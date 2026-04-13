@@ -1,7 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "Bash(bash -c \"source /opt/ros/humble/setup.bash && xacro /home/murain/WorkSpace/robot/install/robot_description/share/robot_description/urdf/robot.xacro\")"
-    ]
-  }
-}
