@@ -1,5 +1,8 @@
-.claude/
-build/
-install/
-log/
-CLAUDE.md
+# 忽略所有文件
+*
+
+# 但保留 src 目录
+!src/
+
+# 保留 .gitignore 本身
+!.gitignore
