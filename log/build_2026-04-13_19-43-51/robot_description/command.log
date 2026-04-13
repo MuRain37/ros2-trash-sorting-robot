@@ -1,0 +1,6 @@
+Invoking command in '/home/murain/WorkSpace/robot/build/robot_description': CMAKE_PREFIX_PATH=/opt/ros/humble /usr/bin/cmake /home/murain/WorkSpace/robot/src/robot_description -DCMAKE_INSTALL_PREFIX=/home/murain/WorkSpace/robot/install/robot_description
+Invoked command in '/home/murain/WorkSpace/robot/build/robot_description' returned '0': CMAKE_PREFIX_PATH=/opt/ros/humble /usr/bin/cmake /home/murain/WorkSpace/robot/src/robot_description -DCMAKE_INSTALL_PREFIX=/home/murain/WorkSpace/robot/install/robot_description
+Invoking command in '/home/murain/WorkSpace/robot/build/robot_description': CMAKE_PREFIX_PATH=/opt/ros/humble /usr/bin/cmake --build /home/murain/WorkSpace/robot/build/robot_description -- -j16 -l16
+Invoked command in '/home/murain/WorkSpace/robot/build/robot_description' returned '0': CMAKE_PREFIX_PATH=/opt/ros/humble /usr/bin/cmake --build /home/murain/WorkSpace/robot/build/robot_description -- -j16 -l16
+Invoking command in '/home/murain/WorkSpace/robot/build/robot_description': CMAKE_PREFIX_PATH=/opt/ros/humble /usr/bin/cmake --install /home/murain/WorkSpace/robot/build/robot_description
+Invoked command in '/home/murain/WorkSpace/robot/build/robot_description' returned '0': CMAKE_PREFIX_PATH=/opt/ros/humble /usr/bin/cmake --install /home/murain/WorkSpace/robot/build/robot_description
