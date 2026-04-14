@@ -29,12 +29,6 @@ def generate_launch_description():
         parameters=[{'robot_description': robot_description}]
     )
 
-    # 关节状态发布节点
-    joint_state_publisher_node = launch_ros.actions.Node(
-        package='joint_state_publisher',
-        executable='joint_state_publisher',
-    )
-
     # 通过 IncludeLaunchDescription 包含另外一个 launch 文件
     launch_gazebo = launch.actions.IncludeLaunchDescription(
         PythonLaunchDescriptionSource([get_package_share_directory(
@@ -54,12 +48,34 @@ def generate_launch_description():
         executable='rviz2',
         arguments=['-d', default_rviz_config_path]
     )
+
+    # 加载并激活 fishbot_joint_state_broadcaster 控制器
+    load_joint_state_controller = launch.actions.ExecuteProcess(
+        cmd=['ros2', 'control', 'load_controller', '--set-state', 'active',
+            'fishbot_joint_state_broadcaster'],
+        output='screen'
+    )
+
+    load_fishbot_diff_drive_controller = launch.actions.ExecuteProcess(
+        cmd=['ros2', 'control', 'load_controller', '--set-state', 'active','fishbot_diff_drive_controller'], 
+        output='screen')
     
     return launch.LaunchDescription([
         action_declare_arg_mode_path,
         robot_state_publisher_node,
-        joint_state_publisher_node,
         launch_gazebo,
         spawn_entity_node,
+        # 事件动作，当加载机器人结束后执行    
+        launch.actions.RegisterEventHandler(
+            event_handler=launch.event_handlers.OnProcessExit(
+                target_action=spawn_entity_node,
+                on_exit=[load_joint_state_controller],)
+            ),
+        # 事件动作，load_fishbot_diff_drive_controller
+        launch.actions.RegisterEventHandler(
+        event_handler=launch.event_handlers.OnProcessExit(
+            target_action=load_joint_state_controller,
+            on_exit=[load_fishbot_diff_drive_controller],)
+            ),
         rviz_node,
     ])

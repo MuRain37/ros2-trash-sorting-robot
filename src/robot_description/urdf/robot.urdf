@@ -1,8 +1,0 @@
-<?xml version="1.0"?>
-<!-- This is a generated file from robot.xacro - DO NOT EDIT -->
-<!-- To regenerate: xacro robot.xacro > robot.urdf -->
-<robot name="four_wheel_robot">
-  <!-- Chassis: 200mm x 300mm x 50mm -->
-  <!-- Wheels: 60mm diameter, 25mm thickness -->
-  <!-- Coordinate frame: X forward, Y left, Z up -->
-</robot>
