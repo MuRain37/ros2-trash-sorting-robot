@@ -49,15 +49,15 @@ def generate_launch_description():
         arguments=['-d', default_rviz_config_path]
     )
 
-    # 加载并激活 fishbot_joint_state_broadcaster 控制器
+    # 加载并激活 robot_joint_state_broadcaster 控制器
     load_joint_state_controller = launch.actions.ExecuteProcess(
         cmd=['ros2', 'control', 'load_controller', '--set-state', 'active',
-            'fishbot_joint_state_broadcaster'],
+            'robot_joint_state_broadcaster'],
         output='screen'
     )
 
-    load_fishbot_diff_drive_controller = launch.actions.ExecuteProcess(
-        cmd=['ros2', 'control', 'load_controller', '--set-state', 'active','fishbot_diff_drive_controller'], 
+    load_robot_diff_drive_controller = launch.actions.ExecuteProcess(
+        cmd=['ros2', 'control', 'load_controller', '--set-state', 'active','robot_diff_drive_controller'], 
         output='screen')
     
     return launch.LaunchDescription([
@@ -71,11 +71,11 @@ def generate_launch_description():
                 target_action=spawn_entity_node,
                 on_exit=[load_joint_state_controller],)
             ),
-        # 事件动作，load_fishbot_diff_drive_controller
+        # 事件动作，load_robot_diff_drive_controller
         launch.actions.RegisterEventHandler(
         event_handler=launch.event_handlers.OnProcessExit(
             target_action=load_joint_state_controller,
-            on_exit=[load_fishbot_diff_drive_controller],)
+            on_exit=[load_robot_diff_drive_controller],)
             ),
         rviz_node,
     ])
