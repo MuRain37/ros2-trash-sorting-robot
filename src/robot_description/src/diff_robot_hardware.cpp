@@ -1,14 +1,3 @@
-/**
- *****************************Copyright (c) 2023  ZJU****************************
- * @file      : diff_robot_hardware.cpp
- * @brief     : 四轮差速机器人硬件接口
- * @history   :
- *  Version     Date            Author          Note
- *  V1.0.0    2023-07-18       Hao Lion        1. 基于 diff_test_system 移植
- *  V2.0.0    2026-04-16       MuRain37        2. 修改为四轮差速驱动
- *******************************************************************************
- */
-
 #include "robot_description/diff_robot_hardware.hpp"
 
 #include <chrono>
