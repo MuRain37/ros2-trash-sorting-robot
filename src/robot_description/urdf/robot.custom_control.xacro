@@ -1,0 +1,38 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro">
+    <xacro:macro name="robot_custom_ros2_control">
+        <ros2_control name="RobotCustomSystem" type="system">
+            <hardware>
+                <plugin>robot_description/DiffRobotHardware</plugin>
+            </hardware>
+
+            <!-- 左前轮 -->
+            <joint name="front_left_wheel_joint">
+                <command_interface name="velocity"/>
+                <state_interface name="position"/>
+                <state_interface name="velocity"/>
+            </joint>
+
+            <!-- 右前轮 -->
+            <joint name="front_right_wheel_joint">
+                <command_interface name="velocity"/>
+                <state_interface name="position"/>
+                <state_interface name="velocity"/>
+            </joint>
+
+            <!-- 左后轮 -->
+            <joint name="rear_left_wheel_joint">
+                <command_interface name="velocity"/>
+                <state_interface name="position"/>
+                <state_interface name="velocity"/>
+            </joint>
+
+            <!-- 右后轮 -->
+            <joint name="rear_right_wheel_joint">
+                <command_interface name="velocity"/>
+                <state_interface name="position"/>
+                <state_interface name="velocity"/>
+            </joint>
+        </ros2_control>
+    </xacro:macro>
+</robot>

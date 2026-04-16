@@ -1,0 +1,10 @@
+<?xml version="1.0"?>
+<library path="robot_description">
+  <class name="robot_description/DiffRobotHardware"
+         type="robot_description::DiffRobotHardware"
+         base_class_type="hardware_interface::SystemInterface">
+    <description>
+    Four-wheel differential drive robot hardware interface.
+    </description>
+  </class>
+</library>

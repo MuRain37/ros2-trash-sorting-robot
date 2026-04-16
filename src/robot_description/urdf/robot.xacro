@@ -216,6 +216,6 @@
   </joint>
 
   <xacro:include filename="$(find robot_description)/urdf/robot.ros2_control.xacro" />
-    <xacro:robot_ros2_control />
+  <xacro:robot_ros2_control />
 
 </robot>
