@@ -6,7 +6,7 @@ from ament_index_python.packages import get_package_share_directory
 def generate_launch_description():
     # 获取默认路径
     pkg_path = get_package_share_directory('robot_description')
-    default_model_path = pkg_path + '/urdf/robot.xacro'
+    default_model_path = pkg_path + '/urdf/robot.gazebo.xacro'
     default_rviz_config_path = pkg_path + '/config/rviz/display_model.rviz'
 
     # 为 Launch 声明参数

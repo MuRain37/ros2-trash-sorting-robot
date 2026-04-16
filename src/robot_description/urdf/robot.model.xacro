@@ -1,6 +1,7 @@
 <?xml version="1.0"?>
-<robot name="four_wheel_robot" xmlns:xacro="http://www.ros.org/wiki/xacro">
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro">
 
+  <!-- ========== 公共属性 ========== -->
   <!-- 机器人常量 -->
   <xacro:property name="PI" value="3.1415926535897931"/>
 
@@ -19,11 +20,7 @@
   <xacro:property name="wheel_z_offset" value="0.030"/>
   <xacro:property name="wheel_x_offset" value="0.100"/>
 
-  <!-- Gazebo 材质 (放在 link 定义之前) -->
-  <gazebo reference="base_link">
-    <material>Gazebo/Grey</material>
-  </gazebo>
-
+  <!-- ========== 底盘 ========== -->
   <!-- 底盘链接 (参考坐标系) -->
   <link name="base_link">
     <visual>
@@ -54,15 +51,12 @@
 
   <link name="base_footprint" />
   <joint name="base_joint" type="fixed">
-            <parent link="base_footprint" />
-            <child link="base_link" />
-            <origin xyz="0.0 0.0 ${wheel_z_offset + wheel_radius - 0.001}" rpy="0 0 0" />
+    <parent link="base_footprint" />
+    <child link="base_link" />
+    <origin xyz="0.0 0.0 ${wheel_z_offset + wheel_radius - 0.001}" rpy="0 0 0" />
   </joint>
 
-  <!-- Gazebo 材质 - 左前轮 -->
-  <gazebo reference="front_left_wheel">
-    <material>Gazebo/Black</material>
-  </gazebo>
+  <!-- ========== 轮子 ========== -->
   <!-- 左前轮 -->
   <link name="front_left_wheel">
     <visual>
@@ -98,10 +92,6 @@
     <axis xyz="0 1 0"/>
   </joint>
 
-  <!-- Gazebo 材质 - 右前轮 -->
-  <gazebo reference="front_right_wheel">
-    <material>Gazebo/Black</material>
-  </gazebo>
   <!-- 右前轮 -->
   <link name="front_right_wheel">
     <visual>
@@ -137,10 +127,6 @@
     <axis xyz="0 1 0"/>
   </joint>
 
-  <!-- Gazebo 材质 - 左后轮 -->
-  <gazebo reference="rear_left_wheel">
-    <material>Gazebo/Black</material>
-  </gazebo>
   <!-- 左后轮 -->
   <link name="rear_left_wheel">
     <visual>
@@ -176,10 +162,6 @@
     <axis xyz="0 1 0"/>
   </joint>
 
-  <!-- Gazebo 材质 - 右后轮 -->
-  <gazebo reference="rear_right_wheel">
-    <material>Gazebo/Black</material>
-  </gazebo>
   <!-- 右后轮 -->
   <link name="rear_right_wheel">
     <visual>
@@ -214,8 +196,5 @@
     <origin xyz="${-wheel_x_offset} ${-chassis_width/2 - wheel_thickness/2} ${-wheel_z_offset}" rpy="0 0 0"/>
     <axis xyz="0 1 0"/>
   </joint>
-
-  <xacro:include filename="$(find robot_description)/urdf/robot.ros2_control.xacro" />
-  <xacro:robot_ros2_control />
 
 </robot>

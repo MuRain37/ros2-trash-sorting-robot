@@ -7,7 +7,7 @@ def generate_launch_description():
     # 获取默认路径
     robot_name_in_model = "robot"
     pkg_path = get_package_share_directory('robot_description')
-    default_model_path = pkg_path + '/urdf/robot.xacro'
+    default_model_path = pkg_path + '/urdf/robot.gazebo.xacro'
     default_world_path = pkg_path + '/world/custom_room.world'
     default_rviz_config_path = pkg_path + '/config/rviz/display_model.rviz'
 
