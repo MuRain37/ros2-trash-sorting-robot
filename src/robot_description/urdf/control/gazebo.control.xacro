@@ -12,7 +12,7 @@
 
         <gazebo>
             <plugin filename="libgazebo_ros2_control.so" name="gazebo_ros2_control">
-                <parameters>$(find robot_description)/config/gazebo_ros2_controller.yaml</parameters>
+                <parameters>$(find robot_description)/config/robot_gazebo_controllers.yaml</parameters>
                 <ros>
                     <remapping>/robot_diff_drive_controller/cmd_vel_unstamped:=/cmd_vel</remapping>
                     <remapping>/robot_diff_drive_controller/odom:=/odom</remapping>

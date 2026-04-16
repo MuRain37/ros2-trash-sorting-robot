@@ -197,4 +197,37 @@
     <axis xyz="0 1 0"/>
   </joint>
 
+  <!-- ========== Gazebo 材质 ========== -->
+  <gazebo reference="base_link">
+    <material>Gazebo/Grey</material>
+  </gazebo>
+  <gazebo reference="front_left_wheel">
+    <material>Gazebo/Black</material>
+    <mu1 value="20.0"/>
+    <mu2 value="20.0"/>
+    <kp value="1000000000.0"/>
+    <kd value="1.0"/>
+  </gazebo>
+  <gazebo reference="front_right_wheel">
+    <material>Gazebo/Black</material>
+    <mu1 value="20.0"/>
+    <mu2 value="20.0"/>
+    <kp value="1000000000.0"/>
+    <kd value="1.0"/>
+  </gazebo>
+  <gazebo reference="rear_left_wheel">
+    <material>Gazebo/Black</material>
+    <mu1 value="20.0"/>
+    <mu2 value="20.0"/>
+    <kp value="1000000000.0"/>
+    <kd value="1.0"/>
+  </gazebo>
+  <gazebo reference="rear_right_wheel">
+    <material>Gazebo/Black</material>
+    <mu1 value="20.0"/>
+    <mu2 value="20.0"/>
+    <kp value="1000000000.0"/>
+    <kd value="1.0"/>
+  </gazebo>
+
 </robot>
