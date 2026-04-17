@@ -153,6 +153,7 @@ hardware_interface::CallbackReturn DiffRobotHardware::on_activate(
   }
   received_fb_msg_ptr_.set(std::make_shared<std_msgs::msg::Float64MultiArray>(empty_int16array));
 
+  //订阅者，接收外部反馈数据
   fb_subscriber_ =
     this->node_->create_subscription<std_msgs::msg::Float64MultiArray>(
     DEFAULT_STATE_TOPIC, rclcpp::SystemDefaultsQoS(),
@@ -167,7 +168,7 @@ hardware_interface::CallbackReturn DiffRobotHardware::on_activate(
       received_fb_msg_ptr_.set(std::move(msg));
     });
 
-  // create realtime publisher
+  //发布者，发送命令数据
   cmd_publisher = this->node_->create_publisher<std_msgs::msg::Float64MultiArray>(DEFAULT_COMMAND_TOPIC, rclcpp::SystemDefaultsQoS());
   realtime_cmd_publisher_ = std::make_shared<realtime_tools::RealtimePublisher<std_msgs::msg::Float64MultiArray>>(cmd_publisher);
 
@@ -193,24 +194,17 @@ hardware_interface::CallbackReturn DiffRobotHardware::on_deactivate(
 hardware_interface::return_type DiffRobotHardware::read(
   const rclcpp::Time & /*time*/, const rclcpp::Duration & period)
 {
-  // Open-loop mode: directly use commands as velocities (no external feedback needed)
-  // Left wheel velocity (applied to both front_left and rear_left)
-  double left_velocity = hw_commands_[0];
-  // Right wheel velocity (applied to both front_right and rear_right)
-  double right_velocity = hw_commands_[1];
+  std::shared_ptr<std_msgs::msg::Float64MultiArray> fb_msg;
+  received_fb_msg_ptr_.get(fb_msg);
+  rclcpp::spin_some(this->node_);
 
-  RCLCPP_INFO_THROTTLE(rclcpp::get_logger("DiffRobotHardware"), *this->node_->get_clock(), 1000,
-    "read() - left_vel: %.3f, right_vel: %.3f", left_velocity, right_velocity);
-
-  hw_velocities_[0] = left_velocity;   // front_left_wheel_joint
-  hw_velocities_[1] = right_velocity;  // front_right_wheel_joint
-  hw_velocities_[2] = left_velocity;  // rear_left_wheel_joint
-  hw_velocities_[3] = right_velocity; // rear_right_wheel_joint
-
-  // integrate velocity to position
   for (std::size_t i = 0; i < hw_positions_.size(); i++)
   {
-    hw_positions_[i] += period.seconds() * hw_velocities_[i];
+    if (i < hw_velocities_.size())
+    {
+      hw_velocities_[i] = fb_msg->data[i];
+      hw_positions_[i] += period.seconds() * hw_velocities_[i];
+    }
   }
 
   return hardware_interface::return_type::OK;
@@ -219,7 +213,17 @@ hardware_interface::return_type DiffRobotHardware::read(
 hardware_interface::return_type DiffRobotHardware::write(
   const rclcpp::Time & /*time*/, const rclcpp::Duration & /*period*/)
 {
-  // Open-loop mode: nothing to publish, commands are directly used in read()
+  if (realtime_cmd_publisher_->trylock())
+  {
+    auto & cmd_msg = realtime_cmd_publisher_->msg_;
+    cmd_msg.data.resize(hw_commands_.size());
+    for (auto i = 0u; i < hw_commands_.size(); i++)
+    {
+      cmd_msg.data[i] = hw_commands_[i];
+    }
+    realtime_cmd_publisher_->unlockAndPublish();
+  }
+
   return hardware_interface::return_type::OK;
 }
 
