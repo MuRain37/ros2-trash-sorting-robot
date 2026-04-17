@@ -1,0 +1,62 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+  <!-- ========== 轮子宏 ========== -->
+  <xacro:macro name="wheel" params="name x_sign y_sign">
+    <link name="${name}">
+      <visual>
+        <origin xyz="0 0 0" rpy="${PI/2} 0 0"/>
+        <geometry>
+          <cylinder radius="${wheel_radius}" length="${wheel_thickness}"/>
+        </geometry>
+        <material name="black">
+          <color rgba="0.1 0.1 0.1 1.0"/>
+        </material>
+      </visual>
+      <collision>
+        <origin xyz="0 0 0" rpy="${PI/2} 0 0"/>
+        <geometry>
+          <cylinder radius="${wheel_radius}" length="${wheel_thickness}"/>
+        </geometry>
+      </collision>
+      <inertial>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <mass value="${wheel_mass}"/>
+        <inertia ixx="${wheel_mass / 12.0 * (3*wheel_radius**2 + wheel_thickness**2)}"
+                 ixy="0" ixz="0"
+                 iyy="${wheel_mass / 12.0 * (3*wheel_radius**2 + wheel_thickness**2)}"
+                 iyz="0"
+                 izz="${wheel_mass / 2.0 * wheel_radius**2}"/>
+      </inertial>
+    </link>
+
+    <joint name="${name}_joint" type="continuous">
+      <parent link="base_link"/>
+      <child link="${name}"/>
+      <origin xyz="${x_sign * wheel_x_offset} ${y_sign * (chassis_width/2 + wheel_thickness/2)} ${-wheel_z_offset}" rpy="0 0 0"/>
+      <axis xyz="0 1 0"/>
+    </joint>
+  </xacro:macro>
+
+  <!-- ========== 轮子实例化 ========== -->
+  <xacro:wheel name="front_left_wheel"  x_sign="1"  y_sign="1"/>
+  <xacro:wheel name="front_right_wheel" x_sign="1"  y_sign="-1"/>
+  <xacro:wheel name="rear_left_wheel"   x_sign="-1" y_sign="1"/>
+  <xacro:wheel name="rear_right_wheel"  x_sign="-1" y_sign="-1"/>
+
+  <!-- ========== Gazebo 材质 ========== -->
+  <xacro:macro name="wheel_gazebo" params="name">
+    <gazebo reference="${name}">
+      <material>Gazebo/Black</material>
+      <mu1 value="20.0"/>
+      <mu2 value="20.0"/>
+      <kp value="1000000000.0"/>
+      <kd value="1.0"/>
+    </gazebo>
+  </xacro:macro>
+  <xacro:wheel_gazebo name="front_left_wheel"/>
+  <xacro:wheel_gazebo name="front_right_wheel"/>
+  <xacro:wheel_gazebo name="rear_left_wheel"/>
+  <xacro:wheel_gazebo name="rear_right_wheel"/>
+
+</robot>

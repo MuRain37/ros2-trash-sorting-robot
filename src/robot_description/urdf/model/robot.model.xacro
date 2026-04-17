@@ -1,0 +1,29 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+  <!-- ========== 公共属性 ========== -->
+  <!-- 机器人常量 -->
+  <xacro:property name="PI" value="3.1415926535897931"/>
+
+  <!-- 底盘属性 -->
+  <xacro:property name="chassis_length" value="0.300"/>
+  <xacro:property name="chassis_width" value="0.200"/>
+  <xacro:property name="chassis_height" value="0.050"/>
+  <xacro:property name="chassis_mass" value="5.0"/>
+
+  <!-- 轮子属性 -->
+  <xacro:property name="wheel_radius" value="0.030"/>
+  <xacro:property name="wheel_thickness" value="0.025"/>
+  <xacro:property name="wheel_mass" value="0.5"/>
+
+  <!-- 安装位置偏移 -->
+  <xacro:property name="wheel_z_offset" value="0.030"/>
+  <xacro:property name="wheel_x_offset" value="0.100"/>
+
+  <!-- ========== 底盘 ========== -->
+  <xacro:include filename="robot.chassis.xacro"/>
+
+  <!-- ========== 轮子 ========== -->
+  <xacro:include filename="robot.wheels.xacro"/>
+  
+</robot>
