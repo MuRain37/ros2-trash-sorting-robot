@@ -8,4 +8,16 @@
   <xacro:include filename="$(find robot_description)/urdf/control/gazebo.control.xacro" />
   <xacro:robot_ros2_control />
 
+  <!-- 激光雷达 Gazebo 插件 -->
+  <xacro:include filename="$(find robot_description)/urdf/plugin/robot.lidar.gazebo.xacro" />
+  <xacro:lidar_gazebo_plugin />
+
+  <!-- IMU Gazebo 插件 -->
+  <xacro:include filename="$(find robot_description)/urdf/plugin/robot.imu.gazebo.xacro" />
+  <xacro:imu_gazebo_plugin />
+
+  <!-- 深度相机 Gazebo 插件 -->
+  <xacro:include filename="$(find robot_description)/urdf/plugin/robot.camera.gazebo.xacro" />
+  <xacro:camera_gazebo_plugin />
+
 </robot>

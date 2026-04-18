@@ -25,5 +25,11 @@
 
   <!-- ========== 轮子 ========== -->
   <xacro:include filename="robot.wheels.xacro"/>
-  
+
+  <!-- ========== 激光雷达 ========== -->
+  <xacro:include filename="robot.lidar.xacro"/>
+
+  <!-- ========== 深度相机 ========== -->
+  <xacro:include filename="robot.camera.xacro"/>
+
 </robot>

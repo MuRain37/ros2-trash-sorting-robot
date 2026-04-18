@@ -1,0 +1,103 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://www.wiki.ros.org/xacro">
+
+  <!-- ========== 相机支架属性 ========== -->
+  <xacro:property name="camera_bracket_length" value="0.020"/>
+  <xacro:property name="camera_bracket_width" value="0.040"/>
+  <xacro:property name="camera_bracket_height" value="0.015"/>
+  <xacro:property name="camera_bracket_mass" value="0.02"/>
+
+  <!-- ========== 相机属性 ========== -->
+  <xacro:property name="camera_box_size" value="0.025"/>
+  <xacro:property name="camera_mass" value="0.03"/>
+
+  <!-- ========== 相机支架链接 ========== -->
+  <link name="camera_bracket">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="${camera_bracket_length} ${camera_bracket_width} ${camera_bracket_height}"/>
+      </geometry>
+      <material name="black">
+        <color rgba="0.1 0.1 0.1 1.0"/>
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="${camera_bracket_length} ${camera_bracket_width} ${camera_bracket_height}"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <mass value="${camera_bracket_mass}"/>
+      <inertia ixx="${camera_bracket_mass / 12.0 * (camera_bracket_width**2 + camera_bracket_height**2)}"
+               ixy="0" ixz="0"
+               iyy="${camera_bracket_mass / 12.0 * (camera_bracket_length**2 + camera_bracket_height**2)}"
+               iyz="0"
+               izz="${camera_bracket_mass / 12.0 * (camera_bracket_length**2 + camera_bracket_width**2)}"/>
+    </inertial>
+  </link>
+
+  <!-- 支架与底盘的固定关节 (前方偏移) -->
+  <joint name="camera_bracket_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="camera_bracket"/>
+    <origin xyz="${chassis_length/2 - camera_bracket_length/2} 0 ${chassis_height/2 + camera_bracket_height/2}" rpy="0 0 0"/>
+  </joint>
+
+  <!-- ========== 相机链接 ========== -->
+  <link name="camera_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="${camera_box_size} ${camera_box_size} ${camera_box_size}"/>
+      </geometry>
+      <material name="grey">
+        <color rgba="0.5 0.5 0.5 1.0"/>
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="${camera_box_size} ${camera_box_size} ${camera_box_size}"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <mass value="${camera_mass}"/>
+      <inertia ixx="${camera_mass / 12.0 * (camera_box_size**2 + camera_box_size**2)}"
+               ixy="0" ixz="0"
+               iyy="${camera_mass / 12.0 * (camera_box_size**2 + camera_box_size**2)}"
+               iyz="0"
+               izz="${camera_mass / 12.0 * (camera_box_size**2 + camera_box_size**2)}"/>
+    </inertial>
+  </link>
+
+  <!-- 相机与支架的固定关节 -->
+  <joint name="camera_joint" type="fixed">
+    <parent link="camera_bracket"/>
+    <child link="camera_link"/>
+    <origin xyz="0 0 ${camera_bracket_height/2 + camera_box_size/2}" rpy="0 0 0"/>
+  </joint>
+
+  <!-- ========== 相机光学坐标框架 (ROS 相机惯例) ========== -->
+  <link name="camera_optical_link"/>
+
+  <joint name="camera_optical_joint" type="fixed">
+    <parent link="camera_link"/>
+    <child link="camera_optical_link"/>
+    <!-- ROS 光学坐标系: x向前, y向左, z向上 (绕 Y 轴旋转 -90°) -->
+    <origin xyz="0 0 0" rpy="0 -1.570795 0"/>
+  </joint>
+
+  <!-- ========== Gazebo 材质 ========== -->
+  <gazebo reference="camera_bracket">
+    <material>Gazebo/Black</material>
+  </gazebo>
+
+  <gazebo reference="camera_link">
+    <material>Gazebo/Grey</material>
+  </gazebo>
+
+</robot>

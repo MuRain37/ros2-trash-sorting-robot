@@ -1,0 +1,94 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://www.wiki.ros.org/xacro">
+
+  <!-- ========== 激光雷达属性 ========== -->
+  <xacro:property name="lidar_radius" value="0.025"/>
+  <xacro:property name="lidar_height" value="0.020"/>
+  <xacro:property name="lidar_mass" value="0.05"/>
+  <xacro:property name="lidar_offset_z" value="0.035"/>
+
+  <!-- ========== 支架属性 ========== -->
+  <xacro:property name="bracket_radius" value="0.015"/>
+  <xacro:property name="bracket_height" value="0.060"/>
+  <xacro:property name="bracket_mass" value="0.02"/>
+
+  <!-- ========== 支架链接 ========== -->
+  <link name="lidar_bracket">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <cylinder radius="${bracket_radius}" length="${bracket_height}"/>
+      </geometry>
+      <material name="black">
+        <color rgba="0.1 0.1 0.1 1.0"/>
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <cylinder radius="${bracket_radius}" length="${bracket_height}"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <mass value="${bracket_mass}"/>
+      <inertia ixx="${bracket_mass / 12.0 * (3*bracket_radius**2 + bracket_height**2)}"
+               ixy="0" ixz="0"
+               iyy="${bracket_mass / 12.0 * (3*bracket_radius**2 + bracket_height**2)}"
+               iyz="0"
+               izz="${bracket_mass / 2.0 * bracket_radius**2}"/>
+    </inertial>
+  </link>
+
+  <!-- 支架与底盘的固定关节 -->
+  <joint name="lidar_bracket_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="lidar_bracket"/>
+    <origin xyz="0 0 ${chassis_height/2 + bracket_height/2}" rpy="0 0 0"/>
+  </joint>
+
+  <!-- ========== 激光雷达传感器链接 ========== -->
+  <link name="lidar_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <cylinder radius="${lidar_radius}" length="${lidar_height}"/>
+      </geometry>
+      <material name="grey">
+        <color rgba="0.5 0.5 0.5 1.0"/>
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <cylinder radius="${lidar_radius}" length="${lidar_height}"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <mass value="${lidar_mass}"/>
+      <inertia ixx="${lidar_mass / 12.0 * (3*lidar_radius**2 + lidar_height**2)}"
+               ixy="0" ixz="0"
+               iyy="${lidar_mass / 12.0 * (3*lidar_radius**2 + lidar_height**2)}"
+               iyz="0"
+               izz="${lidar_mass / 2.0 * lidar_radius**2}"/>
+    </inertial>
+  </link>
+
+  <!-- 激光雷达与支架的固定关节 -->
+  <joint name="lidar_joint" type="fixed">
+    <parent link="lidar_bracket"/>
+    <child link="lidar_link"/>
+    <origin xyz="0 0 ${bracket_height/2 + lidar_height/2}" rpy="0 0 0"/>
+  </joint>
+
+  <!-- ========== Gazebo 材质 ========== -->
+  <gazebo reference="lidar_bracket">
+    <material>Gazebo/Black</material>
+  </gazebo>
+
+  <gazebo reference="lidar_link">
+    <material>Gazebo/Grey</material>
+  </gazebo>
+
+</robot>
