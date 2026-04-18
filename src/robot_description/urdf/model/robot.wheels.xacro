@@ -48,10 +48,8 @@
   <xacro:macro name="wheel_gazebo" params="name">
     <gazebo reference="${name}">
       <material>Gazebo/Black</material>
-      <mu1 value="20.0"/>
-      <mu2 value="20.0"/>
-      <kp value="1000000000.0"/>
-      <kd value="1.0"/>
+      <mu1 value="0.2"/>
+      <mu2 value="0.2"/>
     </gazebo>
   </xacro:macro>
   <xacro:wheel_gazebo name="front_left_wheel"/>
