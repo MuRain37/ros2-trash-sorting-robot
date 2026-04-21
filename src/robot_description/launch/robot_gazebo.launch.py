@@ -58,6 +58,25 @@ def generate_launch_description():
         arguments=['-d', default_rviz_config_path]
     )
 
+    # 深度图像转激光扫描节点
+    depthimage_to_laserscan_node = launch_ros.actions.Node(
+        package='depthimage_to_laserscan',
+        executable='depthimage_to_laserscan_node',
+        name='depthimage_to_laserscan',
+        remappings=[
+            ('depth', '/camera/camera/depth/image_raw'),
+            ('depth_camera_info', '/camera/camera/depth/camera_info'),
+            ('scan', '/scan_camera'),
+        ],
+        parameters=[{
+            'scan_height': 30,
+            'scan_time': 0.1,
+            'range_min': 0.1,
+            'range_max': 8.0,
+            'output_frame': 'base_link',
+        }]
+    )
+
     return launch.LaunchDescription([
         action_declare_arg_mode_path,
         declare_use_sim_time_cmd,
@@ -65,4 +84,5 @@ def generate_launch_description():
         launch_gazebo,
         spawn_entity_node,
         rviz_node,
+        depthimage_to_laserscan_node,
     ])

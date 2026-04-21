@@ -74,11 +74,11 @@
     </inertial>
   </link>
 
-  <!-- 相机与支架的固定关节 -->
+  <!-- 相机与支架的固定关节 (向下倾斜15度检测低矮障碍物) -->
   <joint name="camera_joint" type="fixed">
     <parent link="camera_bracket"/>
     <child link="camera_link"/>
-    <origin xyz="0 0 ${camera_bracket_height/2 + camera_box_size/2}" rpy="0 0 0"/>
+    <origin xyz="0 0 ${camera_bracket_height/2 + camera_box_size/2}" rpy="0 -0.26 0"/>
   </joint>
 
   <!-- ========== 相机光学坐标框架 (ROS 相机惯例) ========== -->
