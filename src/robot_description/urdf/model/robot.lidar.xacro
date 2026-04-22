@@ -9,7 +9,7 @@
 
   <!-- ========== 支架属性 ========== -->
   <xacro:property name="bracket_radius" value="0.015"/>
-  <xacro:property name="bracket_height" value="0.060"/>
+  <xacro:property name="bracket_height" value="0.35"/>
   <xacro:property name="bracket_mass" value="0.02"/>
 
   <!-- ========== 支架链接 ========== -->

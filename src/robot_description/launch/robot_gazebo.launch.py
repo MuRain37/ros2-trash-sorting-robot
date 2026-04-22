@@ -69,7 +69,7 @@ def generate_launch_description():
             ('scan', '/scan_camera'),
         ],
         parameters=[{
-            'scan_height': 30,
+            'scan_height': 1,
             'scan_time': 0.1,
             'range_min': 0.1,
             'range_max': 8.0,
