@@ -24,7 +24,7 @@ setup(
     },
     entry_points={
         'console_scripts': [
-            'chassis_controller = robot_controller.chassis_controller:main',
+            'hardware_node = robot_controller.hardware_node:main',
         ],
     },
 )

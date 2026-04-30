@@ -1,0 +1,94 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+  <!-- ========== 机械臂属性 ========== -->
+  <xacro:property name="arm_l1" value="0.0338648"/>
+  <xacro:property name="arm_l2" value="0.129416"/>
+  <xacro:property name="arm_l3" value="0.129444"/>
+  <xacro:property name="arm_l4" value="0.1138648"/>
+
+  <xacro:property name="arm_w" value="0.030"/>
+
+  <xacro:property name="arm_m0" value="0.3"/>
+  <xacro:property name="arm_m1" value="0.4"/>
+  <xacro:property name="arm_m2" value="0.3"/>
+  <xacro:property name="arm_m3" value="0.2"/>
+
+  <xacro:property name="arm_origin_x" value="${chassis_length/2 - 0.05}"/>
+  <xacro:property name="arm_origin_y" value="0.0"/>
+  <xacro:property name="arm_origin_z" value="${chassis_height/2}"/>
+
+  <!-- ========== 长方体惯性宏 ========== -->
+  <xacro:macro name="box_inertia" params="mass w h">
+    <inertia ixx="${mass/12.0 * (w*w + h*h)}" ixy="0" ixz="0"
+             iyy="${mass/12.0 * (w*w + h*h)}" iyz="0"
+             izz="${mass/6.0 * w*w}"/>
+  </xacro:macro>
+
+  <!-- ========== 连杆宏 ========== -->
+  <xacro:macro name="arm_link" params="name length mass color">
+    <link name="${name}">
+      <visual>
+        <origin xyz="0 0 ${length/2}" rpy="0 0 0"/>
+        <geometry>
+          <box size="${arm_w} ${arm_w} ${length}"/>
+        </geometry>
+        <material name="${color}">
+          <color rgba="${color} 1.0"/>
+        </material>
+      </visual>
+      <collision>
+        <origin xyz="0 0 ${length/2}" rpy="0 0 0"/>
+        <geometry>
+          <box size="${arm_w} ${arm_w} ${length}"/>
+        </geometry>
+      </collision>
+      <inertial>
+        <origin xyz="0 0 ${length/2}" rpy="0 0 0"/>
+        <mass value="${mass}"/>
+        <xacro:box_inertia mass="${mass}" w="${arm_w}" h="${length}"/>
+      </inertial>
+    </link>
+  </xacro:macro>
+
+  <joint name="arm_base_joint" type="revolute">
+    <parent link="base_link"/>
+    <child link="arm_link0"/>
+    <origin xyz="${arm_origin_x} ${arm_origin_y} ${arm_origin_z}" rpy="0 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="${-PI}" upper="${PI}" effort="10" velocity="3.14"/>
+  </joint>
+
+  <xacro:arm_link name="arm_link0" length="${arm_l1}" mass="${arm_m0}" color="0.1 0.1 0.1"/>
+
+  <joint name="arm_shoulder_joint" type="revolute">
+    <parent link="arm_link0"/>
+    <child link="arm_link1"/>
+    <origin xyz="0 0 ${arm_l1}" rpy="0 0 0"/>
+    <axis xyz="0 1 0"/>
+    <limit lower="${-PI/2}" upper="${PI}" effort="10" velocity="3.14"/>
+  </joint>
+
+  <xacro:arm_link name="arm_link1" length="${arm_l2}" mass="${arm_m1}" color="0.5 0.5 0.5"/>
+
+  <joint name="arm_elbow_joint" type="revolute">
+    <parent link="arm_link1"/>
+    <child link="arm_link2"/>
+    <origin xyz="0 0 ${arm_l2}" rpy="0 0 0"/>
+    <axis xyz="0 1 0"/>
+    <limit lower="0" upper="${PI}" effort="10" velocity="3.14"/>
+  </joint>
+
+  <xacro:arm_link name="arm_link2" length="${arm_l3}" mass="${arm_m2}" color="0.1 0.1 0.1"/>
+
+  <joint name="arm_wrist_joint" type="revolute">
+    <parent link="arm_link2"/>
+    <child link="arm_link3"/>
+    <origin xyz="0 0 ${arm_l3}" rpy="0 0 0"/>
+    <axis xyz="0 1 0"/>
+    <limit lower="0" upper="${PI}" effort="10" velocity="3.14"/>
+  </joint>
+
+  <xacro:arm_link name="arm_link3" length="${arm_l4}" mass="${arm_m3}" color="0.5 0.5 0.5"/>
+
+</robot>

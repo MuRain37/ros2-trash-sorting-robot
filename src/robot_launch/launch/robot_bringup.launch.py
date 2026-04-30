@@ -13,14 +13,22 @@ def generate_launch_description():
         ]),
     )
 
-    chassis_controller = Node(
+    hardware_node = Node(
         package='robot_controller',
-        executable='chassis_controller',
-        name='chassis_controller',
+        executable='hardware_node',
+        name='hardware_bridge',
+        output='screen',
+    )
+
+    arm_joint_publisher = Node(
+        package='robot_arm',
+        executable='arm_joint_publisher',
+        name='arm_joint_publisher',
         output='screen',
     )
 
     return LaunchDescription([
         custom_launch,
-        chassis_controller,
+        hardware_node,
+        arm_joint_publisher,
     ])

@@ -32,4 +32,7 @@
   <!-- ========== 深度相机 ========== -->
   <xacro:include filename="robot.camera.xacro"/>
 
+  <!-- ========== 机械臂 ========== -->
+  <xacro:include filename="robot.arm.xacro"/>
+
 </robot>
