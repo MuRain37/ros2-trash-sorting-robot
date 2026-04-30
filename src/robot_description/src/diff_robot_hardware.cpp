@@ -14,7 +14,7 @@
 namespace
 {
 constexpr auto DEFAULT_COMMAND_TOPIC = "diff_test_cmd";
-constexpr auto DEFAULT_STATE_TOPIC = "diff_test_cmd";
+constexpr auto DEFAULT_STATE_TOPIC = "diff_test_fb";
 
 }  // namespace
 
