@@ -20,15 +20,15 @@ def generate_launch_description():
         output='screen',
     )
 
-    arm_joint_publisher = Node(
+    arm_controller = Node(
         package='robot_arm',
-        executable='arm_joint_publisher',
-        name='arm_joint_publisher',
+        executable='arm_controller',
+        name='arm_controller',
         output='screen',
     )
 
     return LaunchDescription([
         custom_launch,
         hardware_node,
-        arm_joint_publisher,
+        arm_controller,
     ])

@@ -303,7 +303,7 @@ def solve(target, angle=None, verify=False, plot=False, collision_check=True):
 # ==================== 主程序 ====================
 
 if __name__ == "__main__":
-    target = [30, 0, 0]
+    target = [10, 0, 15]
     result = solve(target, angle=None, verify=True, plot=True, collision_check=True)
     if result is False:
         print("目标位置不可达")

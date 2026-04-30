@@ -1,0 +1,18 @@
+# 目标位置 (cm)
+float64 x
+float64 y
+float64 z
+# 轨迹时长 (秒)
+float64 duration 1.0
+# 末端俯仰角 (度, -1 自动选择)
+float64 end_angle -1.0
+---
+# 是否成功
+bool success
+# 最终关节角 (度)
+float64[4] final_angles
+---
+# 进度 0.0~1.0
+float64 progress
+# 当前关节角 (度)
+float64[4] current_angles

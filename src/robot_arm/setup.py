@@ -24,7 +24,7 @@ setup(
     },
     entry_points={
         'console_scripts': [
-            'arm_joint_publisher = robot_arm.arm_joint_publisher:main',
+            'arm_controller = robot_arm.arm_controller:main',
         ],
     },
 )
