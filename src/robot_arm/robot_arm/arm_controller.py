@@ -9,6 +9,7 @@ from sensor_msgs.msg import JointState
 
 from robot_arm.kinematics import solve
 from robot_interfaces.action import ArmTarget
+from std_msgs.msg import Float64MultiArray
 
 DEG_TO_RAD = math.pi / 180.0
 
@@ -28,12 +29,17 @@ class ArmController(Node):
 
         self.declare_parameter('rate', 50.0)
         self.declare_parameter('initial_pose', [0, -25, 80, 80])
+        self.declare_parameter('publish_joint_states', True)
+        self.declare_parameter('publish_forward_command', False)
 
         rate = self.get_parameter('rate').value
+        self._publish_js = self.get_parameter('publish_joint_states').value
+        self._publish_fwd = self.get_parameter('publish_forward_command').value
 
         self._current = list(self.get_parameter('initial_pose').value)
 
         self._joint_pub = self.create_publisher(JointState, 'joint_states', 10)
+        self._cmd_pub = self.create_publisher(Float64MultiArray, '/arm_forward_controller/commands', 10)
 
         self._action_server = ActionServer(
             self,
@@ -99,11 +105,19 @@ class ArmController(Node):
         return r
 
     def _publish(self):
-        msg = JointState()
-        msg.header.stamp = self.get_clock().now().to_msg()
-        msg.name = self.JOINTS
-        msg.position = [a * DEG_TO_RAD for a in self._current]
-        self._joint_pub.publish(msg)
+        angles_rad = [a * DEG_TO_RAD for a in self._current]
+
+        if self._publish_js:
+            msg = JointState()
+            msg.header.stamp = self.get_clock().now().to_msg()
+            msg.name = self.JOINTS
+            msg.position = angles_rad
+            self._joint_pub.publish(msg)
+
+        if self._publish_fwd:
+            cmd = Float64MultiArray()
+            cmd.data = angles_rad
+            self._cmd_pub.publish(cmd)
 
 
 def main(args=None):

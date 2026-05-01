@@ -1,6 +1,7 @@
 <?xml version="1.0"?>
 <robot xmlns:xacro="http://www.ros.org/wiki/xacro">
 
+    <!-- ===== 底盘：gazebo_ros_diff_drive ===== -->
     <xacro:macro name="robot_ros2_control">
         <gazebo>
             <plugin filename="libgazebo_ros_diff_drive.so" name="skid_steer_drive">
@@ -31,4 +32,24 @@
             </plugin>
         </gazebo>
     </xacro:macro>
+
+    <!-- ===== 机械臂 ros2_control 接口 ===== -->
+    <xacro:include filename="arm.joints.xacro"/>
+
+    <!-- ===== 机械臂：gazebo_ros2_control ===== -->
+    <!-- ros2_control 放在 robot 级别，plugin 内部只放 parameters -->
+    <xacro:macro name="robot_arm_control">
+        <ros2_control name="RobotArmGazeboSystem" type="system">
+            <hardware>
+                <plugin>gazebo_ros2_control/GazeboSystem</plugin>
+            </hardware>
+            <xacro:arm_joints/>
+        </ros2_control>
+        <gazebo>
+            <plugin name="gazebo_ros2_control" filename="libgazebo_ros2_control.so">
+                <parameters>$(find robot_description)/config/robot_gazebo_controllers.yaml</parameters>
+            </plugin>
+        </gazebo>
+    </xacro:macro>
+
 </robot>

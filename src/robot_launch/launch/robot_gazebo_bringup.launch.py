@@ -20,6 +20,11 @@ def generate_launch_description():
         executable='arm_controller',
         name='arm_controller',
         output='screen',
+        parameters=[{
+            'use_sim_time': True,
+            'publish_joint_states': False,    # 由 arm_joint_state_broadcaster 发布
+            'publish_forward_command': True,   # 通过 ForwardCommandController 驱动 Gazebo 关节
+        }],
     )
     return LaunchDescription([
         gazebo_launch,

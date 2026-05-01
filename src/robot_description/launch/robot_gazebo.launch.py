@@ -1,3 +1,5 @@
+import os
+
 import launch
 import launch_ros
 from ament_index_python.packages import get_package_share_directory
@@ -10,6 +12,8 @@ def generate_launch_description():
     default_model_path = pkg_path + '/urdf/robot.gazebo.xacro'
     default_world_path = pkg_path + '/world/custom_room.world'
     default_rviz_config_path = pkg_path + '/config/rviz/display_model.rviz'
+    controller_config_path = os.path.join(
+        pkg_path, 'config', 'robot_gazebo_controllers.yaml')
 
     # 为 Launch 声明参数
     action_declare_arg_mode_path = launch.actions.DeclareLaunchArgument(
@@ -77,12 +81,36 @@ def generate_launch_description():
         }]
     )
 
+    # 机械臂 ros2_control spawners
+    # controller_manager 由 gazebo_ros2_control 插件内部创建
+    arm_forward_spawner = launch_ros.actions.Node(
+        package='controller_manager',
+        executable='spawner',
+        arguments=[
+            'arm_forward_controller',
+            '-c', '/controller_manager',
+            '--param-file', controller_config_path,
+        ],
+    )
+
+    arm_joint_state_spawner = launch_ros.actions.Node(
+        package='controller_manager',
+        executable='spawner',
+        arguments=[
+            'arm_joint_state_broadcaster',
+            '-c', '/controller_manager',
+            '--param-file', controller_config_path,
+        ],
+    )
+
     return launch.LaunchDescription([
         action_declare_arg_mode_path,
         declare_use_sim_time_cmd,
         robot_state_publisher_node,
         launch_gazebo,
         spawn_entity_node,
+        arm_forward_spawner,
+        arm_joint_state_spawner,
         rviz_node,
         depthimage_to_laserscan_node,
     ])
