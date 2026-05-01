@@ -60,6 +60,9 @@
   </joint>
 
   <xacro:arm_link name="arm_link0" length="${arm_l1}" mass="${arm_m0}" color="0.1 0.1 0.1"/>
+  <gazebo reference="arm_link0">
+    <material>Gazebo/DarkGrey</material>
+  </gazebo>
 
   <joint name="arm_shoulder_joint" type="revolute">
     <parent link="arm_link0"/>
@@ -70,6 +73,9 @@
   </joint>
 
   <xacro:arm_link name="arm_link1" length="${arm_l2}" mass="${arm_m1}" color="0.5 0.5 0.5"/>
+  <gazebo reference="arm_link1">
+    <material>Gazebo/Grey</material>
+  </gazebo>
 
   <joint name="arm_elbow_joint" type="revolute">
     <parent link="arm_link1"/>
@@ -80,6 +86,9 @@
   </joint>
 
   <xacro:arm_link name="arm_link2" length="${arm_l3}" mass="${arm_m2}" color="0.1 0.1 0.1"/>
+  <gazebo reference="arm_link2">
+    <material>Gazebo/DarkGrey</material>
+  </gazebo>
 
   <joint name="arm_wrist_joint" type="revolute">
     <parent link="arm_link2"/>
@@ -90,5 +99,8 @@
   </joint>
 
   <xacro:arm_link name="arm_link3" length="${arm_l4}" mass="${arm_m3}" color="0.5 0.5 0.5"/>
+  <gazebo reference="arm_link3">
+    <material>Gazebo/Grey</material>
+  </gazebo>
 
 </robot>

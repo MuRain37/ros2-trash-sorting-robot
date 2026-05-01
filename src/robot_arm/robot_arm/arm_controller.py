@@ -28,7 +28,7 @@ class ArmController(Node):
         super().__init__('arm_controller')
 
         self.declare_parameter('rate', 50.0)
-        self.declare_parameter('initial_pose', [0, -25, 80, 80])
+        self.declare_parameter('initial_pose', [0, -25, 80, 60])
         self.declare_parameter('publish_joint_states', True)
         self.declare_parameter('publish_forward_command', False)
 

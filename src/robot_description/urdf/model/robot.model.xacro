@@ -29,10 +29,10 @@
   <!-- ========== 激光雷达 ========== -->
   <xacro:include filename="robot.lidar.xacro"/>
 
-  <!-- ========== 深度相机 ========== -->
-  <xacro:include filename="robot.camera.xacro"/>
-
   <!-- ========== 机械臂 ========== -->
   <xacro:include filename="robot.arm.xacro"/>
+
+  <!-- ========== 深度相机（挂在机械臂末端 arm_link3 上） ========== -->
+  <xacro:include filename="robot.camera.xacro"/>
 
 </robot>
