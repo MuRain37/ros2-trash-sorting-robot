@@ -44,7 +44,7 @@
   <joint name="lidar_bracket_joint" type="fixed">
     <parent link="base_link"/>
     <child link="lidar_bracket"/>
-    <origin xyz="0 0 ${chassis_height/2 + bracket_height/2}" rpy="0 0 0"/>
+    <origin xyz="${-(chassis_length/2 - 0.05)} 0 ${chassis_height/2 + bracket_height/2}" rpy="0 0 0"/>
   </joint>
 
   <!-- ========== 激光雷达传感器链接 ========== -->

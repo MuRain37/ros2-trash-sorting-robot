@@ -32,6 +32,18 @@
   <!-- ========== 机械臂 ========== -->
   <xacro:include filename="robot.arm.xacro"/>
 
+  <!-- ========== 侧边桶子 ========== -->
+  <xacro:include filename="robot.barrel.xacro"/>
+  <xacro:barrel name="left_barrel" y_sign="1"/>
+  <xacro:barrel name="right_barrel" y_sign="-1"/>
+
+  <gazebo reference="left_barrel">
+    <material>Gazebo/DarkGrey</material>
+  </gazebo>
+  <gazebo reference="right_barrel">
+    <material>Gazebo/DarkGrey</material>
+  </gazebo>
+
   <!-- ========== 深度相机（挂在机械臂末端 arm_link3 上） ========== -->
   <xacro:include filename="robot.camera.xacro"/>
 

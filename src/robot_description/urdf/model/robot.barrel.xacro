@@ -1,0 +1,49 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+  <!-- ========== 属性 ========== -->
+  <xacro:property name="barrel_radius" value="0.05"/>
+  <xacro:property name="barrel_height" value="0.12"/>
+  <xacro:property name="barrel_mass" value="0.3"/>
+
+  <!-- y 方向偏移（左右两侧） -->
+  <xacro:property name="barrel_y_offset" value="${chassis_width / 2.0 - 0.02}"/>
+
+  <xacro:macro name="barrel" params="name y_sign">
+    <link name="${name}">
+      <visual>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry>
+          <cylinder radius="${barrel_radius}" length="${barrel_height}"/>
+        </geometry>
+        <material name="black">
+          <color rgba="0 0 0 1.0"/>
+        </material>
+      </visual>
+      <collision>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry>
+          <cylinder radius="${barrel_radius}" length="${barrel_height}"/>
+        </geometry>
+      </collision>
+      <inertial>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <mass value="${barrel_mass}"/>
+        <inertia
+          ixx="${barrel_mass / 12.0 * (3 * barrel_radius**2 + barrel_height**2)}"
+          ixy="0" ixz="0"
+          iyy="${barrel_mass / 12.0 * (3 * barrel_radius**2 + barrel_height**2)}"
+          iyz="0"
+          izz="${barrel_mass / 2.0 * barrel_radius**2}"/>
+      </inertial>
+    </link>
+
+    <joint name="${name}_joint" type="fixed">
+      <parent link="base_link"/>
+      <child link="${name}"/>
+      <origin xyz="0 ${y_sign * barrel_y_offset} ${chassis_height / 2.0 + barrel_height / 2.0}"
+              rpy="0 0 0"/>
+    </joint>
+  </xacro:macro>
+
+</robot>
