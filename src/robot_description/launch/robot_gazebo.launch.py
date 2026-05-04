@@ -62,22 +62,27 @@ def generate_launch_description():
         arguments=['-d', default_rviz_config_path]
     )
 
-    # 深度图像转激光扫描节点
-    depthimage_to_laserscan_node = launch_ros.actions.Node(
-        package='depthimage_to_laserscan',
-        executable='depthimage_to_laserscan_node',
-        name='depthimage_to_laserscan',
+    # 深度点云 → 2D 激光扫描（水平面切片）
+    pointcloud_to_laserscan_node = launch_ros.actions.Node(
+        package='pointcloud_to_laserscan',
+        executable='pointcloud_to_laserscan_node',
+        name='pointcloud_to_laserscan',
+        output='screen',
         remappings=[
-            ('depth', '/camera/camera/depth/image_raw'),
-            ('depth_camera_info', '/camera/camera/depth/camera_info'),
+            ('cloud_in', '/camera/camera/points'),
             ('scan', '/scan_camera'),
         ],
         parameters=[{
-            'scan_height': 1,
+            'target_frame': 'base_link',
+            'min_height': -0.02,
+            'max_height': 0.01,
+            'angle_min': -3.14159,
+            'angle_max': 3.14159,
+            'angle_increment': 0.017453,
             'scan_time': 0.1,
             'range_min': 0.1,
             'range_max': 8.0,
-            'output_frame': 'base_link',
+            'transform_tolerance': 0.1,
         }]
     )
 
@@ -112,5 +117,5 @@ def generate_launch_description():
         arm_forward_spawner,
         arm_joint_state_spawner,
         rviz_node,
-        depthimage_to_laserscan_node,
+        pointcloud_to_laserscan_node,
     ])
