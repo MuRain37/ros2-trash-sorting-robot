@@ -9,7 +9,7 @@ endif()
 find_package(ament_cmake REQUIRED)
 
 # 安装 launch 文件
-install(DIRECTORY launch
+install(DIRECTORY launch config
   DESTINATION share/${PROJECT_NAME})
 
 if(BUILD_TESTING)

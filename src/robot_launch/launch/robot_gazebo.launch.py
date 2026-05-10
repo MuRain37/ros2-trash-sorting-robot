@@ -5,33 +5,38 @@ import launch_ros
 from ament_index_python.packages import get_package_share_directory
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 
+
 def generate_launch_description():
-    # 获取默认路径
     robot_name_in_model = "robot"
     pkg_path = get_package_share_directory('robot_description')
     default_model_path = pkg_path + '/urdf/robot.gazebo.xacro'
     default_world_path = pkg_path + '/world/custom_room.world'
-    default_rviz_config_path = pkg_path + '/config/rviz/display_model.rviz'
+    default_rviz_config_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(
+            get_package_share_directory('robot_launch'))))),
+        'src', 'robot_launch', 'config', 'gazebo.rviz')
     controller_config_path = os.path.join(
         pkg_path, 'config', 'robot_gazebo_controllers.yaml')
 
-    # 为 Launch 声明参数
     action_declare_arg_mode_path = launch.actions.DeclareLaunchArgument(
         name='model', default_value=str(default_model_path),
-        description='URDF 的绝对路径')
+        description='URDF absolute path')
 
-    # 获取文件内容生成新的参数
+    declare_rviz = launch.actions.DeclareLaunchArgument(
+        'rviz_config',
+        default_value=default_rviz_config_path,
+        description='RViz config file path')
+
     robot_description = launch_ros.parameter_descriptions.ParameterValue(
         launch.substitutions.Command(
             ['xacro ', launch.substitutions.LaunchConfiguration('model')]),
         value_type=str)
-    
+
     declare_use_sim_time_cmd = launch.actions.DeclareLaunchArgument(
         name='use_sim_time',
         default_value='True',
         description='whether to use sim_time')
-  	
-    # 状态发布节点
+
     robot_state_publisher_node = launch_ros.actions.Node(
         package='robot_state_publisher',
         executable='robot_state_publisher',
@@ -41,28 +46,21 @@ def generate_launch_description():
         }]
     )
 
-    # 通过 IncludeLaunchDescription 包含另外一个 launch 文件
     launch_gazebo = launch.actions.IncludeLaunchDescription(
         PythonLaunchDescriptionSource([get_package_share_directory(
             'gazebo_ros'), '/launch/gazebo.launch.py']),
-      	# 传递参数
-        launch_arguments=[('world', default_world_path),('verbose','true')]
+        launch_arguments=[
+            ('world', default_world_path),
+            ('headless', 'true'),
+        ]
     )
-    
-    # 请求 Gazebo 加载机器人
+
     spawn_entity_node = launch_ros.actions.Node(
         package='gazebo_ros',
         executable='spawn_entity.py',
         arguments=['-topic', '/robot_description',
                    '-entity', robot_name_in_model, ])
-    # RViz 节点
-    rviz_node = launch_ros.actions.Node(
-        package='rviz2',
-        executable='rviz2',
-        arguments=['-d', default_rviz_config_path]
-    )
 
-    # 深度点云 → 2D 激光扫描（水平面切片）
     pointcloud_to_laserscan_node = launch_ros.actions.Node(
         package='pointcloud_to_laserscan',
         executable='pointcloud_to_laserscan_node',
@@ -86,8 +84,12 @@ def generate_launch_description():
         }]
     )
 
-    # 机械臂 ros2_control spawners
-    # controller_manager 由 gazebo_ros2_control 插件内部创建
+    rviz_node = launch_ros.actions.Node(
+        package='rviz2',
+        executable='rviz2',
+        arguments=['-d', launch.substitutions.LaunchConfiguration('rviz_config')],
+    )
+
     arm_forward_spawner = launch_ros.actions.Node(
         package='controller_manager',
         executable='spawner',
@@ -108,14 +110,28 @@ def generate_launch_description():
         ],
     )
 
+    arm_controller = launch_ros.actions.Node(
+        package='robot_arm',
+        executable='arm_controller',
+        name='arm_controller',
+        output='screen',
+        parameters=[{
+            'use_sim_time': True,
+            'publish_joint_states': False,
+            'publish_forward_command': True,
+        }],
+    )
+
     return launch.LaunchDescription([
         action_declare_arg_mode_path,
+        declare_rviz,
         declare_use_sim_time_cmd,
         robot_state_publisher_node,
         launch_gazebo,
         spawn_entity_node,
         arm_forward_spawner,
         arm_joint_state_spawner,
-        rviz_node,
+        arm_controller,
         pointcloud_to_laserscan_node,
+        rviz_node,
     ])
