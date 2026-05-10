@@ -12,7 +12,7 @@ class HardwareNode(Node):
     def __init__(self):
         super().__init__('hardware_bridge')
 
-        self.declare_parameter('port', '/dev/ttyUSB0')
+        self.declare_parameter('port', '/dev/ttyACM0')
         self.declare_parameter('baudrate', 115200)
         self.declare_parameter('imu_topic', 'imu_data')
         self.declare_parameter('read_rate', 100.0)
@@ -35,7 +35,7 @@ class HardwareNode(Node):
         )
 
     def _read_serial(self):
-        encoder, imu = self._serial.read()
+        encoder, imu = self._serial.read_frame()
         if encoder is not None:
             self._motor.publish_feedback(encoder)
         if imu is not None:

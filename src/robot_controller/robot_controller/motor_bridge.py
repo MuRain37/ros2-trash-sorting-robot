@@ -37,5 +37,6 @@ class MotorBridge:
             return
 
         if self._cmd_callback:
-            self._cmd_callback(list(msg.data))
+            cmd_str = 'MOTOR:' + ','.join(f'{v:.3f}' for v in msg.data)
+            self._cmd_callback(cmd_str.encode('utf-8'))
         self.publish_feedback(msg.data)
