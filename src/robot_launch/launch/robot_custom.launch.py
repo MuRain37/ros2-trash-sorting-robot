@@ -1,9 +1,11 @@
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, RegisterEventHandler
+from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, RegisterEventHandler
 from launch.event_handlers import OnProcessExit
-from launch.substitutions import Command, LaunchConfiguration
+from launch.launch_description_sources import PythonLaunchDescriptionSource
+from launch.substitutions import Command, LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import LifecycleNode, Node
+from launch_ros.substitutions import FindPackageShare
 
 
 def generate_launch_description():
@@ -79,6 +81,57 @@ def generate_launch_description():
         output='screen',
     )
 
+    # Realsense 深度相机
+    rs_launch = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource([
+            PathJoinSubstitution([
+                FindPackageShare('realsense2_camera'),
+                'launch', 'rs_launch.py',
+            ]),
+        ]),
+        launch_arguments={
+            'pointcloud.enable': 'true',
+            'enable_gyro': 'true',
+            'enable_accel': 'true',
+        }.items(),
+    )
+
+    # IMU 驱动 + 滤波
+    imu_device_node = Node(
+        package='imu_ros2_device',
+        executable='ybimu_driver',
+    )
+
+    imu_filter_node = Node(
+        package='imu_filter_madgwick',
+        executable='imu_filter_madgwick_node',
+        parameters=[get_package_share_directory('imu_ros2_device') + '/config/imu_filter_param.yaml'],
+    )
+
+    # 点云转激光扫描
+    pointcloud_to_laserscan_node = Node(
+        package='pointcloud_to_laserscan',
+        executable='pointcloud_to_laserscan_node',
+        name='pointcloud_to_laserscan',
+        output='screen',
+        remappings=[
+            ('cloud_in', '/camera/camera/depth/color/points'),
+            ('scan', '/scan_camera'),
+        ],
+        parameters=[{
+            'target_frame': 'base_link',
+            'min_height': -0.02,
+            'max_height': 0.01,
+            'angle_min': -3.14159,
+            'angle_max': 3.14159,
+            'angle_increment': 0.017453,
+            'scan_time': 0.1,
+            'range_min': 0.1,
+            'range_max': 8.0,
+            'transform_tolerance': 0.1,
+        }],
+    )
+
     # YDLidar 激光雷达驱动
     ydlidar_params_declare = DeclareLaunchArgument(
         'params_file',
@@ -103,6 +156,10 @@ def generate_launch_description():
         delay_controller_after_jsb,
         hardware_node,
         arm_controller,
+        rs_launch,
+        pointcloud_to_laserscan_node,
+        imu_device_node,
+        imu_filter_node,
         ydlidar_params_declare,
         lidar_driver_node,
     ])
