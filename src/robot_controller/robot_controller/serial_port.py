@@ -5,9 +5,11 @@ import serial
 class SerialPort:
     """STM32 串口通信模块。"""
 
-    def __init__(self, port='/dev/ttyACM0', baudrate=115200):
+    def __init__(self, port='/dev/ttyACM0', baudrate=115200, debug=False, logger=None):
         self._port_name = port
         self._baudrate = baudrate
+        self._debug = debug
+        self._logger = logger
         self._serial = None
         self._running = False
         self._rx_thread = None
@@ -15,6 +17,12 @@ class SerialPort:
         self._rx_buf = bytearray()
 
         self.open()
+
+    def _log(self, msg):
+        if self._logger:
+            self._logger.info(msg)
+        else:
+            print(msg)
 
     def open(self):
         if self._serial and self._serial.is_open:
@@ -29,10 +37,10 @@ class SerialPort:
             self._running = True
             self._rx_thread = threading.Thread(target=self._rx_task, daemon=True)
             self._rx_thread.start()
-            print(f'[SerialPort] 已打开 {self._port_name} @ {self._baudrate}')
+            self._log(f'[SerialPort] 已打开 {self._port_name} @ {self._baudrate}')
             return True
         except serial.SerialException as e:
-            print(f'[SerialPort] 打开失败 ({self._port_name}): {e}')
+            self._log(f'[SerialPort] 打开失败 ({self._port_name}): {e}')
             return False
 
     def close(self):
@@ -54,45 +62,14 @@ class SerialPort:
                 del self._rx_buf[:n]
                 return data
             elif n == 0 and len(self._rx_buf) > 0:
-                data = bytes(self._rx_buf)
-                self._rx_buf.clear()
+                last_nl = self._rx_buf.rfind(b'\n')
+                if last_nl >= 0:
+                    data = bytes(self._rx_buf[:last_nl + 1])
+                    del self._rx_buf[:last_nl + 1]
+                else:
+                    data = b''
                 return data
         return b''
-
-    def read_frame(self):
-        """读取并解析一帧数据，返回 (encoder, imu) 元组。
-
-        encoder: [v1, v2, v3, v4] 四轮速度列表，无数据时为 None
-        imu:     未实现则为 None
-        """
-        encoder = None
-        imu = None
-
-        with self._lock:
-            if not self._rx_buf:
-                return None, None
-            data = bytes(self._rx_buf)
-            self._rx_buf.clear()
-
-        for line in data.split(b'\n'):
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                text = line.decode('utf-8', errors='replace')
-            except Exception:
-                continue
-
-            if text.startswith('ENCODER:'):
-                parts = text.split(':', 1)[1].split(',')
-                if len(parts) == 4:
-                    try:
-                        encoder = [float(v) for v in parts]
-                    except ValueError:
-                        pass
-            # 可扩展 IMU 等其他帧类型解析
-
-        return encoder, imu
 
     def write(self, data):
         """发送数据到串口。
@@ -106,10 +83,11 @@ class SerialPort:
         try:
             n = self._serial.write(data)
             self._serial.flush()
-            print(f'[SerialPort] 已发送 {n} 字节: {data.decode("utf-8", errors="replace").strip()}')
+            if self._debug:
+                self._log(f'[SerialPort] TX {n}B: {data!r}')
             return n
         except serial.SerialException as e:
-            print(f'[SerialPort] 写入失败: {e}')
+            self._log(f'[SerialPort] 写入失败: {e}')
             return 0
 
     def _rx_task(self):
@@ -117,6 +95,8 @@ class SerialPort:
             try:
                 chunk = self._serial.read(64)
                 if chunk:
+                    if self._debug:
+                        self._log(f'[SerialPort] RX {len(chunk)}B: {chunk!r}')
                     with self._lock:
                         self._rx_buf.extend(chunk)
             except serial.SerialException:

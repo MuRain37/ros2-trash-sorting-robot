@@ -68,6 +68,7 @@ def generate_launch_description():
         executable='hardware_node',
         name='hardware_bridge',
         output='screen',
+        parameters=[{'debug': True}],
     )
 
     arm_controller = Node(

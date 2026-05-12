@@ -1,3 +1,4 @@
+
 import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import Imu
@@ -16,12 +17,14 @@ class HardwareNode(Node):
         self.declare_parameter('baudrate', 115200)
         self.declare_parameter('imu_topic', 'imu_data')
         self.declare_parameter('read_rate', 100.0)
+        self.declare_parameter('debug', False)
 
         port = self.get_parameter('port').value
         baudrate = self.get_parameter('baudrate').value
         read_rate = self.get_parameter('read_rate').value
+        debug = self.get_parameter('debug').value
 
-        self._serial = SerialPort(port, baudrate)
+        self._serial = SerialPort(port, baudrate, debug=debug, logger=self.get_logger())
 
         self._motor = MotorBridge(self, cmd_callback=self._serial.write)
 
@@ -35,11 +38,27 @@ class HardwareNode(Node):
         )
 
     def _read_serial(self):
-        encoder, imu = self._serial.read_frame()
+        data = self._serial.read_raw()
+        if not data:
+            return
+        encoder = None
+        for line in data.split(b'\n'):
+            line = line.strip()
+            if not line or not line.startswith(b'ENCODER:'):
+                continue
+            try:
+                text = line.decode('utf-8', errors='replace')
+            except Exception:
+                continue
+            parts = text.split(':', 1)[1].split(',')
+            if len(parts) == 4:
+                try:
+                    encoder = [float(v) for v in parts]
+                except ValueError:
+                    pass
         if encoder is not None:
+            self.get_logger().info(f'Parsed encoder: {encoder}')
             self._motor.publish_feedback(encoder)
-        if imu is not None:
-            self._imu_pub.publish(imu)
 
     def destroy_node(self):
         self._serial.close()
