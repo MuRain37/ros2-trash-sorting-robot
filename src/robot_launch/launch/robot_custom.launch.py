@@ -3,13 +3,14 @@ from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, RegisterEventHandler
 from launch.event_handlers import OnProcessExit
 from launch.substitutions import Command, LaunchConfiguration
-from launch_ros.actions import Node
+from launch_ros.actions import LifecycleNode, Node
 
 
 def generate_launch_description():
     pkg_path = get_package_share_directory('robot_description')
     default_model_path = pkg_path + '/urdf/robot.custom.xacro'
     robot_controllers = pkg_path + '/config/robot_custom_controllers.yaml'
+    ydlidar_pkg_path = get_package_share_directory('ydlidar_ros2_driver')
 
     declare_model = DeclareLaunchArgument(
         name='model',
@@ -78,6 +79,22 @@ def generate_launch_description():
         output='screen',
     )
 
+    # YDLidar 激光雷达驱动
+    ydlidar_params_declare = DeclareLaunchArgument(
+        'params_file',
+        default_value=ydlidar_pkg_path + '/params/ydlidar.yaml',
+        description='YDLidar参数文件路径')
+
+    lidar_driver_node = LifecycleNode(
+        package='ydlidar_ros2_driver',
+        executable='ydlidar_ros2_driver_node',
+        name='ydlidar_ros2_driver_node',
+        output='screen',
+        emulate_tty=True,
+        parameters=[LaunchConfiguration('params_file')],
+        namespace='/',
+    )
+
     return LaunchDescription([
         declare_model,
         control_node,
@@ -86,4 +103,6 @@ def generate_launch_description():
         delay_controller_after_jsb,
         hardware_node,
         arm_controller,
+        ydlidar_params_declare,
+        lidar_driver_node,
     ])
