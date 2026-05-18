@@ -1,8 +1,67 @@
 import os
+import tempfile
+
 import launch
 import launch_ros
+import yaml
 from ament_index_python.packages import get_package_share_directory
 from launch.launch_description_sources import PythonLaunchDescriptionSource
+
+
+NAV2_PARAM_FILES = [
+    'amcl.yaml',
+    'bt_navigator.yaml',
+    'controller_server.yaml',
+    'costmaps.yaml',
+    'map_server.yaml',
+    'planner_server.yaml',
+    'behavior_server.yaml',
+    'robot_state_publisher.yaml',
+    'waypoint_follower.yaml',
+    'velocity_smoother.yaml',
+]
+
+
+def _merged_nav2_params(context):
+    params_file = launch.substitutions.LaunchConfiguration(
+        'params_file').perform(context)
+    if params_file:
+        return params_file
+
+    params_dir = launch.substitutions.LaunchConfiguration(
+        'params_dir').perform(context)
+    merged_params = {}
+    for filename in NAV2_PARAM_FILES:
+        path = os.path.join(params_dir, filename)
+        with open(path, 'r') as param_file:
+            data = yaml.safe_load(param_file) or {}
+        duplicate_nodes = set(merged_params).intersection(data)
+        if duplicate_nodes:
+            duplicates = ', '.join(sorted(duplicate_nodes))
+            raise RuntimeError(
+                f'Duplicate Nav2 parameter sections in {path}: {duplicates}')
+        merged_params.update(data)
+
+    output = tempfile.NamedTemporaryFile(
+        mode='w', prefix='robot_navgation2_nav2_', suffix='.yaml', delete=False)
+    with output:
+        yaml.safe_dump(merged_params, output, default_flow_style=False, sort_keys=False)
+    return output.name
+
+
+def _include_nav2_bringup(context, nav2_bringup_dir, map_yaml_path, use_sim_time):
+    nav2_param_path = _merged_nav2_params(context)
+    return [
+        launch.actions.IncludeLaunchDescription(
+            PythonLaunchDescriptionSource(
+                [nav2_bringup_dir, '/launch', '/bringup_launch.py']),
+            # 使用 Launch 参数替换原有参数
+            launch_arguments={
+                'map': map_yaml_path,
+                'use_sim_time': use_sim_time,
+                'params_file': nav2_param_path}.items(),
+        )
+    ]
 
 
 def generate_launch_description():
@@ -18,8 +77,10 @@ def generate_launch_description():
         'use_sim_time', default='true')
     map_yaml_path = launch.substitutions.LaunchConfiguration(
         'map', default=os.path.join(robot_navgation2_dir, 'maps', 'room.yaml'))
+    nav2_param_dir = launch.substitutions.LaunchConfiguration(
+        'params_dir', default=os.path.join(robot_navgation2_dir, 'config', 'nav2_params'))
     nav2_param_path = launch.substitutions.LaunchConfiguration(
-        'params_file', default=os.path.join(robot_navgation2_dir, 'config', 'nav2_params.yaml'))
+        'params_file', default='')
 
     return launch.LaunchDescription([
         # 声明新的 Launch 参数
@@ -27,17 +88,14 @@ def generate_launch_description():
                                              description='Use simulation (Gazebo) clock if true'),
         launch.actions.DeclareLaunchArgument('map', default_value=map_yaml_path,
                                              description='Full path to map file to load'),
+        launch.actions.DeclareLaunchArgument('params_dir', default_value=nav2_param_dir,
+                                             description='Directory containing split Nav2 param files'),
         launch.actions.DeclareLaunchArgument('params_file', default_value=nav2_param_path,
-                                             description='Full path to param file to load'),
+                                             description='Full path to a single Nav2 param file to load. Overrides params_dir when set.'),
 
-        launch.actions.IncludeLaunchDescription(
-            PythonLaunchDescriptionSource(
-                [nav2_bringup_dir, '/launch', '/bringup_launch.py']),
-            # 使用 Launch 参数替换原有参数
-            launch_arguments={
-                'map': map_yaml_path,
-                'use_sim_time': use_sim_time,
-                'params_file': nav2_param_path}.items(),
+        launch.actions.OpaqueFunction(
+            function=_include_nav2_bringup,
+            args=[nav2_bringup_dir, map_yaml_path, use_sim_time],
         ),
         launch_ros.actions.Node(
             package='rviz2',
