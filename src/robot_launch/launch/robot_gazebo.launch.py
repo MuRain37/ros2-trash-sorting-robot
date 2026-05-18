@@ -14,7 +14,7 @@ def generate_launch_description():
     default_rviz_config_path = os.path.join(
         os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(
             get_package_share_directory('robot_launch'))))),
-        'src', 'robot_launch', 'config', 'gazebo.rviz')
+        'src', 'robot_launch', 'rviz', 'gazebo.rviz')
     controller_config_path = os.path.join(
         pkg_path, 'config', 'robot_gazebo_controllers.yaml')
 

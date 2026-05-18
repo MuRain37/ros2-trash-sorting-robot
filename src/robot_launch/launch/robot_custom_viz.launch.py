@@ -11,7 +11,7 @@ from launch_ros.actions import Node
 def generate_launch_description():
     share = get_package_share_directory('robot_launch')
     workspace = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(share))))
-    default_rviz = os.path.join(workspace, 'src', 'robot_launch', 'config', 'custom.rviz')
+    default_rviz = os.path.join(workspace, 'src', 'robot_launch', 'rviz', 'custom.rviz')
 
     declare_rviz = DeclareLaunchArgument(
         'rviz_config',
