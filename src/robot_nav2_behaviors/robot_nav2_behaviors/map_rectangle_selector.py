@@ -1,8 +1,11 @@
 import os
+import math
 
 import cv2
 import numpy as np
 import rclpy
+from geometry_msgs.msg import PoseStamped
+from nav_msgs.msg import Path
 from rclpy.node import Node
 from robot_interfaces.srv import SetRectangle
 
@@ -23,12 +26,19 @@ class MapRectangleSelector(Node):
         self.declare_parameter('window_name', 'room map')
         self.declare_parameter('frame_id', 'map')
         self.declare_parameter('rectangle_service', 'set_center_square_marker')
+        self.declare_parameter('coverage_path_topic', 'coverage_path')
 
         self.map_yaml = self.get_parameter('map_yaml').value
         self.window_name = self.get_parameter('window_name').value
         self.frame_id = self.get_parameter('frame_id').value
         service_name = self.get_parameter('rectangle_service').value
+        coverage_path_topic = self.get_parameter('coverage_path_topic').value
         self.rectangle_client = self.create_client(SetRectangle, service_name)
+        self.coverage_path_publisher = self.create_publisher(
+            Path,
+            coverage_path_topic,
+            10,
+        )
         self.map_image_path, self.resolution, self.origin = self.load_map_info(
             self.map_yaml
         )
@@ -223,8 +233,48 @@ class MapRectangleSelector(Node):
 
         if response.success:
             self.get_logger().info(response.message)
+            self.publish_coverage_path(response.path_points)
         else:
             self.get_logger().warn(response.message)
+
+    def publish_coverage_path(self, path_points):
+        if not path_points:
+            self.get_logger().warn('rectangle service returned no path points')
+            return
+
+        path = Path()
+        path.header.frame_id = self.frame_id
+        path.header.stamp = self.get_clock().now().to_msg()
+        path.poses = [
+            self.create_pose_stamped(point, yaw)
+            for point, yaw in self.iter_points_with_yaw(path_points)
+        ]
+        self.coverage_path_publisher.publish(path)
+        self.get_logger().info(
+            f'coverage path published with {len(path.poses)} poses'
+        )
+
+    def iter_points_with_yaw(self, path_points):
+        last_yaw = 0.0
+        for index, point in enumerate(path_points):
+            if index < len(path_points) - 1:
+                next_point = path_points[index + 1]
+                dx = next_point.x - point.x
+                dy = next_point.y - point.y
+                if dx != 0.0 or dy != 0.0:
+                    last_yaw = math.atan2(dy, dx)
+            yield point, last_yaw
+
+    def create_pose_stamped(self, point, yaw):
+        pose = PoseStamped()
+        pose.header.frame_id = self.frame_id
+        pose.header.stamp = self.get_clock().now().to_msg()
+        pose.pose.position.x = point.x
+        pose.pose.position.y = point.y
+        pose.pose.position.z = point.z
+        pose.pose.orientation.z = math.sin(yaw / 2.0)
+        pose.pose.orientation.w = math.cos(yaw / 2.0)
+        return pose
 
     def run(self):
         self.get_logger().info(f'Loaded map image: {self.map_image_path}')

@@ -6,3 +6,4 @@ string frame_id
 ---
 bool success
 string message
+geometry_msgs/Point[] path_points

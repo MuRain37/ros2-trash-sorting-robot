@@ -46,18 +46,24 @@ class CenterSquareMarker(Node):
             return response
 
         frame_id = request.frame_id or self.get_parameter('frame_id').value
+        zigzag_points = self.create_zigzag_points(min_x, min_y, max_x, max_y)
         self.current_markers = self.create_rectangle_markers(
             frame_id,
             min_x,
             min_y,
             max_x,
             max_y,
+            zigzag_points,
         )
         for marker in self.current_markers:
             self.publisher.publish(marker)
 
         response.success = True
         response.message = 'rectangle and zigzag markers published'
+        response.path_points = [
+            Point(x=x, y=y, z=0.0)
+            for x, y in zigzag_points
+        ]
         self.get_logger().info(
             'set rectangle marker: '
             f'min=({min_x:.3f}, {min_y:.3f}), '
@@ -65,7 +71,15 @@ class CenterSquareMarker(Node):
         )
         return response
 
-    def create_rectangle_markers(self, frame_id, min_x, min_y, max_x, max_y):
+    def create_rectangle_markers(
+        self,
+        frame_id,
+        min_x,
+        min_y,
+        max_x,
+        max_y,
+        zigzag_points=None,
+    ):
         rectangle_corners = [
             (min_x, min_y),
             (max_x, min_y),
@@ -73,7 +87,13 @@ class CenterSquareMarker(Node):
             (min_x, max_y),
             (min_x, min_y),
         ]
-        zigzag_points = self.create_zigzag_points(min_x, min_y, max_x, max_y)
+        if zigzag_points is None:
+            zigzag_points = self.create_zigzag_points(
+                min_x,
+                min_y,
+                max_x,
+                max_y,
+            )
         return [
             self.create_line_marker(
                 frame_id,

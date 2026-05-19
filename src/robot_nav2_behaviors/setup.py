@@ -30,6 +30,7 @@ setup(
         'console_scripts': [
             'center_square_marker = robot_nav2_behaviors.center_square_marker:main',
             'map_rectangle_selector = robot_nav2_behaviors.map_rectangle_selector:main',
+            'coverage_navigator = robot_nav2_behaviors.coverage_navigator:main',
         ],
     },
 )
