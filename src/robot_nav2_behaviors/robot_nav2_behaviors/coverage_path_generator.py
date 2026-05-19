@@ -1,38 +1,39 @@
 import rclpy
-from geometry_msgs.msg import Point
+from geometry_msgs.msg import Point, Point32, PolygonStamped, PoseStamped
+from nav_msgs.msg import Path
 from rclpy.node import Node
 from robot_interfaces.srv import SetRectangle
-from visualization_msgs.msg import Marker
 
 
-class CenterSquareMarker(Node):
+class CoveragePathGenerator(Node):
     def __init__(self):
-        super().__init__('center_square_marker')
+        super().__init__('coverage_path_generator')
         self.declare_parameter('frame_id', 'map')
-        self.declare_parameter('publish_period', 0.5)
         self.declare_parameter('zigzag_spacing', 1.0)
-        self.declare_parameter('marker_line_width', 0.02)
         self.declare_parameter('rectangle_service', 'set_center_square_marker')
+        self.declare_parameter('rectangle_topic', 'coverage_rectangle')
+        self.declare_parameter('coverage_path_topic', 'coverage_path_preview')
 
-        self.publisher = self.create_publisher(Marker, 'center_square_marker', 10)
         service_name = self.get_parameter('rectangle_service').value
+        rectangle_topic = self.get_parameter('rectangle_topic').value
+        coverage_path_topic = self.get_parameter('coverage_path_topic').value
+
         self.rectangle_service = self.create_service(
             SetRectangle,
             service_name,
             self.handle_set_rectangle,
         )
-        self.get_logger().info(f'rectangle service ready: {service_name}')
-        period = self.get_parameter('publish_period').value
-        self.timer = self.create_timer(period, self.publish_marker)
-        self.current_markers = None
-
-    def publish_marker(self):
-        if self.current_markers is None:
-            return
-
-        for marker in self.current_markers:
-            marker.header.stamp = self.get_clock().now().to_msg()
-            self.publisher.publish(marker)
+        self.rectangle_publisher = self.create_publisher(
+            PolygonStamped,
+            rectangle_topic,
+            10,
+        )
+        self.path_publisher = self.create_publisher(
+            Path,
+            coverage_path_topic,
+            10,
+        )
+        self.get_logger().info(f'coverage path service ready: {service_name}')
 
     def handle_set_rectangle(self, request, response):
         min_x = min(request.min_x, request.max_x)
@@ -47,73 +48,54 @@ class CenterSquareMarker(Node):
 
         frame_id = request.frame_id or self.get_parameter('frame_id').value
         zigzag_points = self.create_zigzag_points(min_x, min_y, max_x, max_y)
-        self.current_markers = self.create_rectangle_markers(
-            frame_id,
-            min_x,
-            min_y,
-            max_x,
-            max_y,
-            zigzag_points,
-        )
-        for marker in self.current_markers:
-            self.publisher.publish(marker)
+        self.publish_rectangle(frame_id, min_x, min_y, max_x, max_y)
+        self.publish_coverage_path(frame_id, zigzag_points)
 
         response.success = True
-        response.message = 'rectangle and zigzag markers published'
+        response.message = 'coverage path generated'
         response.path_points = [
             Point(x=x, y=y, z=0.0)
             for x, y in zigzag_points
         ]
         self.get_logger().info(
-            'set rectangle marker: '
+            'generated coverage path: '
             f'min=({min_x:.3f}, {min_y:.3f}), '
-            f'max=({max_x:.3f}, {max_y:.3f}), frame_id={frame_id}'
+            f'max=({max_x:.3f}, {max_y:.3f}), '
+            f'points={len(zigzag_points)}, frame_id={frame_id}'
         )
         return response
 
-    def create_rectangle_markers(
-        self,
-        frame_id,
-        min_x,
-        min_y,
-        max_x,
-        max_y,
-        zigzag_points=None,
-    ):
-        rectangle_corners = [
-            (min_x, min_y),
-            (max_x, min_y),
-            (max_x, max_y),
-            (min_x, max_y),
-            (min_x, min_y),
+    def publish_rectangle(self, frame_id, min_x, min_y, max_x, max_y):
+        rectangle = PolygonStamped()
+        rectangle.header.frame_id = frame_id
+        rectangle.header.stamp = self.get_clock().now().to_msg()
+        rectangle.polygon.points = [
+            Point32(x=float(min_x), y=float(min_y), z=0.0),
+            Point32(x=float(max_x), y=float(min_y), z=0.0),
+            Point32(x=float(max_x), y=float(max_y), z=0.0),
+            Point32(x=float(min_x), y=float(max_y), z=0.0),
+            Point32(x=float(min_x), y=float(min_y), z=0.0),
         ]
-        if zigzag_points is None:
-            zigzag_points = self.create_zigzag_points(
-                min_x,
-                min_y,
-                max_x,
-                max_y,
-            )
-        return [
-            self.create_line_marker(
-                frame_id,
-                rectangle_corners,
-                marker_id=0,
-                red=0.0,
-                green=1.0,
-                blue=0.0,
-                z=0.03,
-            ),
-            self.create_line_marker(
-                frame_id,
-                zigzag_points,
-                marker_id=1,
-                red=1.0,
-                green=0.0,
-                blue=0.0,
-                z=0.05,
-            ),
+        self.rectangle_publisher.publish(rectangle)
+
+    def publish_coverage_path(self, frame_id, zigzag_points):
+        path = Path()
+        path.header.frame_id = frame_id
+        path.header.stamp = self.get_clock().now().to_msg()
+        path.poses = [
+            self.create_pose_stamped(frame_id, x, y)
+            for x, y in zigzag_points
         ]
+        self.path_publisher.publish(path)
+
+    def create_pose_stamped(self, frame_id, x, y):
+        pose = PoseStamped()
+        pose.header.frame_id = frame_id
+        pose.header.stamp = self.get_clock().now().to_msg()
+        pose.pose.position.x = x
+        pose.pose.position.y = y
+        pose.pose.orientation.w = 1.0
+        return pose
 
     def create_zigzag_points(self, min_x, min_y, max_x, max_y):
         spacing = float(self.get_parameter('zigzag_spacing').value)
@@ -186,55 +168,10 @@ class CenterSquareMarker(Node):
 
         return points
 
-    def create_rectangle_marker(
-        self,
-        frame_id,
-        corners,
-        marker_id=0,
-        namespace='robot_nav2_behaviors',
-    ):
-        return self.create_line_marker(
-            frame_id,
-            corners,
-            marker_id,
-            namespace,
-            red=0.0,
-            green=1.0,
-            blue=0.0,
-            z=0.03,
-        )
-
-    def create_line_marker(
-        self,
-        frame_id,
-        points,
-        marker_id=0,
-        namespace='robot_nav2_behaviors',
-        red=0.0,
-        green=1.0,
-        blue=0.0,
-        z=0.03,
-    ):
-        marker = Marker()
-        marker.header.frame_id = frame_id
-        marker.header.stamp = self.get_clock().now().to_msg()
-        marker.ns = namespace
-        marker.id = marker_id
-        marker.type = Marker.LINE_STRIP
-        marker.action = Marker.ADD
-        marker.pose.orientation.w = 1.0
-        marker.scale.x = float(self.get_parameter('marker_line_width').value)
-        marker.color.r = red
-        marker.color.g = green
-        marker.color.b = blue
-        marker.color.a = 1.0
-        marker.points = [Point(x=x, y=y, z=z) for x, y in points]
-        return marker
-
 
 def main(args=None):
     rclpy.init(args=args)
-    node = CenterSquareMarker()
+    node = CoveragePathGenerator()
     try:
         rclpy.spin(node)
     finally:

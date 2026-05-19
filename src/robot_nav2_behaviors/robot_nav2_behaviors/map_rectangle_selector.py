@@ -1,13 +1,10 @@
 import os
-import math
 
 import cv2
 import numpy as np
 import rclpy
-from geometry_msgs.msg import PoseStamped
-from nav_msgs.msg import Path
 from rclpy.node import Node
-from robot_interfaces.srv import SetRectangle
+from robot_interfaces.srv import AddCoverageRectangle
 
 
 DEFAULT_MAP_YAML = (
@@ -19,25 +16,22 @@ DEFAULT_MAP_YAML = (
 class MapRectangleSelector(Node):
     CONTROL_BAR_HEIGHT = 64
     SEND_BUTTON = (16, 14, 148, 50)
+    UNDO_BUTTON = (164, 14, 296, 50)
 
     def __init__(self):
         super().__init__('map_rectangle_selector')
         self.declare_parameter('map_yaml', DEFAULT_MAP_YAML)
         self.declare_parameter('window_name', 'room map')
         self.declare_parameter('frame_id', 'map')
-        self.declare_parameter('rectangle_service', 'set_center_square_marker')
-        self.declare_parameter('coverage_path_topic', 'coverage_path')
+        self.declare_parameter('task_service', 'add_coverage_rectangle')
 
         self.map_yaml = self.get_parameter('map_yaml').value
         self.window_name = self.get_parameter('window_name').value
         self.frame_id = self.get_parameter('frame_id').value
-        service_name = self.get_parameter('rectangle_service').value
-        coverage_path_topic = self.get_parameter('coverage_path_topic').value
-        self.rectangle_client = self.create_client(SetRectangle, service_name)
-        self.coverage_path_publisher = self.create_publisher(
-            Path,
-            coverage_path_topic,
-            10,
+        service_name = self.get_parameter('task_service').value
+        self.task_client = self.create_client(
+            AddCoverageRectangle,
+            service_name,
         )
         self.map_image_path, self.resolution, self.origin = self.load_map_info(
             self.map_yaml
@@ -52,7 +46,8 @@ class MapRectangleSelector(Node):
         self.dragging = False
         self.start_pixel = None
         self.end_pixel = None
-        self.current_rectangle = None
+        self.rectangles = []
+        self.sent = False
         self.redraw_display()
 
     def load_map_info(self, yaml_path):
@@ -95,18 +90,69 @@ class MapRectangleSelector(Node):
 
     def redraw_display(self):
         self.map_display = cv2.cvtColor(self.image, cv2.COLOR_GRAY2BGR)
-        if self.start_pixel is None or self.end_pixel is None:
-            self.draw_controls()
-            return
+        self.draw_stored_rectangles()
 
-        cv2.rectangle(
-            self.map_display,
-            self.start_pixel,
-            self.end_pixel,
-            (0, 0, 255),
-            2,
-        )
+        if self.start_pixel is not None and self.end_pixel is not None:
+            cv2.rectangle(
+                self.map_display,
+                self.start_pixel,
+                self.end_pixel,
+                (0, 0, 255),
+                2,
+            )
         self.draw_controls()
+
+    def draw_stored_rectangles(self):
+        for rectangle in self.rectangles:
+            top_left = rectangle['top_left']
+            bottom_right = rectangle['bottom_right']
+            color = (0, 0, 255)
+            if rectangle['submitting']:
+                color = (0, 255, 255)
+            elif rectangle['queued']:
+                color = (0, 160, 255)
+            cv2.rectangle(self.map_display, top_left, bottom_right, color, 2)
+            self.draw_rectangle_index(rectangle)
+
+    def draw_rectangle_index(self, rectangle):
+        top_left = rectangle['top_left']
+        bottom_right = rectangle['bottom_right']
+        center_x = (top_left[0] + bottom_right[0]) // 2
+        center_y = (top_left[1] + bottom_right[1]) // 2
+        text = str(rectangle['sequence'])
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        scale = 0.7
+        thickness = 2
+        (text_width, text_height), baseline = cv2.getTextSize(
+            text,
+            font,
+            scale,
+            thickness,
+        )
+        origin = (
+            center_x - text_width // 2,
+            center_y + (text_height + baseline) // 2,
+        )
+        cv2.putText(
+            self.map_display,
+            text,
+            origin,
+            font,
+            scale,
+            (0, 0, 0),
+            thickness + 2,
+            cv2.LINE_AA,
+        )
+        cv2.putText(
+            self.map_display,
+            text,
+            origin,
+            font,
+            scale,
+            (255, 255, 255),
+            thickness,
+            cv2.LINE_AA,
+        )
 
     def draw_controls(self):
         width = self.map_display.shape[1]
@@ -114,7 +160,7 @@ class MapRectangleSelector(Node):
         controls[:] = (245, 245, 245)
 
         x1, y1, x2, y2 = self.SEND_BUTTON
-        enabled = self.current_rectangle is not None
+        enabled = self.can_send()
         button_color = (70, 150, 70) if enabled else (170, 170, 170)
         cv2.rectangle(controls, (x1, y1), (x2, y2), button_color, -1)
         cv2.rectangle(controls, (x1, y1), (x2, y2), (80, 80, 80), 1)
@@ -122,6 +168,22 @@ class MapRectangleSelector(Node):
             controls,
             'Send',
             (x1 + 38, y1 + 25),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.7,
+            (255, 255, 255),
+            2,
+            cv2.LINE_AA,
+        )
+
+        x1, y1, x2, y2 = self.UNDO_BUTTON
+        enabled = self.can_undo()
+        button_color = (80, 120, 210) if enabled else (170, 170, 170)
+        cv2.rectangle(controls, (x1, y1), (x2, y2), button_color, -1)
+        cv2.rectangle(controls, (x1, y1), (x2, y2), (80, 80, 80), 1)
+        cv2.putText(
+            controls,
+            'Undo',
+            (x1 + 36, y1 + 25),
             cv2.FONT_HERSHEY_SIMPLEX,
             0.7,
             (255, 255, 255),
@@ -137,13 +199,15 @@ class MapRectangleSelector(Node):
             self.handle_control_click(event, x, y - image_height)
             return
 
+        if self.sent:
+            return
+
         current = (x, y)
 
         if event == cv2.EVENT_LBUTTONDOWN:
             self.dragging = True
             self.start_pixel = current
             self.end_pixel = current
-            self.current_rectangle = None
             self.redraw_display()
         elif event == cv2.EVENT_MOUSEMOVE and self.dragging:
             self.end_pixel = current
@@ -160,10 +224,40 @@ class MapRectangleSelector(Node):
 
         x1, y1, x2, y2 = self.SEND_BUTTON
         if x1 <= x <= x2 and y1 <= y <= y2:
-            if self.current_rectangle is None:
-                self.get_logger().warn('draw a rectangle before sending')
+            if not self.can_send():
+                self.get_logger().warn('draw a rectangle before adding')
                 return
-            self.call_rectangle_service(*self.current_rectangle)
+            self.call_pending_task_services()
+            self.sent = True
+            self.redraw_display()
+            return
+
+        x1, y1, x2, y2 = self.UNDO_BUTTON
+        if x1 <= x <= x2 and y1 <= y <= y2:
+            if not self.can_undo():
+                self.get_logger().warn('no rectangle to undo')
+                return
+            removed = self.rectangles.pop()
+            self.get_logger().info(
+                f'rectangle {removed["sequence"]} removed'
+            )
+            self.redraw_display()
+
+    def has_pending_rectangles(self):
+        return any(
+            not rectangle['queued'] and not rectangle['submitting']
+            for rectangle in self.rectangles
+        )
+
+    def can_send(self):
+        return not self.sent and self.has_pending_rectangles()
+
+    def can_undo(self):
+        return (
+            not self.sent
+            and bool(self.rectangles)
+            and not any(rectangle['submitting'] for rectangle in self.rectangles)
+        )
 
     def get_rectangle_points(self):
         x1, y1 = self.start_pixel
@@ -186,6 +280,14 @@ class MapRectangleSelector(Node):
         map_bottom_right = self.pixel_to_map(bottom_right)
         map_bottom_left = self.pixel_to_map(bottom_left)
 
+        if top_left[0] == bottom_right[0] or top_left[1] == bottom_right[1]:
+            self.get_logger().warn(
+                'rectangle width and height must be greater than 0'
+            )
+            self.start_pixel = None
+            self.end_pixel = None
+            return
+
         self.get_logger().info(
             'rectangle pixels: '
             f'top_left={top_left}, bottom_right={bottom_right}'
@@ -204,77 +306,71 @@ class MapRectangleSelector(Node):
                     map_top_left[1])
         max_y = max(map_bottom_left[1], map_bottom_right[1], map_top_right[1],
                     map_top_left[1])
-        self.current_rectangle = (min_x, min_y, max_x, max_y)
-        self.get_logger().info('rectangle stored, click Send to publish')
+        rectangle = {
+            'sequence': len(self.rectangles) + 1,
+            'top_left': top_left,
+            'bottom_right': bottom_right,
+            'map_bounds': (min_x, min_y, max_x, max_y),
+            'queued': False,
+            'submitting': False,
+        }
+        self.rectangles.append(rectangle)
+        self.start_pixel = None
+        self.end_pixel = None
+        self.get_logger().info(
+            f'rectangle {rectangle["sequence"]} stored, click Send to queue'
+        )
 
-    def call_rectangle_service(self, min_x, min_y, max_x, max_y):
-        if not self.rectangle_client.wait_for_service(timeout_sec=1.0):
+    def call_pending_task_services(self):
+        for rectangle in self.rectangles:
+            if rectangle['queued'] or rectangle['submitting']:
+                continue
+            self.call_task_service(rectangle)
+
+    def call_task_service(self, rectangle):
+        if not self.task_client.wait_for_service(timeout_sec=1.0):
             self.get_logger().warn(
-                'rectangle service is not available: '
-                f'{self.rectangle_client.srv_name}'
+                'coverage task service is not available: '
+                f'{self.task_client.srv_name}'
             )
             return
 
-        request = SetRectangle.Request()
+        rectangle['submitting'] = True
+        self.redraw_display()
+        min_x, min_y, max_x, max_y = rectangle['map_bounds']
+        request = AddCoverageRectangle.Request()
         request.min_x = min_x
         request.min_y = min_y
         request.max_x = max_x
         request.max_y = max_y
         request.frame_id = self.frame_id
-        future = self.rectangle_client.call_async(request)
-        future.add_done_callback(self.handle_rectangle_response)
+        future = self.task_client.call_async(request)
+        future.add_done_callback(
+            lambda future, rectangle=rectangle: self.handle_task_response(
+                future,
+                rectangle,
+            )
+        )
 
-    def handle_rectangle_response(self, future):
+    def handle_task_response(self, future, rectangle):
         try:
             response = future.result()
         except Exception as exc:
-            self.get_logger().error(f'rectangle service call failed: {exc}')
+            rectangle['submitting'] = False
+            self.get_logger().error(f'coverage task service call failed: {exc}')
+            self.redraw_display()
             return
 
+        rectangle['submitting'] = False
         if response.success:
-            self.get_logger().info(response.message)
-            self.publish_coverage_path(response.path_points)
+            rectangle['queued'] = True
+            self.get_logger().info(
+                f'rectangle {rectangle["sequence"]}: '
+                f'{response.message}; queued={response.queued_count}'
+            )
+            self.redraw_display()
         else:
             self.get_logger().warn(response.message)
-
-    def publish_coverage_path(self, path_points):
-        if not path_points:
-            self.get_logger().warn('rectangle service returned no path points')
-            return
-
-        path = Path()
-        path.header.frame_id = self.frame_id
-        path.header.stamp = self.get_clock().now().to_msg()
-        path.poses = [
-            self.create_pose_stamped(point, yaw)
-            for point, yaw in self.iter_points_with_yaw(path_points)
-        ]
-        self.coverage_path_publisher.publish(path)
-        self.get_logger().info(
-            f'coverage path published with {len(path.poses)} poses'
-        )
-
-    def iter_points_with_yaw(self, path_points):
-        last_yaw = 0.0
-        for index, point in enumerate(path_points):
-            if index < len(path_points) - 1:
-                next_point = path_points[index + 1]
-                dx = next_point.x - point.x
-                dy = next_point.y - point.y
-                if dx != 0.0 or dy != 0.0:
-                    last_yaw = math.atan2(dy, dx)
-            yield point, last_yaw
-
-    def create_pose_stamped(self, point, yaw):
-        pose = PoseStamped()
-        pose.header.frame_id = self.frame_id
-        pose.header.stamp = self.get_clock().now().to_msg()
-        pose.pose.position.x = point.x
-        pose.pose.position.y = point.y
-        pose.pose.position.z = point.z
-        pose.pose.orientation.z = math.sin(yaw / 2.0)
-        pose.pose.orientation.w = math.cos(yaw / 2.0)
-        return pose
 
     def run(self):
         self.get_logger().info(f'Loaded map image: {self.map_image_path}')

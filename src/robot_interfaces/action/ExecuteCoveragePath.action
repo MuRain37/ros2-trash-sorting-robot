@@ -1,0 +1,6 @@
+nav_msgs/Path path
+---
+bool success
+string message
+---
+uint32 remaining_poses

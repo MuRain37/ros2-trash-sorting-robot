@@ -1,75 +1,101 @@
+from action_msgs.msg import GoalStatus
 from nav2_msgs.action import NavigateThroughPoses
-from nav_msgs.msg import Path
 import rclpy
-from rclpy.action import ActionClient
+from rclpy.action import ActionClient, ActionServer
 from rclpy.node import Node
+from robot_interfaces.action import ExecuteCoveragePath
 
 
 class CoverageNavigator(Node):
     def __init__(self):
         super().__init__('coverage_navigator')
-        self.declare_parameter('coverage_path_topic', 'coverage_path')
+        self.declare_parameter('execute_action', 'execute_coverage_path')
         self.declare_parameter('navigate_action', 'navigate_through_poses')
         self.declare_parameter('server_timeout_sec', 5.0)
 
-        coverage_path_topic = self.get_parameter('coverage_path_topic').value
+        self.execute_action = self.get_parameter('execute_action').value
         self.navigate_action = self.get_parameter('navigate_action').value
 
-        self.action_client = ActionClient(
+        self.navigate_client = ActionClient(
             self,
             NavigateThroughPoses,
             self.navigate_action,
         )
-        self.path_subscription = self.create_subscription(
-            Path,
-            coverage_path_topic,
-            self.handle_coverage_path,
-            10,
+        self.execute_server = ActionServer(
+            self,
+            ExecuteCoveragePath,
+            self.execute_action,
+            self.execute_callback,
         )
-        self.active_goal_handle = None
         self.get_logger().info(
-            f'coverage navigator ready: topic={coverage_path_topic}, '
-            f'action={self.navigate_action}'
+            f'coverage navigator ready: action={self.execute_action}, '
+            f'nav2_action={self.navigate_action}'
         )
 
-    def handle_coverage_path(self, path):
+    async def execute_callback(self, goal_handle):
+        result = ExecuteCoveragePath.Result()
+        path = goal_handle.request.path
+
         if not path.poses:
-            self.get_logger().warn('received empty coverage path')
-            return
+            result.success = False
+            result.message = 'coverage path is empty'
+            goal_handle.abort()
+            return result
 
         timeout_sec = float(self.get_parameter('server_timeout_sec').value)
-        if not self.action_client.wait_for_server(timeout_sec=timeout_sec):
-            self.get_logger().warn(
+        if not self.navigate_client.wait_for_server(timeout_sec=timeout_sec):
+            result.success = False
+            result.message = (
                 'NavigateThroughPoses action server is not available: '
                 f'{self.navigate_action}'
             )
-            return
+            goal_handle.abort()
+            return result
 
-        goal = NavigateThroughPoses.Goal()
-        goal.poses = path.poses
+        nav_goal = NavigateThroughPoses.Goal()
+        nav_goal.poses = path.poses
         self.get_logger().info(
-            f'sending coverage path to Nav2 with {len(goal.poses)} poses'
+            f'executing coverage path with {len(nav_goal.poses)} poses'
         )
-        goal_future = self.action_client.send_goal_async(goal)
-        goal_future.add_done_callback(self.handle_goal_response)
 
-    def handle_goal_response(self, future):
-        goal_handle = future.result()
-        if not goal_handle.accepted:
-            self.get_logger().warn('coverage navigation goal rejected')
-            return
-
-        self.active_goal_handle = goal_handle
-        self.get_logger().info('coverage navigation goal accepted')
-        result_future = goal_handle.get_result_async()
-        result_future.add_done_callback(self.handle_navigation_result)
-
-    def handle_navigation_result(self, future):
-        result = future.result()
-        self.active_goal_handle = None
-        self.get_logger().info(
-            f'coverage navigation finished with status={result.status}'
+        nav_goal_future = self.navigate_client.send_goal_async(
+            nav_goal,
+            feedback_callback=lambda feedback: self.publish_feedback(
+                goal_handle,
+                feedback,
+            ),
         )
+        nav_goal_handle = await nav_goal_future
+        if not nav_goal_handle.accepted:
+            result.success = False
+            result.message = 'NavigateThroughPoses goal rejected'
+            goal_handle.abort()
+            return result
+
+        nav_result_future = nav_goal_handle.get_result_async()
+        nav_result = await nav_result_future
+
+        if nav_result.status == GoalStatus.STATUS_SUCCEEDED:
+            result.success = True
+            result.message = 'coverage path executed'
+            goal_handle.succeed()
+        else:
+            result.success = False
+            result.message = (
+                'coverage path execution failed with status='
+                f'{nav_result.status}'
+            )
+            goal_handle.abort()
+
+        self.get_logger().info(result.message)
+        return result
+
+    def publish_feedback(self, goal_handle, feedback):
+        execute_feedback = ExecuteCoveragePath.Feedback()
+        execute_feedback.remaining_poses = (
+            feedback.feedback.number_of_poses_remaining
+        )
+        goal_handle.publish_feedback(execute_feedback)
 
 
 def main(args=None):
