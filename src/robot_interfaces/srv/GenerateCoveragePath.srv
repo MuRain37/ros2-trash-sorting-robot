@@ -6,4 +6,4 @@ string frame_id
 ---
 bool success
 string message
-geometry_msgs/Point[] path_points
+nav_msgs/Path coverage_path

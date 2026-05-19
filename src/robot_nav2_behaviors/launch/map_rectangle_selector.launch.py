@@ -11,7 +11,7 @@ def generate_launch_description():
     rectangle_topic = LaunchConfiguration('rectangle_topic')
     coverage_path_topic = LaunchConfiguration('coverage_path_topic')
     task_service = LaunchConfiguration('task_service')
-    rectangle_service = LaunchConfiguration('rectangle_service')
+    coverage_path_service = LaunchConfiguration('coverage_path_service')
     navigate_to_pose_action = LaunchConfiguration('navigate_to_pose_action')
     navigate_through_poses_action = LaunchConfiguration(
         'navigate_through_poses_action'
@@ -29,7 +29,7 @@ def generate_launch_description():
             {
                 'frame_id': frame_id,
                 'zigzag_spacing': zigzag_spacing,
-                'rectangle_service': rectangle_service,
+                'coverage_path_service': coverage_path_service,
                 'rectangle_topic': rectangle_topic,
                 'coverage_path_topic': coverage_path_topic,
             }
@@ -60,7 +60,7 @@ def generate_launch_description():
             {
                 'frame_id': frame_id,
                 'task_service': task_service,
-                'rectangle_service': rectangle_service,
+                'coverage_path_service': coverage_path_service,
                 'navigate_to_pose_action': navigate_to_pose_action,
                 'execute_coverage_action': execute_coverage_action,
             }
@@ -127,8 +127,8 @@ def generate_launch_description():
             default_value='add_coverage_rectangle',
         ),
         DeclareLaunchArgument(
-            'rectangle_service',
-            default_value='set_center_square_marker',
+            'coverage_path_service',
+            default_value='generate_coverage_path',
         ),
         DeclareLaunchArgument(
             'navigate_to_pose_action',

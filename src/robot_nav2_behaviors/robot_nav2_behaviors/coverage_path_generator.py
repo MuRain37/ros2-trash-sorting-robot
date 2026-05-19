@@ -1,8 +1,10 @@
+import math
+
 import rclpy
-from geometry_msgs.msg import Point, Point32, PolygonStamped, PoseStamped
+from geometry_msgs.msg import Point32, PolygonStamped, PoseStamped
 from nav_msgs.msg import Path
 from rclpy.node import Node
-from robot_interfaces.srv import SetRectangle
+from robot_interfaces.srv import GenerateCoveragePath
 
 
 class CoveragePathGenerator(Node):
@@ -10,18 +12,18 @@ class CoveragePathGenerator(Node):
         super().__init__('coverage_path_generator')
         self.declare_parameter('frame_id', 'map')
         self.declare_parameter('zigzag_spacing', 1.0)
-        self.declare_parameter('rectangle_service', 'set_center_square_marker')
+        self.declare_parameter('coverage_path_service', 'generate_coverage_path')
         self.declare_parameter('rectangle_topic', 'coverage_rectangle')
         self.declare_parameter('coverage_path_topic', 'coverage_path_preview')
 
-        service_name = self.get_parameter('rectangle_service').value
+        service_name = self.get_parameter('coverage_path_service').value
         rectangle_topic = self.get_parameter('rectangle_topic').value
         coverage_path_topic = self.get_parameter('coverage_path_topic').value
 
-        self.rectangle_service = self.create_service(
-            SetRectangle,
+        self.coverage_path_service = self.create_service(
+            GenerateCoveragePath,
             service_name,
-            self.handle_set_rectangle,
+            self.handle_generate_coverage_path,
         )
         self.rectangle_publisher = self.create_publisher(
             PolygonStamped,
@@ -35,7 +37,7 @@ class CoveragePathGenerator(Node):
         )
         self.get_logger().info(f'coverage path service ready: {service_name}')
 
-    def handle_set_rectangle(self, request, response):
+    def handle_generate_coverage_path(self, request, response):
         min_x = min(request.min_x, request.max_x)
         max_x = max(request.min_x, request.max_x)
         min_y = min(request.min_y, request.max_y)
@@ -48,15 +50,13 @@ class CoveragePathGenerator(Node):
 
         frame_id = request.frame_id or self.get_parameter('frame_id').value
         zigzag_points = self.create_zigzag_points(min_x, min_y, max_x, max_y)
+        coverage_path = self.create_coverage_path(frame_id, zigzag_points)
         self.publish_rectangle(frame_id, min_x, min_y, max_x, max_y)
-        self.publish_coverage_path(frame_id, zigzag_points)
+        self.path_publisher.publish(coverage_path)
 
         response.success = True
         response.message = 'coverage path generated'
-        response.path_points = [
-            Point(x=x, y=y, z=0.0)
-            for x, y in zigzag_points
-        ]
+        response.coverage_path = coverage_path
         self.get_logger().info(
             'generated coverage path: '
             f'min=({min_x:.3f}, {min_y:.3f}), '
@@ -78,23 +78,36 @@ class CoveragePathGenerator(Node):
         ]
         self.rectangle_publisher.publish(rectangle)
 
-    def publish_coverage_path(self, frame_id, zigzag_points):
+    def create_coverage_path(self, frame_id, zigzag_points):
         path = Path()
         path.header.frame_id = frame_id
         path.header.stamp = self.get_clock().now().to_msg()
         path.poses = [
-            self.create_pose_stamped(frame_id, x, y)
-            for x, y in zigzag_points
+            self.create_pose_stamped(frame_id, x, y, yaw)
+            for x, y, yaw in self.iter_points_with_yaw(zigzag_points)
         ]
-        self.path_publisher.publish(path)
+        return path
 
-    def create_pose_stamped(self, frame_id, x, y):
+    def iter_points_with_yaw(self, points):
+        last_yaw = 0.0
+        for index, point in enumerate(points):
+            x, y = point
+            if index < len(points) - 1:
+                next_x, next_y = points[index + 1]
+                dx = next_x - x
+                dy = next_y - y
+                if dx != 0.0 or dy != 0.0:
+                    last_yaw = math.atan2(dy, dx)
+            yield x, y, last_yaw
+
+    def create_pose_stamped(self, frame_id, x, y, yaw):
         pose = PoseStamped()
         pose.header.frame_id = frame_id
         pose.header.stamp = self.get_clock().now().to_msg()
         pose.pose.position.x = x
         pose.pose.position.y = y
-        pose.pose.orientation.w = 1.0
+        pose.pose.orientation.z = math.sin(yaw / 2.0)
+        pose.pose.orientation.w = math.cos(yaw / 2.0)
         return pose
 
     def create_zigzag_points(self, min_x, min_y, max_x, max_y):

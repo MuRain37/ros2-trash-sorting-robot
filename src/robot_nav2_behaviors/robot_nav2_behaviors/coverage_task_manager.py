@@ -5,12 +5,11 @@ from dataclasses import dataclass
 from action_msgs.msg import GoalStatus
 from geometry_msgs.msg import PoseStamped
 from nav2_msgs.action import NavigateToPose
-from nav_msgs.msg import Path
 import rclpy
 from rclpy.action import ActionClient
 from rclpy.node import Node
 from robot_interfaces.action import ExecuteCoveragePath
-from robot_interfaces.srv import AddCoverageRectangle, SetRectangle
+from robot_interfaces.srv import AddCoverageRectangle, GenerateCoveragePath
 
 
 @dataclass
@@ -28,14 +27,14 @@ class CoverageTaskManager(Node):
         super().__init__('coverage_task_manager')
         self.declare_parameter('frame_id', 'map')
         self.declare_parameter('task_service', 'add_coverage_rectangle')
-        self.declare_parameter('rectangle_service', 'set_center_square_marker')
+        self.declare_parameter('coverage_path_service', 'generate_coverage_path')
         self.declare_parameter('navigate_to_pose_action', 'navigate_to_pose')
         self.declare_parameter('execute_coverage_action', 'execute_coverage_path')
         self.declare_parameter('approach_distance', 0.5)
         self.declare_parameter('server_timeout_sec', 5.0)
 
         task_service = self.get_parameter('task_service').value
-        rectangle_service = self.get_parameter('rectangle_service').value
+        coverage_path_service = self.get_parameter('coverage_path_service').value
         navigate_to_pose_action = self.get_parameter(
             'navigate_to_pose_action'
         ).value
@@ -49,8 +48,8 @@ class CoverageTaskManager(Node):
             self.handle_add_rectangle,
         )
         self.rectangle_client = self.create_client(
-            SetRectangle,
-            rectangle_service,
+            GenerateCoveragePath,
+            coverage_path_service,
         )
         self.navigate_client = ActionClient(
             self,
@@ -70,7 +69,7 @@ class CoverageTaskManager(Node):
 
         self.get_logger().info(
             f'coverage task manager ready: service={task_service}, '
-            f'rectangle_service={rectangle_service}'
+            f'coverage_path_service={coverage_path_service}'
         )
 
     def handle_add_rectangle(self, request, response):
@@ -198,7 +197,7 @@ class CoverageTaskManager(Node):
             )
             return
 
-        request = SetRectangle.Request()
+        request = GenerateCoveragePath.Request()
         request.min_x = task.min_x
         request.min_y = task.min_y
         request.max_x = task.max_x
@@ -218,36 +217,11 @@ class CoverageTaskManager(Node):
             self.finish_active_task(False, response.message)
             return
 
-        if not response.path_points:
-            self.finish_active_task(False, 'rectangle service returned no path')
+        if not response.coverage_path.poses:
+            self.finish_active_task(False, 'coverage path service returned no path')
             return
 
-        path = self.create_coverage_path(
-            self.active_task.frame_id,
-            response.path_points,
-        )
-        self.execute_coverage_path(path)
-
-    def create_coverage_path(self, frame_id, path_points):
-        path = Path()
-        path.header.frame_id = frame_id
-        path.header.stamp = self.get_clock().now().to_msg()
-        path.poses = [
-            self.create_pose_stamped(frame_id, point.x, point.y, yaw)
-            for point, yaw in self.iter_points_with_yaw(path_points)
-        ]
-        return path
-
-    def iter_points_with_yaw(self, path_points):
-        last_yaw = 0.0
-        for index, point in enumerate(path_points):
-            if index < len(path_points) - 1:
-                next_point = path_points[index + 1]
-                dx = next_point.x - point.x
-                dy = next_point.y - point.y
-                if dx != 0.0 or dy != 0.0:
-                    last_yaw = math.atan2(dy, dx)
-            yield point, last_yaw
+        self.execute_coverage_path(response.coverage_path)
 
     def execute_coverage_path(self, path):
         timeout_sec = float(self.get_parameter('server_timeout_sec').value)
