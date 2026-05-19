@@ -155,53 +155,40 @@ class CoveragePathGenerator(Node):
             return []
 
         if width >= height:
-            track_count = max(1, int(math.ceil(height / spacing)))
-            margin = (height - (track_count - 1) * spacing) / 2.0
-            track_ys = [
-                min_y + margin + index * spacing
-                for index in range(track_count)
-            ]
-            variants = [
-                self.build_horizontal_zigzag(track_ys, min_x, max_x, True),
-                self.build_horizontal_zigzag(track_ys, min_x, max_x, False),
-                self.build_horizontal_zigzag(
-                    list(reversed(track_ys)),
-                    min_x,
-                    max_x,
-                    True,
-                ),
-                self.build_horizontal_zigzag(
-                    list(reversed(track_ys)),
-                    min_x,
-                    max_x,
-                    False,
-                ),
-            ]
-            return self.deduplicate_points(
-                self.select_closest_variant(variants, start_point)
+            tracks = self.create_tracks(min_y, max_y, spacing)
+            return self.select_zigzag(
+                tracks,
+                start_point,
+                self.build_horizontal_zigzag,
+                min_x,
+                max_x,
             )
 
-        track_count = max(1, int(math.ceil(width / spacing)))
-        margin = (width - (track_count - 1) * spacing) / 2.0
-        track_xs = [
-            min_x + margin + index * spacing
+        tracks = self.create_tracks(min_x, max_x, spacing)
+        return self.select_zigzag(
+            tracks,
+            start_point,
+            self.build_vertical_zigzag,
+            min_y,
+            max_y,
+        )
+
+    def create_tracks(self, min_value, max_value, spacing):
+        span = max_value - min_value
+        track_count = max(1, int(math.ceil(span / spacing)))
+        margin = (span - (track_count - 1) * spacing) / 2.0
+        return [
+            min_value + margin + index * spacing
             for index in range(track_count)
         ]
+
+    def select_zigzag(self, tracks, start_point, builder, low, high):
+        reversed_tracks = list(reversed(tracks))
         variants = [
-            self.build_vertical_zigzag(track_xs, min_y, max_y, True),
-            self.build_vertical_zigzag(track_xs, min_y, max_y, False),
-            self.build_vertical_zigzag(
-                list(reversed(track_xs)),
-                min_y,
-                max_y,
-                True,
-            ),
-            self.build_vertical_zigzag(
-                list(reversed(track_xs)),
-                min_y,
-                max_y,
-                False,
-            ),
+            builder(tracks, low, high, True),
+            builder(tracks, low, high, False),
+            builder(reversed_tracks, low, high, True),
+            builder(reversed_tracks, low, high, False),
         ]
         return self.deduplicate_points(
             self.select_closest_variant(variants, start_point)

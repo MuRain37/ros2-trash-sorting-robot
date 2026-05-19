@@ -156,7 +156,7 @@ def generate_launch_description():
         DeclareLaunchArgument('zigzag_spacing', default_value='1.0'),
         DeclareLaunchArgument('marker_line_width', default_value='0.02'),
         DeclareLaunchArgument('robot_base_frame', default_value='base_link'),
-        DeclareLaunchArgument('task_entry_margin', default_value='0.2'),
+        DeclareLaunchArgument('task_entry_margin', default_value='0.0'),
         DeclareLaunchArgument('tf_timeout_sec', default_value='0.2'),
         DeclareLaunchArgument('initial_pose_x', default_value='0.0'),
         DeclareLaunchArgument('initial_pose_y', default_value='0.0'),

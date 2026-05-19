@@ -39,7 +39,9 @@ class MapRectangleSelector(Node):
 
         self.image = cv2.imread(self.map_image_path, cv2.IMREAD_GRAYSCALE)
         if self.image is None:
-            raise RuntimeError(f'Failed to read map image: {self.map_image_path}')
+            raise RuntimeError(
+                f'Failed to read map image: {self.map_image_path}'
+            )
 
         self.map_display = cv2.cvtColor(self.image, cv2.COLOR_GRAY2BGR)
         self.display = None
@@ -156,7 +158,10 @@ class MapRectangleSelector(Node):
 
     def draw_controls(self):
         width = self.map_display.shape[1]
-        controls = np.zeros((self.CONTROL_BAR_HEIGHT, width, 3), dtype=np.uint8)
+        controls = np.zeros(
+            (self.CONTROL_BAR_HEIGHT, width, 3),
+            dtype=np.uint8,
+        )
         controls[:] = (245, 245, 245)
 
         x1, y1, x2, y2 = self.SEND_BUTTON
@@ -256,7 +261,9 @@ class MapRectangleSelector(Node):
         return (
             not self.sent
             and bool(self.rectangles)
-            and not any(rectangle['submitting'] for rectangle in self.rectangles)
+            and not any(
+                rectangle['submitting'] for rectangle in self.rectangles
+            )
         )
 
     def get_rectangle_points(self):
@@ -357,7 +364,9 @@ class MapRectangleSelector(Node):
             response = future.result()
         except Exception as exc:
             rectangle['submitting'] = False
-            self.get_logger().error(f'coverage task service call failed: {exc}')
+            self.get_logger().error(
+                f'coverage task service call failed: {exc}'
+            )
             self.redraw_display()
             return
 
