@@ -233,11 +233,17 @@ class CoveragePathGenerator(Node):
 
         for index, x in enumerate(track_xs):
             if bottom_to_top:
-                points.append((x, min_y))
-                points.append((x, max_y))
+                self.append_line_with_midpoint(
+                    points,
+                    (x, min_y),
+                    (x, max_y),
+                )
             else:
-                points.append((x, max_y))
-                points.append((x, min_y))
+                self.append_line_with_midpoint(
+                    points,
+                    (x, max_y),
+                    (x, min_y),
+                )
 
             if index < len(track_xs) - 1:
                 next_x = track_xs[index + 1]
@@ -261,11 +267,17 @@ class CoveragePathGenerator(Node):
 
         for index, y in enumerate(track_ys):
             if left_to_right:
-                points.append((min_x, y))
-                points.append((max_x, y))
+                self.append_line_with_midpoint(
+                    points,
+                    (min_x, y),
+                    (max_x, y),
+                )
             else:
-                points.append((max_x, y))
-                points.append((min_x, y))
+                self.append_line_with_midpoint(
+                    points,
+                    (max_x, y),
+                    (min_x, y),
+                )
 
             if index < len(track_ys) - 1:
                 next_y = track_ys[index + 1]
@@ -276,6 +288,18 @@ class CoveragePathGenerator(Node):
             left_to_right = not left_to_right
 
         return points
+
+    def append_line_with_midpoint(self, points, start, end):
+        start_x, start_y = start
+        end_x, end_y = end
+        points.extend([
+            start,
+            (
+                (start_x + end_x) / 2.0,
+                (start_y + end_y) / 2.0,
+            ),
+            end,
+        ])
 
 
 def main(args=None):
