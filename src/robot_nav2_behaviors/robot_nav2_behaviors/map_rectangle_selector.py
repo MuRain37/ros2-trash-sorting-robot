@@ -8,7 +8,7 @@ from robot_interfaces.srv import SetRectangle
 
 
 DEFAULT_MAP_YAML = (
-    '/home/murain/WorkSpace/ros2_robot/'
+    '/home/murain/WorkSpace/robot/'
     'src/robot_navgation2/maps/room.yaml'
 )
 

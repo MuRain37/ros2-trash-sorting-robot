@@ -98,34 +98,71 @@ class CenterSquareMarker(Node):
     def create_zigzag_points(self, min_x, min_y, max_x, max_y):
         spacing = float(self.get_parameter('zigzag_spacing').value)
         if spacing <= 0.0:
-            spacing = max_y - min_y
+            spacing = max_x - min_x
 
+        width = max_x - min_x
+        height = max_y - min_y
+        if width <= 0.0 or height <= 0.0:
+            return []
+
+        if width >= height:
+            track_count = max(1, int(height // spacing) + 1)
+            margin = (height - (track_count - 1) * spacing) / 2.0
+            track_ys = [
+                min_y + margin + index * spacing
+                for index in range(track_count)
+            ]
+            return self.build_horizontal_zigzag(track_ys, min_x, max_x)
+
+        track_count = max(1, int(width // spacing) + 1)
+        margin = (width - (track_count - 1) * spacing) / 2.0
+        track_xs = [
+            min_x + margin + index * spacing
+            for index in range(track_count)
+        ]
+        return self.build_vertical_zigzag(track_xs, min_y, max_y)
+
+    def build_vertical_zigzag(self, track_xs, min_y, max_y):
         points = []
-        y = min_y
-        left_to_right = True
-        while y <= max_y:
-            if left_to_right:
-                points.append((min_x, y))
-                points.append((max_x, y))
-            else:
-                points.append((max_x, y))
-                points.append((min_x, y))
+        bottom_to_top = True
 
-            y += spacing
-            if y <= max_y:
-                if left_to_right:
-                    points.append((max_x, y))
+        for index, x in enumerate(track_xs):
+            if bottom_to_top:
+                points.append((x, min_y))
+                points.append((x, max_y))
+            else:
+                points.append((x, max_y))
+                points.append((x, min_y))
+
+            if index < len(track_xs) - 1:
+                next_x = track_xs[index + 1]
+                if bottom_to_top:
+                    points.append((next_x, max_y))
                 else:
-                    points.append((min_x, y))
-            left_to_right = not left_to_right
+                    points.append((next_x, min_y))
+            bottom_to_top = not bottom_to_top
 
-        if points and points[-1][1] < max_y:
+        return points
+
+    def build_horizontal_zigzag(self, track_ys, min_x, max_x):
+        points = []
+        left_to_right = True
+
+        for index, y in enumerate(track_ys):
             if left_to_right:
-                points.append((min_x, max_y))
-                points.append((max_x, max_y))
+                points.append((min_x, y))
+                points.append((max_x, y))
             else:
-                points.append((max_x, max_y))
-                points.append((min_x, max_y))
+                points.append((max_x, y))
+                points.append((min_x, y))
+
+            if index < len(track_ys) - 1:
+                next_y = track_ys[index + 1]
+                if left_to_right:
+                    points.append((max_x, next_y))
+                else:
+                    points.append((min_x, next_y))
+            left_to_right = not left_to_right
 
         return points
 

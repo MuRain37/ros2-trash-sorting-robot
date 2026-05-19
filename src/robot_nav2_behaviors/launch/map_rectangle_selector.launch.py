@@ -53,7 +53,7 @@ def generate_launch_description():
         DeclareLaunchArgument(
             'map_yaml',
             default_value=(
-                '/home/murain/WorkSpace/ros2_robot/'
+                '/home/murain/WorkSpace/robot/'
                 'src/robot_navgation2/maps/room.yaml'
             ),
         ),
