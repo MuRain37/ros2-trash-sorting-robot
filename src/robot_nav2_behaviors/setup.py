@@ -30,6 +30,7 @@ setup(
         'console_scripts': [
             'coverage_path_generator = robot_nav2_behaviors.coverage_path_generator:main',
             'coverage_marker_publisher = robot_nav2_behaviors.coverage_marker_publisher:main',
+            'initial_pose_publisher = robot_nav2_behaviors.initial_pose_publisher:main',
             'map_rectangle_selector = robot_nav2_behaviors.map_rectangle_selector:main',
             'coverage_task_manager = robot_nav2_behaviors.coverage_task_manager:main',
             'coverage_navigator = robot_nav2_behaviors.coverage_navigator:main',

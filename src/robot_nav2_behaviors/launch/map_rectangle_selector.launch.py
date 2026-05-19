@@ -6,6 +6,7 @@ from launch_ros.actions import Node
 
 def generate_launch_description():
     map_yaml = LaunchConfiguration('map_yaml')
+    use_sim_time = LaunchConfiguration('use_sim_time')
     frame_id = LaunchConfiguration('frame_id')
     marker_topic = LaunchConfiguration('marker_topic')
     rectangle_topic = LaunchConfiguration('rectangle_topic')
@@ -19,6 +20,15 @@ def generate_launch_description():
     execute_coverage_action = LaunchConfiguration('execute_coverage_action')
     zigzag_spacing = LaunchConfiguration('zigzag_spacing')
     marker_line_width = LaunchConfiguration('marker_line_width')
+    initial_pose_x = LaunchConfiguration('initial_pose_x')
+    initial_pose_y = LaunchConfiguration('initial_pose_y')
+    initial_pose_yaw = LaunchConfiguration('initial_pose_yaw')
+    initial_pose_publish_period = LaunchConfiguration(
+        'initial_pose_publish_period'
+    )
+    initial_pose_publish_attempts = LaunchConfiguration(
+        'initial_pose_publish_attempts'
+    )
 
     coverage_path_generator = Node(
         package='robot_nav2_behaviors',
@@ -32,6 +42,7 @@ def generate_launch_description():
                 'coverage_path_service': coverage_path_service,
                 'rectangle_topic': rectangle_topic,
                 'coverage_path_topic': coverage_path_topic,
+                'use_sim_time': use_sim_time,
             }
         ],
     )
@@ -47,6 +58,7 @@ def generate_launch_description():
                 'rectangle_topic': rectangle_topic,
                 'coverage_path_topic': coverage_path_topic,
                 'marker_line_width': marker_line_width,
+                'use_sim_time': use_sim_time,
             }
         ],
     )
@@ -63,6 +75,7 @@ def generate_launch_description():
                 'coverage_path_service': coverage_path_service,
                 'navigate_to_pose_action': navigate_to_pose_action,
                 'execute_coverage_action': execute_coverage_action,
+                'use_sim_time': use_sim_time,
             }
         ],
     )
@@ -80,6 +93,7 @@ def generate_launch_description():
                         'map_yaml': map_yaml,
                         'frame_id': frame_id,
                         'task_service': task_service,
+                        'use_sim_time': use_sim_time,
                     }
                 ],
             )
@@ -95,7 +109,31 @@ def generate_launch_description():
             {
                 'execute_action': execute_coverage_action,
                 'navigate_action': navigate_through_poses_action,
+                'use_sim_time': use_sim_time,
             }
+        ],
+    )
+
+    initial_pose_publisher = TimerAction(
+        period=3.0,
+        actions=[
+            Node(
+                package='robot_nav2_behaviors',
+                executable='initial_pose_publisher',
+                name='initial_pose_publisher',
+                output='screen',
+                parameters=[
+                    {
+                        'frame_id': frame_id,
+                        'initial_pose_x': initial_pose_x,
+                        'initial_pose_y': initial_pose_y,
+                        'initial_pose_yaw': initial_pose_yaw,
+                        'publish_period': initial_pose_publish_period,
+                        'publish_attempts': initial_pose_publish_attempts,
+                        'use_sim_time': use_sim_time,
+                    }
+                ],
+            )
         ],
     )
 
@@ -108,8 +146,20 @@ def generate_launch_description():
             ),
         ),
         DeclareLaunchArgument('frame_id', default_value='map'),
+        DeclareLaunchArgument('use_sim_time', default_value='false'),
         DeclareLaunchArgument('zigzag_spacing', default_value='1.0'),
         DeclareLaunchArgument('marker_line_width', default_value='0.02'),
+        DeclareLaunchArgument('initial_pose_x', default_value='0.0'),
+        DeclareLaunchArgument('initial_pose_y', default_value='0.0'),
+        DeclareLaunchArgument('initial_pose_yaw', default_value='0.0'),
+        DeclareLaunchArgument(
+            'initial_pose_publish_period',
+            default_value='1.0',
+        ),
+        DeclareLaunchArgument(
+            'initial_pose_publish_attempts',
+            default_value='10',
+        ),
         DeclareLaunchArgument(
             'marker_topic',
             default_value='center_square_marker',
@@ -144,6 +194,7 @@ def generate_launch_description():
         ),
         coverage_path_generator,
         coverage_marker_publisher,
+        initial_pose_publisher,
         coverage_task_manager,
         map_rectangle_selector,
         coverage_navigator,
