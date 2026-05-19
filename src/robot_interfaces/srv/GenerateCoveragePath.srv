@@ -3,6 +3,9 @@ float64 min_y
 float64 max_x
 float64 max_y
 string frame_id
+bool use_start
+float64 start_x
+float64 start_y
 ---
 bool success
 string message

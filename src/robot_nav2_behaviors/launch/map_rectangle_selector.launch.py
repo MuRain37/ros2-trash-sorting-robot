@@ -20,6 +20,9 @@ def generate_launch_description():
     execute_coverage_action = LaunchConfiguration('execute_coverage_action')
     zigzag_spacing = LaunchConfiguration('zigzag_spacing')
     marker_line_width = LaunchConfiguration('marker_line_width')
+    robot_base_frame = LaunchConfiguration('robot_base_frame')
+    task_entry_margin = LaunchConfiguration('task_entry_margin')
+    tf_timeout_sec = LaunchConfiguration('tf_timeout_sec')
     initial_pose_x = LaunchConfiguration('initial_pose_x')
     initial_pose_y = LaunchConfiguration('initial_pose_y')
     initial_pose_yaw = LaunchConfiguration('initial_pose_yaw')
@@ -75,6 +78,9 @@ def generate_launch_description():
                 'coverage_path_service': coverage_path_service,
                 'navigate_to_pose_action': navigate_to_pose_action,
                 'execute_coverage_action': execute_coverage_action,
+                'robot_base_frame': robot_base_frame,
+                'task_entry_margin': task_entry_margin,
+                'tf_timeout_sec': tf_timeout_sec,
                 'use_sim_time': use_sim_time,
             }
         ],
@@ -149,6 +155,9 @@ def generate_launch_description():
         DeclareLaunchArgument('use_sim_time', default_value='false'),
         DeclareLaunchArgument('zigzag_spacing', default_value='1.0'),
         DeclareLaunchArgument('marker_line_width', default_value='0.02'),
+        DeclareLaunchArgument('robot_base_frame', default_value='base_link'),
+        DeclareLaunchArgument('task_entry_margin', default_value='0.2'),
+        DeclareLaunchArgument('tf_timeout_sec', default_value='0.2'),
         DeclareLaunchArgument('initial_pose_x', default_value='0.0'),
         DeclareLaunchArgument('initial_pose_y', default_value='0.0'),
         DeclareLaunchArgument('initial_pose_yaw', default_value='0.0'),
