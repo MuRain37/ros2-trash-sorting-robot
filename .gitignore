@@ -3,3 +3,6 @@ install/**
 log/**
 CLAUDE.md
 
+# VS Code C/C++ extension local index cache
+.vscode/browse.vc.db*
+.vscode/ipch/

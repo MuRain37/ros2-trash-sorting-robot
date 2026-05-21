@@ -12,8 +12,8 @@
     <group name="plan">
         <link name="base_link"/>
         <link name="arm_link0"/>
-        <link name="arm_link2"/>
         <link name="arm_link1"/>
+        <link name="arm_link2"/>
         <link name="arm_link3"/>
         <link name="arm_link4"/>
         <joint name="arm_base_joint"/>

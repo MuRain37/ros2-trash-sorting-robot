@@ -44,7 +44,7 @@
     <material>Gazebo/DarkGrey</material>
   </gazebo>
 
-  <!-- ========== 深度相机（挂在机械臂末端 arm_link3 上） ========== -->
+  <!-- ========== 深度相机（挂在机械臂末端 arm_link4 上） ========== -->
   <xacro:include filename="robot.camera.xacro"/>
 
 </robot>

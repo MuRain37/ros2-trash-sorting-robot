@@ -1,25 +1,10 @@
 moveit_setup_assistant_config:
   urdf:
     package: robot_description
-    relative_path: urdf/robot_arm_moveit.urdf
+    relative_path: urdf/robot.custom.xacro
   srdf:
-    relative_path: config/robot_arm_moveit.srdf
+    relative_path: config/four_wheel_robot.srdf
   package_settings:
     author_name: murain
     author_email: murain@123.com
-    generated_timestamp: 1779280207
-  control_xacro:
-    command:
-      - position
-    state:
-      - position
-      - velocity
-  modified_urdf:
-    xacros:
-      - control_xacro
-  control_xacro:
-    command:
-      - position
-    state:
-      - position
-      - velocity
+    generated_timestamp: 1779357551

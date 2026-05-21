@@ -22,7 +22,6 @@ plan_controller:
       - virtual_tool_pitch_joint
       - virtual_tool_yaw_joint
     command_interfaces:
-      - position
+      []
     state_interfaces:
-      - position
-      - velocity
+      []

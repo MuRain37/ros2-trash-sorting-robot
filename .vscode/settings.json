@@ -1,0 +1,25 @@
+{
+    "ROS2.distro": "humble",
+    "python.autoComplete.extraPaths": [
+        "/home/murain/WorkSpace/robot/install/robot_nav2_behaviors/lib/python3.10/site-packages",
+        "/home/murain/WorkSpace/robot/install/robot_arm/lib/python3.10/site-packages",
+        "/home/murain/WorkSpace/robot/install/robot_interfaces/local/lib/python3.10/dist-packages",
+        "/home/murain/WorkSpace/robot/install/robot_controller/lib/python3.10/site-packages",
+        "/home/murain/WorkSpace/robot/install/realsense2_ros_mqtt_bridge/lib/python3.10/site-packages",
+        "/home/murain/WorkSpace/robot/install/realsense2_camera_msgs/local/lib/python3.10/dist-packages",
+        "/home/murain/WorkSpace/robot/install/imu_ros2_device/lib/python3.10/site-packages",
+        "/opt/ros/humble/lib/python3.10/site-packages",
+        "/opt/ros/humble/local/lib/python3.10/dist-packages"
+    ],
+    "python.analysis.extraPaths": [
+        "/home/murain/WorkSpace/robot/install/robot_nav2_behaviors/lib/python3.10/site-packages",
+        "/home/murain/WorkSpace/robot/install/robot_arm/lib/python3.10/site-packages",
+        "/home/murain/WorkSpace/robot/install/robot_interfaces/local/lib/python3.10/dist-packages",
+        "/home/murain/WorkSpace/robot/install/robot_controller/lib/python3.10/site-packages",
+        "/home/murain/WorkSpace/robot/install/realsense2_ros_mqtt_bridge/lib/python3.10/site-packages",
+        "/home/murain/WorkSpace/robot/install/realsense2_camera_msgs/local/lib/python3.10/dist-packages",
+        "/home/murain/WorkSpace/robot/install/imu_ros2_device/lib/python3.10/site-packages",
+        "/opt/ros/humble/lib/python3.10/site-packages",
+        "/opt/ros/humble/local/lib/python3.10/dist-packages"
+    ]
+}
