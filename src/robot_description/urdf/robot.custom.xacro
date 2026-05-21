@@ -1,11 +1,19 @@
 <?xml version="1.0"?>
 <robot name="four_wheel_robot" xmlns:xacro="http://www.ros.org/wiki/xacro">
+  <xacro:arg name="arm_initial_positions_file" default="$(find robot_description)/config/arm_initial_positions.yaml" />
 
   <!-- 共享模型定义 -->
   <xacro:include filename="$(find robot_description)/urdf/model/robot.model.xacro" />
 
-  <!-- Custom ros2_control hardware interface -->
+  <!-- Custom wheel ros2_control hardware interface -->
   <xacro:include filename="$(find robot_description)/urdf/control/custom.control.xacro" />
+
+  <!-- MoveIt arm ros2_control interface -->
+  <xacro:include filename="$(find robot_description)/urdf/control/arm_moveit.control.xacro" />
+
   <xacro:robot_custom_ros2_control />
+  <xacro:robot_arm_moveit_ros2_control
+    name="ArmMoveItSystem"
+    initial_positions_file="$(arg arm_initial_positions_file)" />
 
 </robot>

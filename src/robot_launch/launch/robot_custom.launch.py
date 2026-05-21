@@ -10,17 +10,15 @@ from launch.event_handlers import OnProcessExit
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import Command, LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import LifecycleNode, Node
+from launch_ros.parameter_descriptions import ParameterValue
 from launch_ros.substitutions import FindPackageShare
 
 
 def include_drive_launch_actions(context):
     use_drive = LaunchConfiguration('use_drive').perform(context).lower()
-    if use_drive == 'true':
-        return create_drive_launch_actions()
-    return []
+    if use_drive != 'true':
+        return []
 
-
-def create_drive_launch_actions():
     ydlidar_pkg_path = get_package_share_directory('ydlidar_ros2_driver')
     imu_filter_params = (
         get_package_share_directory('imu_ros2_device')
@@ -104,10 +102,58 @@ def create_drive_launch_actions():
     ]
 
 
+def include_moveit_launch_actions(context, joint_state_broadcaster_spawner):
+    arm_plan_controller_spawner = Node(
+        package='controller_manager',
+        executable='spawner',
+        arguments=[
+            'plan_controller',
+            '--controller-manager', 'controller_manager',
+        ],
+    )
+
+    move_group = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource([
+            PathJoinSubstitution([
+                FindPackageShare('robot_moveit_config'),
+                'launch', 'move_group.launch.py',
+            ]),
+        ]),
+    )
+
+    arm_controller = Node(
+        package='robot_arm',
+        executable='arm_moveit_target',
+        name='arm_moveit_target_controller',
+        output='screen',
+        parameters=[{
+            'action_name': '/arm_target',
+            'group_name': 'plan',
+            'move_action_name': '/move_action',
+            'shutdown_after_startup_goal': False,
+        }],
+    )
+
+    delay_arm_controller_after_jsb = RegisterEventHandler(
+        event_handler=OnProcessExit(
+            target_action=joint_state_broadcaster_spawner,
+            on_exit=[arm_plan_controller_spawner],
+        ),
+    )
+
+    return [
+        delay_arm_controller_after_jsb,
+        move_group,
+        arm_controller,
+    ]
+
+
 def generate_launch_description():
     pkg_path = get_package_share_directory('robot_description')
+    moveit_pkg_path = get_package_share_directory('robot_moveit_config')
     default_model_path = pkg_path + '/urdf/robot.custom.xacro'
     robot_controllers = pkg_path + '/config/robot_custom_controllers.yaml'
+    moveit_ros2_controllers = moveit_pkg_path + '/config/ros2_controllers.yaml'
 
     declare_model = DeclareLaunchArgument(
         name='model',
@@ -119,6 +165,11 @@ def generate_launch_description():
         default_value='false',
         description='Whether to launch drive sensors and drivers')
 
+    declare_open_loop_control = DeclareLaunchArgument(
+        name='open_loop_control',
+        default_value='false',
+        description='Whether to echo wheel commands as feedback')
+
     robot_description_content = Command(
         ['xacro ', LaunchConfiguration('model')])
 
@@ -128,6 +179,7 @@ def generate_launch_description():
         parameters=[
             {'robot_description': robot_description_content},
             robot_controllers,
+            moveit_ros2_controllers,
         ],
         remappings=[
             ('/robot_diff_drive_controller/cmd_vel_unstamped', '/cmd_vel'),
@@ -145,7 +197,7 @@ def generate_launch_description():
         package='controller_manager',
         executable='spawner',
         arguments=[
-            'robot_joint_state_broadcaster',
+            'joint_state_broadcaster',
             '--controller-manager', 'controller_manager',
         ],
     )
@@ -171,24 +223,27 @@ def generate_launch_description():
         executable='hardware_node',
         name='hardware_bridge',
         output='screen',
-        parameters=[{'debug': True}],
-    )
-
-    arm_controller = Node(
-        package='robot_arm',
-        executable='arm_controller',
-        name='arm_controller',
-        output='screen',
+        parameters=[{
+            'debug': True,
+            'open_loop_control': ParameterValue(
+                LaunchConfiguration('open_loop_control'),
+                value_type=bool,
+            ),
+        }],
     )
 
     return LaunchDescription([
         declare_model,
         declare_use_drive,
+        declare_open_loop_control,
         control_node,
         robot_state_publisher,
         joint_state_broadcaster_spawner,
         delay_controller_after_jsb,
+        OpaqueFunction(
+            function=include_moveit_launch_actions,
+            args=[joint_state_broadcaster_spawner],
+        ),
         hardware_node,
-        arm_controller,
         OpaqueFunction(function=include_drive_launch_actions),
     ])

@@ -2,15 +2,13 @@ from std_msgs.msg import Float64MultiArray
 
 
 class MotorBridge:
-    """电机指令桥接：订阅硬件接口指令，开环回写为反馈。
-
-    接入真实硬件后，调用 publish_feedback() 写入编码器数据。
-    """
+    """电机指令桥接：订阅硬件接口指令，并发布轮速反馈。"""
 
     def __init__(self, node, cmd_topic='diff_test_cmd', fb_topic='diff_test_fb',
-                 cmd_callback=None):
+                 cmd_callback=None, open_loop_control=False):
         self._node = node
         self._cmd_callback = cmd_callback
+        self._open_loop_control = open_loop_control
 
         self._fb_pub = node.create_publisher(
             Float64MultiArray, fb_topic, 10,
@@ -39,4 +37,6 @@ class MotorBridge:
         if self._cmd_callback:
             cmd_str = 'MOTOR:' + ','.join(f'{v:.3f}' for v in msg.data)
             self._cmd_callback(cmd_str.encode('utf-8'))
-        # self.publish_feedback(msg.data)
+
+        if self._open_loop_control:
+            self.publish_feedback(msg.data)

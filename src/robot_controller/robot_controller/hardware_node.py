@@ -18,15 +18,23 @@ class HardwareNode(Node):
         self.declare_parameter('imu_topic', 'imu_data')
         self.declare_parameter('read_rate', 100.0)
         self.declare_parameter('debug', False)
+        self.declare_parameter('open_loop_control', False)
 
         port = self.get_parameter('port').value
         baudrate = self.get_parameter('baudrate').value
         read_rate = self.get_parameter('read_rate').value
         debug = self.get_parameter('debug').value
+        self._open_loop_control = self.get_parameter(
+            'open_loop_control'
+        ).value
 
         self._serial = SerialPort(port, baudrate, debug=debug, logger=self.get_logger())
 
-        self._motor = MotorBridge(self, cmd_callback=self._serial.write)
+        self._motor = MotorBridge(
+            self,
+            cmd_callback=self._serial.write,
+            open_loop_control=self._open_loop_control,
+        )
 
         self._imu_pub = self.create_publisher(Imu, 'imu_data', 10)
 
@@ -34,7 +42,8 @@ class HardwareNode(Node):
         self._timer = self.create_timer(period, self._read_serial)
 
         self.get_logger().info(
-            f'Hardware bridge started (port: {port}, baudrate: {baudrate}, rate: {read_rate}Hz)'
+            f'Hardware bridge started (port: {port}, baudrate: {baudrate}, '
+            f'rate: {read_rate}Hz, open_loop_control: {self._open_loop_control})'
         )
 
     def _read_serial(self):
@@ -58,7 +67,8 @@ class HardwareNode(Node):
                     pass
         if encoder is not None:
             self.get_logger().info(f'Parsed encoder: {encoder}')
-            self._motor.publish_feedback(encoder)
+            if not self._open_loop_control:
+                self._motor.publish_feedback(encoder)
 
     def destroy_node(self):
         self._serial.close()

@@ -12,7 +12,10 @@
   <exec_depend>robot_arm</exec_depend>
   <exec_depend>robot_controller</exec_depend>
   <exec_depend>robot_description</exec_depend>
+  <exec_depend>robot_moveit_config</exec_depend>
+  <exec_depend>moveit_configs_utils</exec_depend>
   <exec_depend>robot_nav2_behaviors</exec_depend>
+  <exec_depend>rviz2</exec_depend>
 
   <test_depend>ament_lint_auto</test_depend>
   <test_depend>ament_lint_common</test_depend>

@@ -5,7 +5,6 @@ from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
-from launch_ros.actions import Node
 
 
 def generate_launch_description():
@@ -25,14 +24,18 @@ def generate_launch_description():
         ]),
     )
 
-    rviz = Node(
-        package='rviz2',
-        executable='rviz2',
-        arguments=['-d', LaunchConfiguration('rviz_config')],
+    moveit_rviz = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource([
+            get_package_share_directory('robot_moveit_config'),
+            '/launch/moveit_rviz.launch.py',
+        ]),
+        launch_arguments={
+            'rviz_config': LaunchConfiguration('rviz_config'),
+        }.items(),
     )
 
     return LaunchDescription([
         declare_rviz,
         custom_launch,
-        rviz,
+        moveit_rviz,
     ])

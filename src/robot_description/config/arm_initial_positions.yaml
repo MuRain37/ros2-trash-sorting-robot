@@ -1,0 +1,11 @@
+# Default initial positions for the arm ros2_control system.
+
+initial_positions:
+  arm_base_joint: 0
+  arm_elbow_joint: 0
+  arm_shoulder_joint: 0
+  arm_tool_rotate_joint: 0
+  arm_wrist_joint: 0
+  virtual_tool_pitch_joint: 0
+  virtual_tool_roll_joint: 0
+  virtual_tool_yaw_joint: 0
