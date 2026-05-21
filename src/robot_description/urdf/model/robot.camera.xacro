@@ -43,7 +43,7 @@
   <joint name="camera_bracket_joint" type="fixed">
     <parent link="arm_link4"/>
     <child link="camera_bracket"/>
-    <origin xyz="${-arm_w/2 - camera_bracket_height/2} 0 0" rpy="0 ${-PI/2} 0"/>
+    <origin xyz="${-gripper_base_length/2 - camera_bracket_height/2} 0 0" rpy="0 ${-PI/2} 0"/>
   </joint>
 
   <!-- ========== 相机链接 ========== -->
