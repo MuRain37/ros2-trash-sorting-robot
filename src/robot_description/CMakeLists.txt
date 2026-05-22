@@ -22,6 +22,7 @@ find_package(std_msgs REQUIRED)
 add_library(
   robot_description
   SHARED
+  src/arm_robot_hardware.cpp
   src/diff_robot_hardware.cpp
 )
 

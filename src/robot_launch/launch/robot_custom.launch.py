@@ -168,7 +168,17 @@ def generate_launch_description():
     declare_open_loop_control = DeclareLaunchArgument(
         name='open_loop_control',
         default_value='false',
+        description='Default open-loop feedback for motor and arm bridges')
+
+    declare_motor_open_loop_control = DeclareLaunchArgument(
+        name='motor_open_loop_control',
+        default_value=LaunchConfiguration('open_loop_control'),
         description='Whether to echo wheel commands as feedback')
+
+    declare_arm_open_loop_control = DeclareLaunchArgument(
+        name='arm_open_loop_control',
+        default_value=LaunchConfiguration('open_loop_control'),
+        description='Whether to echo arm position commands as feedback')
 
     robot_description_content = Command(
         ['xacro ', LaunchConfiguration('model')])
@@ -229,6 +239,14 @@ def generate_launch_description():
                 LaunchConfiguration('open_loop_control'),
                 value_type=bool,
             ),
+            'motor_open_loop_control': ParameterValue(
+                LaunchConfiguration('motor_open_loop_control'),
+                value_type=bool,
+            ),
+            'arm_open_loop_control': ParameterValue(
+                LaunchConfiguration('arm_open_loop_control'),
+                value_type=bool,
+            ),
         }],
     )
 
@@ -236,6 +254,8 @@ def generate_launch_description():
         declare_model,
         declare_use_drive,
         declare_open_loop_control,
+        declare_motor_open_loop_control,
+        declare_arm_open_loop_control,
         control_node,
         robot_state_publisher,
         joint_state_broadcaster_spawner,

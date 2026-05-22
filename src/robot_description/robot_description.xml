@@ -7,4 +7,11 @@
     Four-wheel differential drive robot hardware interface.
     </description>
   </class>
+  <class name="robot_description/ArmRobotHardware"
+         type="robot_description::ArmRobotHardware"
+         base_class_type="hardware_interface::SystemInterface">
+    <description>
+    Topic-based arm position hardware interface.
+    </description>
+  </class>
 </library>
