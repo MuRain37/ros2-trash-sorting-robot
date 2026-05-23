@@ -10,6 +10,7 @@ from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.node import Node
 from rclpy.parameter import Parameter
 
+from robot_arm.arm_link_lengths import install_urdf_loader
 from robot_arm.kinematics import solve
 from robot_interfaces.action import ArmTarget
 
@@ -76,6 +77,8 @@ class ArmMoveItTargetController(Node):
         self._shutdown_after_startup_goal = bool(
             self.get_parameter('shutdown_after_startup_goal').value
         )
+
+        install_urdf_loader(self)
 
         callback_group = ReentrantCallbackGroup()
         self._move_group = ActionClient(
@@ -183,7 +186,7 @@ class ArmMoveItTargetController(Node):
             angle=pitch,
             verify=False,
             plot=False,
-            collision_check=True,
+            collision_check=False,
         )
         if ik_result is False:
             self.get_logger().warning(

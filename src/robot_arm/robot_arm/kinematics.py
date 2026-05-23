@@ -10,13 +10,22 @@ JOINT_LIMITS = {
     'theta4': (0, 180),     # 末端关节
 }
 
-# 机械臂连杆长度配置
+# 连杆长度（cm），可通过 set_link_lengths() 从外部修改
 LINK_LENGTHS = {
-    'l1': 3.38648,    # 基座高度
-    'l2': 12.9416,  # 大臂长度
-    'l3': 12.9444,   # 小臂长度
-    'l4': 11.38648,  # 末端执行器长度
+    'l1': 3.38648,
+    'l2': 12.9416,
+    'l3': 12.9444,
+    'l4': 11.38648,
 }
+
+
+def set_link_lengths(l1, l2, l3, l4):
+    """修改连杆长度（cm）。通常在启动时从 URDF 读取后调用。"""
+    LINK_LENGTHS['l1'] = l1
+    LINK_LENGTHS['l2'] = l2
+    LINK_LENGTHS['l3'] = l3
+    LINK_LENGTHS['l4'] = l4
+
 
 LINK_RADIUS = 2.0  # 连杆碰撞半径
 
@@ -254,7 +263,7 @@ def solve(target, angle=None, verify=False, plot=False, collision_check=True):
         plot: 是否绘制机械臂（默认False）
         collision_check: 是否检测连杆碰撞（默认True）
 
-    连杆长度和关节范围从 LINK_LENGTHS / JOINT_LIMITS 配置读取。
+    连杆长度从 LINK_LENGTHS 配置读取，可通过 set_link_lengths() 修改。
 
     返回:
         (theta1, theta2, theta3, theta4, angle) 角度（度），或 False 表示不可达

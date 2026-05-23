@@ -7,6 +7,7 @@ from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.node import Node
 from sensor_msgs.msg import JointState
 
+from robot_arm.arm_link_lengths import install_urdf_loader
 from robot_arm.kinematics import solve
 from robot_interfaces.action import ArmTarget
 from std_msgs.msg import Float64MultiArray
@@ -37,6 +38,8 @@ class ArmController(Node):
         self._publish_fwd = self.get_parameter('publish_forward_command').value
 
         self._current = list(self.get_parameter('initial_pose').value)
+
+        install_urdf_loader(self)
 
         self._joint_pub = self.create_publisher(JointState, 'joint_states', 10)
         self._cmd_pub = self.create_publisher(Float64MultiArray, '/arm_forward_controller/commands', 10)
