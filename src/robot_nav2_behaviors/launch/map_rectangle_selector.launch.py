@@ -1,3 +1,6 @@
+import os
+
+from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, TimerAction
 from launch.substitutions import LaunchConfiguration
@@ -5,6 +8,12 @@ from launch_ros.actions import Node
 
 
 def generate_launch_description():
+    default_map_yaml = os.path.join(
+        get_package_share_directory('robot_navgation2'),
+        'maps',
+        'room.yaml',
+    )
+
     map_yaml = LaunchConfiguration('map_yaml')
     use_sim_time = LaunchConfiguration('use_sim_time')
     frame_id = LaunchConfiguration('frame_id')
@@ -146,10 +155,7 @@ def generate_launch_description():
     return LaunchDescription([
         DeclareLaunchArgument(
             'map_yaml',
-            default_value=(
-                '/home/murain/WorkSpace/robot/'
-                'src/robot_navgation2/maps/room.yaml'
-            ),
+            default_value=default_map_yaml,
         ),
         DeclareLaunchArgument('frame_id', default_value='map'),
         DeclareLaunchArgument('use_sim_time', default_value='false'),

@@ -3,13 +3,15 @@ import os
 import cv2
 import numpy as np
 import rclpy
+from ament_index_python.packages import get_package_share_directory
 from rclpy.node import Node
 from robot_interfaces.srv import AddCoverageRectangle
 
 
-DEFAULT_MAP_YAML = (
-    '/home/murain/WorkSpace/robot/'
-    'src/robot_navgation2/maps/room.yaml'
+DEFAULT_MAP_YAML = os.path.join(
+    get_package_share_directory('robot_navgation2'),
+    'maps',
+    'room.yaml',
 )
 
 
