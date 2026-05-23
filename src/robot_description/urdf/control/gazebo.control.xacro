@@ -35,6 +35,7 @@
 
     <!-- ===== 机械臂 ros2_control 接口 ===== -->
     <xacro:include filename="arm.joints.xacro"/>
+    <xacro:include filename="wheel.joints.xacro"/>
 
     <!-- ===== 机械臂：gazebo_ros2_control ===== -->
     <!-- ros2_control 放在 robot 级别，plugin 内部只放 parameters -->
@@ -44,6 +45,7 @@
                 <plugin>gazebo_ros2_control/GazeboSystem</plugin>
             </hardware>
             <xacro:arm_joints/>
+            <xacro:wheel_state_joints/>
         </ros2_control>
         <gazebo>
             <plugin name="gazebo_ros2_control" filename="libgazebo_ros2_control.so">

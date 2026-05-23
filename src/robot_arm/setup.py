@@ -24,7 +24,6 @@ setup(
     },
     entry_points={
         'console_scripts': [
-            'arm_controller = robot_arm.arm_controller:main',
             'arm_moveit_target = robot_arm.moveit_target_controller:main',
         ],
     },

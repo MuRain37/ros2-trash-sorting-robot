@@ -3,6 +3,8 @@ import os
 import launch
 import launch_ros
 from ament_index_python.packages import get_package_share_directory
+from launch.conditions import IfCondition
+from launch.event_handlers import OnProcessExit
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 
 
@@ -26,6 +28,16 @@ def generate_launch_description():
         'rviz_config',
         default_value=default_rviz_config_path,
         description='RViz config file path')
+
+    declare_use_rviz = launch.actions.DeclareLaunchArgument(
+        'use_rviz',
+        default_value='True',
+        description='whether to start RViz')
+
+    declare_gazebo_gui = launch.actions.DeclareLaunchArgument(
+        'gazebo_gui',
+        default_value='False',
+        description='whether to start Gazebo GUI')
 
     robot_description = launch_ros.parameter_descriptions.ParameterValue(
         launch.substitutions.Command(
@@ -52,6 +64,7 @@ def generate_launch_description():
         launch_arguments=[
             ('world', default_world_path),
             ('headless', 'true'),
+            ('gui', launch.substitutions.LaunchConfiguration('gazebo_gui')),
         ]
     )
 
@@ -88,13 +101,14 @@ def generate_launch_description():
         package='rviz2',
         executable='rviz2',
         arguments=['-d', launch.substitutions.LaunchConfiguration('rviz_config')],
+        condition=IfCondition(launch.substitutions.LaunchConfiguration('use_rviz')),
     )
 
-    arm_forward_spawner = launch_ros.actions.Node(
+    arm_plan_controller_spawner = launch_ros.actions.Node(
         package='controller_manager',
         executable='spawner',
         arguments=[
-            'arm_forward_controller',
+            'plan_controller',
             '-c', '/controller_manager',
             '--param-file', controller_config_path,
         ],
@@ -104,34 +118,66 @@ def generate_launch_description():
         package='controller_manager',
         executable='spawner',
         arguments=[
-            'arm_joint_state_broadcaster',
+            'joint_state_broadcaster',
             '-c', '/controller_manager',
             '--param-file', controller_config_path,
         ],
     )
 
-    arm_controller = launch_ros.actions.Node(
+    delay_plan_controller_after_jsb = launch.actions.RegisterEventHandler(
+        event_handler=OnProcessExit(
+            target_action=arm_joint_state_spawner,
+            on_exit=[arm_plan_controller_spawner],
+        ),
+    )
+
+    move_group = launch.actions.IncludeLaunchDescription(
+        PythonLaunchDescriptionSource([
+            os.path.join(
+                get_package_share_directory('robot_moveit_config'),
+                'launch',
+                'move_group.launch.py',
+            ),
+        ]),
+        launch_arguments={
+            'use_sim_time': launch.substitutions.LaunchConfiguration('use_sim_time'),
+        }.items(),
+    )
+
+    arm_moveit_target_controller = launch_ros.actions.Node(
         package='robot_arm',
-        executable='arm_controller',
-        name='arm_controller',
+        executable='arm_moveit_target',
+        name='arm_moveit_target_controller',
         output='screen',
         parameters=[{
-            'use_sim_time': True,
-            'publish_joint_states': False,
-            'publish_forward_command': True,
+            'use_sim_time': launch.substitutions.LaunchConfiguration('use_sim_time'),
+            'action_name': '/arm_target',
+            'group_name': 'plan',
+            'move_action_name': '/move_action',
+            'shutdown_after_startup_goal': False,
         }],
+    )
+
+    delay_arm_target_after_plan_controller = launch.actions.RegisterEventHandler(
+        event_handler=OnProcessExit(
+            target_action=arm_plan_controller_spawner,
+            on_exit=[arm_moveit_target_controller],
+        ),
     )
 
     return launch.LaunchDescription([
         action_declare_arg_mode_path,
         declare_rviz,
+        declare_use_rviz,
+        declare_gazebo_gui,
         declare_use_sim_time_cmd,
         robot_state_publisher_node,
         launch_gazebo,
         spawn_entity_node,
-        arm_forward_spawner,
         arm_joint_state_spawner,
-        arm_controller,
+        delay_plan_controller_after_jsb,
+        move_group,
+        delay_arm_target_after_plan_controller,
         pointcloud_to_laserscan_node,
         rviz_node,
     ])

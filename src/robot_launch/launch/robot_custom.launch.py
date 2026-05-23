@@ -127,6 +127,7 @@ def include_moveit_launch_actions(context, joint_state_broadcaster_spawner):
         name='arm_moveit_target_controller',
         output='screen',
         parameters=[{
+            'use_sim_time': False,
             'action_name': '/arm_target',
             'group_name': 'plan',
             'move_action_name': '/move_action',
@@ -141,10 +142,17 @@ def include_moveit_launch_actions(context, joint_state_broadcaster_spawner):
         ),
     )
 
+    delay_arm_controller_after_plan = RegisterEventHandler(
+        event_handler=OnProcessExit(
+            target_action=arm_plan_controller_spawner,
+            on_exit=[arm_controller],
+        ),
+    )
+
     return [
         delay_arm_controller_after_jsb,
+        delay_arm_controller_after_plan,
         move_group,
-        arm_controller,
     ]
 
 

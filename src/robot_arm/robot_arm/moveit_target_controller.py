@@ -17,6 +17,11 @@ from robot_interfaces.action import ArmTarget
 
 DEG_TO_RAD = math.pi / 180.0
 ZERO_ANGLES = [0.0, 0.0, 0.0, 0.0]
+MOVEIT_ERROR_NAMES = {
+    getattr(MoveItErrorCodes, name): name
+    for name in dir(MoveItErrorCodes)
+    if name.isupper() and isinstance(getattr(MoveItErrorCodes, name), int)
+}
 
 
 class ArmMoveItTargetController(Node):
@@ -253,8 +258,10 @@ class ArmMoveItTargetController(Node):
         result = result_future.result().result
         error_code = result.error_code.val
         if error_code != MoveItErrorCodes.SUCCESS:
+            error_name = MOVEIT_ERROR_NAMES.get(error_code, 'UNKNOWN')
             self.get_logger().error(
-                f'MoveIt failed with error_code={error_code}'
+                f'MoveIt failed with error_code={error_code} '
+                f'({error_name})'
             )
             return False, target_angles_deg
 
