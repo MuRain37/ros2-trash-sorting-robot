@@ -33,7 +33,6 @@ def generate_launch_description():
             'action_name': '/arm_target',
             'group_name': 'plan',
             'move_action_name': '/move_action',
-            'shutdown_after_startup_goal': False,
         }],
     )
 
