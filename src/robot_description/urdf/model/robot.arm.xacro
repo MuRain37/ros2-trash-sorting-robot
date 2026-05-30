@@ -101,12 +101,12 @@
     </link>
   </xacro:macro>
 
-  <joint name="arm_base_joint" type="revolute">
+  <joint name="arm_base_joint" type="continuous">
     <parent link="base_link"/>
     <child link="arm_link0"/>
     <origin xyz="${arm_origin_x} ${arm_origin_y} ${arm_origin_z}" rpy="0 0 0"/>
     <axis xyz="0 0 1"/>
-    <limit lower="${-PI}" upper="${PI}" effort="10" velocity="3.14"/>
+    <limit effort="10" velocity="3.14"/>
   </joint>
 
   <xacro:arm_link name="arm_link0" length="${arm_l1}" mass="${arm_m0}" color="0.1 0.1 0.1"/>
@@ -114,12 +114,12 @@
     <material>Gazebo/DarkGrey</material>
   </gazebo>
 
-  <joint name="arm_shoulder_joint" type="revolute">
+  <joint name="arm_shoulder_joint" type="continuous">
     <parent link="arm_link0"/>
     <child link="arm_link1"/>
     <origin xyz="0 0 ${arm_l1}" rpy="0 0 0"/>
     <axis xyz="0 1 0"/>
-    <limit lower="${-PI/2}" upper="${PI}" effort="10" velocity="3.14"/>
+    <limit effort="10" velocity="3.14"/>
   </joint>
 
   <xacro:arm_link name="arm_link1" length="${arm_l2}" mass="${arm_m1}" color="0.5 0.5 0.5"/>
@@ -127,12 +127,12 @@
     <material>Gazebo/Grey</material>
   </gazebo>
 
-  <joint name="arm_elbow_joint" type="revolute">
+  <joint name="arm_elbow_joint" type="continuous">
     <parent link="arm_link1"/>
     <child link="arm_link2"/>
     <origin xyz="0 0 ${arm_l2}" rpy="0 0 0"/>
     <axis xyz="0 1 0"/>
-    <limit lower="0" upper="${PI}" effort="10" velocity="3.14"/>
+    <limit effort="10" velocity="3.14"/>
   </joint>
 
   <xacro:arm_link name="arm_link2" length="${arm_l3}" mass="${arm_m2}" color="0.1 0.1 0.1"/>
@@ -140,12 +140,12 @@
     <material>Gazebo/DarkGrey</material>
   </gazebo>
 
-  <joint name="arm_wrist_joint" type="revolute">
+  <joint name="arm_wrist_joint" type="continuous">
     <parent link="arm_link2"/>
     <child link="arm_link3"/>
     <origin xyz="0 0 ${arm_l3}" rpy="0 0 0"/>
     <axis xyz="0 1 0"/>
-    <limit lower="0" upper="${PI}" effort="10" velocity="3.14"/>
+    <limit effort="10" velocity="3.14"/>
   </joint>
 
   <xacro:arm_link name="arm_link3" length="${arm_l4}" mass="${arm_m3}" color="0.5 0.5 0.5"/>
@@ -153,12 +153,12 @@
     <material>Gazebo/Grey</material>
   </gazebo>
 
-  <joint name="arm_tool_rotate_joint" type="revolute">
+  <joint name="arm_tool_rotate_joint" type="continuous">
     <parent link="arm_link3"/>
     <child link="arm_link4"/>
     <origin xyz="0 0 ${arm_l4}" rpy="0 0 0"/>
     <axis xyz="0 0 1"/>
-    <limit lower="${-PI}" upper="${PI}" effort="10" velocity="3.14"/>
+    <limit effort="10" velocity="3.14"/>
   </joint>
 
   <link name="arm_link4">
@@ -196,12 +196,12 @@
     <material>Gazebo/Black</material>
   </gazebo>
 
-  <joint name="virtual_tool_roll_joint" type="revolute">
+  <joint name="virtual_tool_roll_joint" type="continuous">
     <parent link="arm_link4"/>
     <child link="tool_roll_link"/>
     <origin xyz="0 0 ${arm_l5}" rpy="0 0 0"/>
     <axis xyz="1 0 0"/>
-    <limit lower="${-PI}" upper="${PI}" effort="1" velocity="3.14"/>
+    <limit effort="1" velocity="3.14"/>
   </joint>
 
   <link name="tool_roll_link">
@@ -211,12 +211,12 @@
     </inertial>
   </link>
 
-  <joint name="virtual_tool_pitch_joint" type="revolute">
+  <joint name="virtual_tool_pitch_joint" type="continuous">
     <parent link="tool_roll_link"/>
     <child link="tool_pitch_link"/>
     <origin xyz="0 0 0" rpy="0 0 0"/>
     <axis xyz="0 1 0"/>
-    <limit lower="${-PI}" upper="${PI}" effort="1" velocity="3.14"/>
+    <limit effort="1" velocity="3.14"/>
   </joint>
 
   <link name="tool_pitch_link">
@@ -226,12 +226,12 @@
     </inertial>
   </link>
 
-  <joint name="virtual_tool_yaw_joint" type="revolute">
+  <joint name="virtual_tool_yaw_joint" type="continuous">
     <parent link="tool_pitch_link"/>
     <child link="tool0"/>
     <origin xyz="0 0 0" rpy="0 0 0"/>
     <axis xyz="0 0 1"/>
-    <limit lower="${-PI}" upper="${PI}" effort="1" velocity="3.14"/>
+    <limit effort="1" velocity="3.14"/>
   </joint>
 
   <link name="tool0">
