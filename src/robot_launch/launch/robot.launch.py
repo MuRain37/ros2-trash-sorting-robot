@@ -217,7 +217,7 @@ def generate_launch_description():
         ),
         DeclareLaunchArgument(
             'gazebo_gui',
-            default_value='false',
+            default_value='true',
             description='Start Gazebo GUI when mode=gazebo',
         ),
         DeclareLaunchArgument(

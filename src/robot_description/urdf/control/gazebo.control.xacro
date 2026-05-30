@@ -39,12 +39,12 @@
 
     <!-- ===== 机械臂：gazebo_ros2_control ===== -->
     <!-- ros2_control 放在 robot 级别，plugin 内部只放 parameters -->
-    <xacro:macro name="robot_arm_control">
+    <xacro:macro name="robot_arm_control" params="initial_positions_file">
         <ros2_control name="RobotArmGazeboSystem" type="system">
             <hardware>
                 <plugin>gazebo_ros2_control/GazeboSystem</plugin>
             </hardware>
-            <xacro:arm_joints/>
+            <xacro:arm_joints initial_positions_file="${initial_positions_file}"/>
             <xacro:wheel_state_joints/>
         </ros2_control>
         <gazebo>

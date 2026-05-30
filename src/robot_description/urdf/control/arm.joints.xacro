@@ -1,45 +1,63 @@
 <?xml version="1.0"?>
 <robot xmlns:xacro="http://www.ros.org/wiki/xacro">
 
-    <xacro:macro name="arm_joints">
+    <xacro:macro name="arm_joints" params="initial_positions_file">
+        <xacro:property name="initial_positions" value="${xacro.load_yaml(initial_positions_file)['initial_positions']}"/>
+
         <joint name="arm_base_joint">
             <command_interface name="position"/>
-            <state_interface name="position"/>
+            <state_interface name="position">
+                <param name="initial_value">${initial_positions['arm_base_joint']}</param>
+            </state_interface>
             <state_interface name="velocity"/>
         </joint>
         <joint name="arm_shoulder_joint">
             <command_interface name="position"/>
-            <state_interface name="position"/>
+            <state_interface name="position">
+                <param name="initial_value">${initial_positions['arm_shoulder_joint']}</param>
+            </state_interface>
             <state_interface name="velocity"/>
         </joint>
         <joint name="arm_elbow_joint">
             <command_interface name="position"/>
-            <state_interface name="position"/>
+            <state_interface name="position">
+                <param name="initial_value">${initial_positions['arm_elbow_joint']}</param>
+            </state_interface>
             <state_interface name="velocity"/>
         </joint>
         <joint name="arm_wrist_joint">
             <command_interface name="position"/>
-            <state_interface name="position"/>
+            <state_interface name="position">
+                <param name="initial_value">${initial_positions['arm_wrist_joint']}</param>
+            </state_interface>
             <state_interface name="velocity"/>
         </joint>
         <joint name="arm_tool_rotate_joint">
             <command_interface name="position"/>
-            <state_interface name="position"/>
+            <state_interface name="position">
+                <param name="initial_value">${initial_positions['arm_tool_rotate_joint']}</param>
+            </state_interface>
             <state_interface name="velocity"/>
         </joint>
         <joint name="virtual_tool_roll_joint">
             <command_interface name="position"/>
-            <state_interface name="position"/>
+            <state_interface name="position">
+                <param name="initial_value">${initial_positions['virtual_tool_roll_joint']}</param>
+            </state_interface>
             <state_interface name="velocity"/>
         </joint>
         <joint name="virtual_tool_pitch_joint">
             <command_interface name="position"/>
-            <state_interface name="position"/>
+            <state_interface name="position">
+                <param name="initial_value">${initial_positions['virtual_tool_pitch_joint']}</param>
+            </state_interface>
             <state_interface name="velocity"/>
         </joint>
         <joint name="virtual_tool_yaw_joint">
             <command_interface name="position"/>
-            <state_interface name="position"/>
+            <state_interface name="position">
+                <param name="initial_value">${initial_positions['virtual_tool_yaw_joint']}</param>
+            </state_interface>
             <state_interface name="velocity"/>
         </joint>
     </xacro:macro>
