@@ -26,6 +26,8 @@
   <xacro:property name="gripper_base_mass" value="${arm_m4 * 0.70}"/>
   <xacro:property name="gripper_finger_mass" value="${arm_m4 * 0.15}"/>
   <xacro:property name="tool_virtual_mass" value="0.001"/>
+  <xacro:property name="tool_virtual_joint_damping" value="5.0"/>
+  <xacro:property name="tool_virtual_joint_friction" value="0.1"/>
 
   <xacro:property name="arm_origin_x" value="${chassis_length/2 - 0.05}"/>
   <xacro:property name="arm_origin_y" value="0.0"/>
@@ -202,6 +204,7 @@
     <origin xyz="0 0 ${arm_l5}" rpy="0 0 0"/>
     <axis xyz="1 0 0"/>
     <limit effort="1" velocity="3.14"/>
+    <dynamics damping="${tool_virtual_joint_damping}" friction="${tool_virtual_joint_friction}"/>
   </joint>
 
   <link name="tool_roll_link">
@@ -217,6 +220,7 @@
     <origin xyz="0 0 0" rpy="0 0 0"/>
     <axis xyz="0 1 0"/>
     <limit effort="1" velocity="3.14"/>
+    <dynamics damping="${tool_virtual_joint_damping}" friction="${tool_virtual_joint_friction}"/>
   </joint>
 
   <link name="tool_pitch_link">
@@ -232,6 +236,7 @@
     <origin xyz="0 0 0" rpy="0 0 0"/>
     <axis xyz="0 0 1"/>
     <limit effort="1" velocity="3.14"/>
+    <dynamics damping="${tool_virtual_joint_damping}" friction="${tool_virtual_joint_friction}"/>
   </joint>
 
   <link name="tool0">
