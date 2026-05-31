@@ -2,10 +2,37 @@ import threading
 import serial
 
 
-class SerialPort:
-    """STM32 串口通信模块。"""
+FRAME_HEAD = bytes([0xAA, 0xBB])
+FRAME_OVERHEAD = 5
+MAX_PAYLOAD_LEN = 250
 
-    def __init__(self, port='/dev/ttyACM0', baudrate=115200, debug=False, logger=None):
+
+def build_frame(cmd, payload=b''):
+    """Build one STM32 binary protocol frame."""
+    if not 0 <= cmd <= 0xFF:
+        raise ValueError('cmd must fit in one byte')
+    if payload is None:
+        payload = b''
+    payload = bytes(payload)
+    if len(payload) > MAX_PAYLOAD_LEN:
+        raise ValueError(
+            f'payload too large: {len(payload)} > {MAX_PAYLOAD_LEN}'
+        )
+
+    frame = bytearray(FRAME_HEAD)
+    frame.append(cmd)
+    frame.append(len(payload))
+    frame.extend(payload)
+    frame.append(sum(frame) & 0xFF)
+    return bytes(frame)
+
+
+class SerialPort:
+    """STM32 serial communication module."""
+
+    def __init__(
+        self, port='/dev/ttyACM0', baudrate=115200, debug=False, logger=None
+    ):
         self._port_name = port
         self._baudrate = baudrate
         self._debug = debug
@@ -35,7 +62,9 @@ class SerialPort:
             self._serial.dtr = False
             self._serial.reset_input_buffer()
             self._running = True
-            self._rx_thread = threading.Thread(target=self._rx_task, daemon=True)
+            self._rx_thread = threading.Thread(
+                target=self._rx_task, daemon=True
+            )
             self._rx_thread.start()
             self._log(f'[SerialPort] 已打开 {self._port_name} @ {self._baudrate}')
             return True
@@ -50,29 +79,62 @@ class SerialPort:
         if self._serial and self._serial.is_open:
             self._serial.close()
 
-    def read_raw(self, n=0):
-        """读取接收缓冲区中的原始字节。
-
-        n > 0 时返回恰好 n 字节（不足则返回实际读取量）。
-        n = 0 时返回缓冲区中所有可用字节。
-        """
+    def read_frames(self, max_frames=None):
+        """Read complete binary protocol frames from the receive buffer."""
+        frames = []
         with self._lock:
-            if n > 0 and len(self._rx_buf) >= n:
+            while max_frames is None or len(frames) < max_frames:
+                head_idx = self._rx_buf.find(FRAME_HEAD)
+                if head_idx < 0:
+                    if len(self._rx_buf) > 1:
+                        del self._rx_buf[:-1]
+                    break
+
+                if head_idx > 0:
+                    del self._rx_buf[:head_idx]
+
+                if len(self._rx_buf) < FRAME_OVERHEAD:
+                    break
+
+                payload_len = self._rx_buf[3]
+                frame_len = FRAME_OVERHEAD + payload_len
+                if payload_len > MAX_PAYLOAD_LEN:
+                    del self._rx_buf[0]
+                    continue
+                if len(self._rx_buf) < frame_len:
+                    break
+
+                frame = bytes(self._rx_buf[:frame_len])
+
+                checksum = sum(frame[:-1]) & 0xFF
+                if checksum != frame[-1]:
+                    if self._debug:
+                        self._log(
+                            '[SerialPort] 丢弃校验失败帧: '
+                            f'expected=0x{checksum:02X}, got=0x{frame[-1]:02X}'
+                        )
+                    del self._rx_buf[0]
+                    continue
+
+                del self._rx_buf[:frame_len]
+                frames.append((frame[2], frame[4:-1]))
+
+        return frames
+
+    def read_raw(self, n=0):
+        """Read raw bytes from the receive buffer for debugging."""
+        with self._lock:
+            if n > 0:
                 data = bytes(self._rx_buf[:n])
-                del self._rx_buf[:n]
+                del self._rx_buf[:len(data)]
                 return data
-            elif n == 0 and len(self._rx_buf) > 0:
-                last_nl = self._rx_buf.rfind(b'\n')
-                if last_nl >= 0:
-                    data = bytes(self._rx_buf[:last_nl + 1])
-                    del self._rx_buf[:last_nl + 1]
-                else:
-                    data = b''
-                return data
-        return b''
+            data = bytes(self._rx_buf)
+            self._rx_buf.clear()
+            return data
 
     def write(self, data):
-        """发送数据到串口。
+        """
+        Send data to the serial port.
 
         data: bytes 或 bytearray 或 list[int]
         """
@@ -89,6 +151,10 @@ class SerialPort:
         except serial.SerialException as e:
             self._log(f'[SerialPort] 写入失败: {e}')
             return 0
+
+    def write_frame(self, cmd, payload=b''):
+        """Build and send one binary protocol frame."""
+        return self.write(build_frame(cmd, payload))
 
     def _rx_task(self):
         while self._running:
@@ -107,19 +173,21 @@ class SerialPort:
 
 def main():
 
-    data = "MOTOR:0,0,0,0"
+    import struct
+
+    payload = struct.pack('<ffff', 0.0, 0.0, 0.0, 0.0)
     read_response = False
     timeout = 1.0
     sp = SerialPort()
-    sp.write(data.encode('utf-8'))
+    sp.write_frame(0x01, payload)
 
     if read_response:
         import time
         deadline = time.time() + timeout
         while time.time() < deadline:
-            resp = sp.read_raw()
-            if resp:
-                print(f'收到: {resp.decode("utf-8", errors="replace")}')
+            frames = sp.read_frames()
+            if frames:
+                print(f'收到: {frames!r}')
                 break
             time.sleep(0.05)
         else:

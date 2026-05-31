@@ -1,5 +1,7 @@
 from std_msgs.msg import Float64MultiArray
 
+from robot_controller import packet_protocol
+
 
 class ArmBridge:
     """Arm bridge for position commands and feedback."""
@@ -32,8 +34,12 @@ class ArmBridge:
         command = [float(value) for value in msg.data[:self._joint_count]]
 
         if self._cmd_callback:
-            cmd_str = 'ARM_POS:' + ','.join(f'{v:.6f}' for v in command)
-            self._cmd_callback(cmd_str.encode('utf-8'))
+            for index, position in enumerate(command):
+                servo_id = index + 1
+                payload = packet_protocol.pack_servo_command(
+                    servo_id, position
+                )
+                self._cmd_callback(packet_protocol.PACKET_CMD_SERVO, payload)
 
         if self._open_loop_control:
             self._positions = command
@@ -45,6 +51,17 @@ class ArmBridge:
         msg = Float64MultiArray()
         msg.data = list(self._positions)
         self._fb_pub.publish(msg)
+
+    def publish_servo_feedback(self, servo_id, position):
+        """Update one 1-based servo feedback value and publish all joints."""
+        if not 1 <= servo_id <= self._joint_count:
+            self._node.get_logger().warning(
+                f'Ignoring servo feedback with invalid id: {servo_id}'
+            )
+            return
+
+        self._positions[servo_id - 1] = float(position)
+        self.publish_feedback(self._positions)
 
     def _publish_feedback(self):
         self.publish_feedback(self._positions)
