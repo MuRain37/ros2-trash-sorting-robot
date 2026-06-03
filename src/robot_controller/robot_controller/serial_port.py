@@ -173,13 +173,17 @@ class SerialPort:
 
 def main():
 
-    import struct
+    from robot_controller.packet_protocol import (
+        PACKET_CMD_MOTOR,
+        pack_motor_command,
+    )
 
-    payload = struct.pack('<ffff', 0.0, 0.0, 0.0, 0.0)
     read_response = False
     timeout = 1.0
     sp = SerialPort()
-    sp.write_frame(0x01, payload)
+    
+    payload = pack_motor_command([0.0, 0.0, 0.0, 0.0])
+    sp.write_frame(PACKET_CMD_MOTOR, payload)
 
     if read_response:
         import time

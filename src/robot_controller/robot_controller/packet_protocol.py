@@ -4,6 +4,11 @@ import struct
 PACKET_CMD_MOTOR = 0x01
 PACKET_CMD_SERVO = 0x04
 
+PACKET_TYPE_ACK = 0x80
+PACKET_TYPE_ERROR = 0x81
+PACKET_TYPE_MOTOR_STATE = 0x82
+PACKET_TYPE_SERVO_STATE = 0x83
+
 MOTOR_FORMAT = '<ffff'
 SERVO_FORMAT = '<Bf'
 ENCODER_FORMAT = '<ffff'
@@ -31,6 +36,11 @@ def unpack_encoder_feedback(payload):
             f'{len(payload)} != {ENCODER_PAYLOAD_SIZE}'
         )
     return list(struct.unpack(ENCODER_FORMAT, payload))
+
+
+def unpack_motor_state(payload):
+    """Unpack four reported motor angular velocities."""
+    return unpack_encoder_feedback(payload)
 
 
 def unpack_servo_feedback(payload):

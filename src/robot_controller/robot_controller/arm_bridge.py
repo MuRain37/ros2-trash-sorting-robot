@@ -1,6 +1,9 @@
 from std_msgs.msg import Float64MultiArray
 
-from robot_controller import packet_protocol
+from robot_controller.packet_protocol import (
+    PACKET_CMD_SERVO,
+    pack_servo_command,
+)
 
 
 class ArmBridge:
@@ -36,10 +39,8 @@ class ArmBridge:
         if self._cmd_callback:
             for index, position in enumerate(command):
                 servo_id = index + 1
-                payload = packet_protocol.pack_servo_command(
-                    servo_id, position
-                )
-                self._cmd_callback(packet_protocol.PACKET_CMD_SERVO, payload)
+                payload = pack_servo_command(servo_id, position)
+                self._cmd_callback(PACKET_CMD_SERVO, payload)
 
         if self._open_loop_control:
             self._positions = command

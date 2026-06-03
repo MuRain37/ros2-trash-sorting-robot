@@ -14,6 +14,7 @@ from robot_controller.motor_bridge import MotorBridge  # noqa: E402
 from robot_controller.packet_protocol import (  # noqa: E402
     PACKET_CMD_MOTOR,
     PACKET_CMD_SERVO,
+    PACKET_TYPE_MOTOR_STATE,
     pack_motor_command,
     pack_servo_command,
 )
@@ -77,12 +78,12 @@ def test_build_motor_frame_checksum():
 def test_read_frames_handles_noise_partial_and_multiple_frames():
     encoder_payload = pack_motor_command([1.0, 2.0, 3.0, 4.0])
     servo_payload = pack_servo_command(2, 1.5)
-    first = build_frame(PACKET_CMD_MOTOR, encoder_payload)
+    first = build_frame(PACKET_TYPE_MOTOR_STATE, encoder_payload)
     second = build_frame(PACKET_CMD_SERVO, servo_payload)
     port = make_serial_with_buffer(b'noise' + first + second[:3])
 
     assert port.read_frames() == [
-        (PACKET_CMD_MOTOR, encoder_payload)
+        (PACKET_TYPE_MOTOR_STATE, encoder_payload)
     ]
     assert bytes(port._rx_buf) == second[:3]
 
@@ -93,16 +94,16 @@ def test_read_frames_handles_noise_partial_and_multiple_frames():
 def test_read_frames_resyncs_after_bad_checksum():
     bad = bytearray(
         build_frame(
-            PACKET_CMD_MOTOR,
+            PACKET_TYPE_MOTOR_STATE,
             pack_motor_command([1.0, 2.0, 3.0, 4.0]),
         )
     )
     bad[-1] ^= 0xFF
-    servo_payload = pack_servo_command(3, 2.5)
-    good = build_frame(PACKET_CMD_SERVO, servo_payload)
+    motor_payload = pack_motor_command([4.0, 3.0, 2.0, 1.0])
+    good = build_frame(PACKET_TYPE_MOTOR_STATE, motor_payload)
     port = make_serial_with_buffer(bytes(bad) + good)
 
-    assert port.read_frames() == [(PACKET_CMD_SERVO, servo_payload)]
+    assert port.read_frames() == [(PACKET_TYPE_MOTOR_STATE, motor_payload)]
 
 
 def test_motor_bridge_sends_binary_motor_frame():
@@ -148,13 +149,10 @@ def test_feedback_dispatcher_publishes_feedback():
     dispatcher = SerialFeedbackDispatcher(hardware)
 
     dispatcher.handle_frame(
-        PACKET_CMD_MOTOR,
+        PACKET_TYPE_MOTOR_STATE,
         pack_motor_command([1.0, 2.0, 3.0, 4.0]),
     )
-    dispatcher.handle_frame(
-        PACKET_CMD_SERVO,
-        pack_servo_command(2, 1.25),
-    )
+    dispatcher.handle_frame(PACKET_CMD_SERVO, pack_servo_command(2, 1.25))
 
-    assert list(node.publisher.messages[-2].data) == [1.0, 2.0, 3.0, 4.0]
-    assert list(node.publisher.messages[-1].data)[1] == 1.25
+    assert len(node.publisher.messages) == 1
+    assert list(node.publisher.messages[-1].data) == [1.0, 2.0, 3.0, 4.0]

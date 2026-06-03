@@ -1,6 +1,8 @@
 from std_msgs.msg import Float64MultiArray
-
-from robot_controller import packet_protocol
+from robot_controller.packet_protocol import (
+    PACKET_CMD_MOTOR,
+    pack_motor_command,
+)
 
 
 class MotorBridge:
@@ -39,8 +41,8 @@ class MotorBridge:
             return
 
         if self._cmd_callback:
-            payload = packet_protocol.pack_motor_command(msg.data)
-            self._cmd_callback(packet_protocol.PACKET_CMD_MOTOR, payload)
+            payload = pack_motor_command(msg.data)
+            self._cmd_callback(PACKET_CMD_MOTOR, payload)
 
         if self._open_loop_control:
             self.publish_feedback(msg.data)
