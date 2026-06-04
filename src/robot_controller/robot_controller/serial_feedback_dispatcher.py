@@ -1,6 +1,8 @@
 from robot_controller.packet_protocol import (
     PACKET_TYPE_MOTOR_STATE,
+    PACKET_TYPE_SERVO_STATE,
     unpack_motor_state,
+    unpack_servo_feedback,
 )
 
 
@@ -11,6 +13,7 @@ class SerialFeedbackDispatcher:
         self._node = node
         self._handlers = {
             PACKET_TYPE_MOTOR_STATE: self._handle_motor_state,
+            PACKET_TYPE_SERVO_STATE: self._handle_servo_state,
         }
 
     def handle_frame(self, frame_type, payload):
@@ -42,3 +45,19 @@ class SerialFeedbackDispatcher:
         self._node.get_logger().info(f'Parsed motor state: {motor_state}')
         if not self._node._motor_open_loop_control:
             self._node._motor.publish_feedback(motor_state)
+
+    def _handle_servo_state(self, payload):
+        try:
+            _, servo_id, position, _ = unpack_servo_feedback(payload)
+        except ValueError:
+            self._node.get_logger().warning(
+                'Ignoring servo state feedback with invalid payload length: '
+                f'{len(payload)}'
+            )
+            return
+
+        self._node.get_logger().info(
+            f'Parsed servo state: id={servo_id}, position={position}'
+        )
+        if not self._node._arm_open_loop_control:
+            self._node._arm.publish_servo_feedback(int(servo_id), position)

@@ -182,7 +182,7 @@ def main():
     timeout = 1.0
     sp = SerialPort()
     
-    payload = pack_servo_command(1, 500.0, 1000.0)
+    payload = pack_servo_command(1, 400.0, 1000.0)
     sent = sp.write_frame(PACKET_CMD_SERVO, payload)
     if sent:
         print(f'发送成功: {sent} 字节')
