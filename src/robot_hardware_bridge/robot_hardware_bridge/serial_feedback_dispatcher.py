@@ -1,6 +1,6 @@
-"""串口反馈分发模块：从 SerialPort 读取帧，解析后分发给对应的桥接器。"""
+"""串口反馈分发模块：从 SerialPort 读取帧，解析后分发给对应的桥接器."""
 
-from robot_controller.packet_protocol import (
+from robot_hardware_bridge.packet_protocol import (
     PACKET_TYPE_MOTOR_STATE,
     PACKET_TYPE_SERVO_STATE,
     unpack_motor_state,
@@ -9,7 +9,7 @@ from robot_controller.packet_protocol import (
 
 
 class SerialFeedbackDispatcher:
-    """定时从串口缓冲区读取帧，按帧类型分发到 MotorBridge 或 ArmBridge。"""
+    """定时从串口缓冲区读取帧，按帧类型分发到 MotorBridge 或 ArmBridge."""
 
     def __init__(self, node):
         self._node = node
@@ -20,7 +20,7 @@ class SerialFeedbackDispatcher:
         }
 
     def handle_frame(self, frame_type, payload):
-        """处理单帧数据，根据类型分发到对应 handler。"""
+        """处理单帧数据，根据类型分发到对应 handler."""
         handler = self._handlers.get(frame_type)
         if handler:
             handler(payload)
@@ -31,12 +31,12 @@ class SerialFeedbackDispatcher:
             )
 
     def dispatch_available(self):
-        """读取并分发当前缓冲区中所有帧（由定时器回调触发）。"""
+        """读取并分发当前缓冲区中所有帧（由定时器回调触发）."""
         for frame_type, payload in self._node._serial.read_frames():
             self.handle_frame(frame_type, payload)
 
     def _handle_motor_state(self, payload):
-        """处理电机状态帧：解包4个状态值 → 发布反馈。"""
+        """处理电机状态帧：解包4个状态值 → 发布反馈."""
         try:
             motor_state = unpack_motor_state(payload)
         except ValueError:
@@ -52,7 +52,7 @@ class SerialFeedbackDispatcher:
             self._node._motor.publish_feedback(motor_state)
 
     def _handle_servo_state(self, payload):
-        """处理舵机状态帧：解包 → 更新 ArmBridge 对应关节角度。"""
+        """处理舵机状态帧：解包 → 更新 ArmBridge 对应关节角度."""
         try:
             _, servo_id, position, _ = unpack_servo_feedback(payload)
         except ValueError:

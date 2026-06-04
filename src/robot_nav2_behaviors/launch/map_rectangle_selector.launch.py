@@ -12,7 +12,7 @@ from launch_ros.actions import Node
 def generate_launch_description():
     """生成覆盖导航辅助节点的 LaunchDescription。"""
     default_map_yaml = os.path.join(
-        get_package_share_directory('robot_navgation2'),
+        get_package_share_directory('robot_nav2'),
         'maps',
         'room.yaml',
     )

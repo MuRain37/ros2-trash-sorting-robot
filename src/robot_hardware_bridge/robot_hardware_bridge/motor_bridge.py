@@ -1,14 +1,15 @@
-"""电机桥接模块：轮速指令发送与电机状态反馈发布。"""
+"""电机桥接模块：轮速指令发送与电机状态反馈发布."""
 
 from std_msgs.msg import Float64MultiArray
-from robot_controller.packet_protocol import (
+from robot_hardware_bridge.packet_protocol import (
     PACKET_CMD_MOTOR,
     pack_motor_command,
 )
 
 
 class MotorBridge:
-    """桥接 diff_drive 速度指令和 STM32 电机控制。
+    """
+    桥接 diff_drive 速度指令和 STM32 电机控制.
 
     默认订阅 diff_test_cmd（4个轮速），打包后通过回调发送；
     接收电机状态反馈后发布到 diff_test_fb。
@@ -37,13 +38,13 @@ class MotorBridge:
         )
 
     def publish_feedback(self, data: list):
-        """发布4个轮子的电机状态反馈值。"""
+        """发布4个轮子的电机状态反馈值."""
         fb = Float64MultiArray()
         fb.data = list(data)
         self._fb_pub.publish(fb)
 
     def _on_cmd(self, msg: Float64MultiArray):
-        """收到轮速指令：打包为16字节负载 → 通过回调发送到串口。"""
+        """收到轮速指令：打包为16字节负载 → 通过回调发送到串口."""
         if len(msg.data) != 4:
             self._node.get_logger().warning(
                 f'Expected 4 wheel velocities, got {len(msg.data)}'

@@ -74,7 +74,7 @@ def custom_control_actions():
     )
 
     hardware_node = Node(
-        package='robot_controller',
+        package='robot_hardware_bridge',
         executable='hardware_node',
         name='hardware_bridge',
         output='screen',

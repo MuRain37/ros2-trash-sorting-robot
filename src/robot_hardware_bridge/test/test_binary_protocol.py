@@ -10,10 +10,10 @@ from std_msgs.msg import Float64MultiArray
 PACKAGE_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PACKAGE_ROOT))
 
-import robot_controller.arm_bridge as arm_bridge_module  # noqa: E402
-from robot_controller.arm_bridge import ArmBridge  # noqa: E402
-from robot_controller.motor_bridge import MotorBridge  # noqa: E402
-from robot_controller.packet_protocol import (  # noqa: E402
+import robot_hardware_bridge.arm_bridge as arm_bridge_module  # noqa: E402
+from robot_hardware_bridge.arm_bridge import ArmBridge  # noqa: E402
+from robot_hardware_bridge.motor_bridge import MotorBridge  # noqa: E402
+from robot_hardware_bridge.packet_protocol import (  # noqa: E402
     PACKET_CMD_MOTOR,
     PACKET_CMD_SERVO,
     PACKET_TYPE_MOTOR_STATE,
@@ -22,10 +22,10 @@ from robot_controller.packet_protocol import (  # noqa: E402
     pack_motor_command,
     pack_servo_command,
 )
-from robot_controller.serial_feedback_dispatcher import (  # noqa: E402
+from robot_hardware_bridge.serial_feedback_dispatcher import (  # noqa: E402
     SerialFeedbackDispatcher,
 )
-from robot_controller.serial_port import SerialPort  # noqa: E402
+from robot_hardware_bridge.serial_port import SerialPort  # noqa: E402
 
 
 class FakeLogger:

@@ -1,11 +1,11 @@
-"""机械臂桥接模块：关节角度 ↔ 舵机原始位置值的双向转换与指令收发。"""
+"""机械臂桥接模块：关节角度 ↔ 舵机原始位置值的双向转换与指令收发."""
 
 import math
 import time
 
 from std_msgs.msg import Float64MultiArray
 
-from robot_controller.packet_protocol import (
+from robot_hardware_bridge.packet_protocol import (
     PACKET_CMD_SERVO,
     pack_servo_command,
 )
@@ -30,12 +30,13 @@ JOINT_DIRECTIONS = (-1.0, -1.0, -1.0, -1.0, 1.0)
 
 
 def clamp_servo_raw(position):
-    """将舵机原始位置值限制在 [0, 1000] 安全范围内。"""
+    """将舵机原始位置值限制在 [0, 1000] 安全范围内."""
     return max(SERVO_RAW_MIN, min(SERVO_RAW_MAX, position))
 
 
 def joint_command_to_servo_raw(index, value):
-    """关节角度（弧度）→ 舵机原始位置值。
+    """
+    关节角度（弧度）→ 舵机原始位置值.
 
     映射公式：raw = 500 + direction × deg × (500 / max_degrees)
     """
@@ -56,7 +57,7 @@ def joint_command_to_servo_raw(index, value):
 
 
 def servo_raw_to_joint_command(index, raw_position):
-    """舵机原始位置值 → 关节角度（弧度）。上面公式的逆运算。"""
+    """舵机原始位置值 → 关节角度（弧度），上面公式的逆运算."""
     raw_position = float(raw_position)
     if index < len(JOINT_MAX_DEGREES):
         max_degrees = JOINT_MAX_DEGREES[index]
@@ -71,7 +72,8 @@ def servo_raw_to_joint_command(index, raw_position):
 
 
 class ArmBridge:
-    """机械臂桥接器：订阅关节角度指令，转换为舵机原始位置值后通过串口发送，
+    """
+    机械臂桥接器：订阅关节角度指令，转换为舵机原始位置值后通过串口发送.
 
     同时发布关节角度反馈。
     """
@@ -102,7 +104,7 @@ class ArmBridge:
         )
 
     def _on_command(self, msg: Float64MultiArray):
-        """收到关节角度指令（弧度），转换并发送。"""
+        """收到关节角度指令（弧度），转换并发送."""
         if len(msg.data) < self._joint_count:
             self._node.get_logger().warning(
                 f'Expected at least {self._joint_count} arm positions, '
@@ -132,14 +134,14 @@ class ArmBridge:
             self.publish_feedback(command)
 
     def publish_feedback(self, data: list):
-        """发布当前关节角度反馈到默认反馈话题。"""
+        """发布当前关节角度反馈到默认反馈话题."""
         self._positions = [float(value) for value in data[:self._joint_count]]
         msg = Float64MultiArray()
         msg.data = list(self._positions)
         self._fb_pub.publish(msg)
 
     def _log_servo_targets(self, servo_positions):
-        """打印舵机目标原始位置值（调试用）。"""
+        """打印舵机目标原始位置值（调试用）."""
         targets = ', '.join(
             f'servo{index + 1}={position:.1f}'
             for index, position in enumerate(servo_positions)
@@ -150,7 +152,7 @@ class ArmBridge:
         )
 
     def _send_servo_targets(self, servo_positions):
-        """逐个打包舵机指令并通过回调发送。"""
+        """逐个打包舵机指令并通过回调发送."""
         if not self._cmd_callback or self._print_only:
             return
 
@@ -164,7 +166,7 @@ class ArmBridge:
             self._cmd_callback(PACKET_CMD_SERVO, payload)
 
     def _should_send_now(self):
-        """发送节流：距上次发送不足 send_period 则跳过。"""
+        """发送节流：距上次发送不足 send_period 则跳过."""
         now = time.monotonic()
         if (
             self._last_send_time is not None
@@ -176,7 +178,8 @@ class ArmBridge:
         return True
 
     def publish_servo_feedback(self, servo_id, position):
-        """收到单个舵机反馈（原始位置值），更新对应关节角度并发布。
+        """
+        收到单个舵机反馈（原始位置值），更新对应关节角度并发布.
 
         servo_id: 1-based 舵机编号
         position: 舵机原始位置值

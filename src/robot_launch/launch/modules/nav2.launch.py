@@ -17,7 +17,7 @@ def generate_launch_description():
 
     navigation2 = IncludeLaunchDescription(
         PythonLaunchDescriptionSource([
-            get_package_share_directory('robot_navgation2'),
+            get_package_share_directory('robot_nav2'),
             '/launch/navigation2.launch.py',
         ]),
         launch_arguments={

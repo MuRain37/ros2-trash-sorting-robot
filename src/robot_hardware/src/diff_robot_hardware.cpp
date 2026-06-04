@@ -1,4 +1,4 @@
-#include "robot_description/diff_robot_hardware.hpp"
+#include "robot_hardware/diff_robot_hardware.hpp"
 
 #include <chrono>
 #include <cmath>
@@ -18,7 +18,7 @@ constexpr auto DEFAULT_STATE_TOPIC = "diff_test_fb";
 
 }  // namespace
 
-namespace robot_description
+namespace robot_hardware
 {
 hardware_interface::CallbackReturn DiffRobotHardware::on_init(
   const hardware_interface::HardwareInfo & info)
@@ -229,8 +229,8 @@ hardware_interface::return_type DiffRobotHardware::write(
   return hardware_interface::return_type::OK;
 }
 
-}  // namespace robot_description
+}  // namespace robot_hardware
 
 #include "pluginlib/class_list_macros.hpp"
 PLUGINLIB_EXPORT_CLASS(
-  robot_description::DiffRobotHardware, hardware_interface::SystemInterface)
+  robot_hardware::DiffRobotHardware, hardware_interface::SystemInterface)

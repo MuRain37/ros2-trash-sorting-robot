@@ -1,7 +1,7 @@
 import threading
 import serial
 
-from robot_controller.packet_protocol import (
+from robot_hardware_bridge.packet_protocol import (
     FRAME_HEAD,
     FRAME_OVERHEAD,
     MAX_PAYLOAD_LEN,
@@ -12,7 +12,7 @@ from robot_controller.packet_protocol import (
 
 
 class SerialPort:
-    """STM32 串口通信模块，负责字节流收发和帧解析。"""
+    """STM32 串口通信模块，负责字节流收发和帧解析."""
 
     def __init__(
         self, port='/dev/ttyACM0', baudrate=115200, debug=False, logger=None
@@ -36,7 +36,7 @@ class SerialPort:
             print(msg)
 
     def open(self):
-        """打开串口并启动接收线程。"""
+        """打开串口并启动接收线程."""
         if self._serial and self._serial.is_open:
             return True
         try:
@@ -59,7 +59,7 @@ class SerialPort:
             return False
 
     def close(self):
-        """关闭串口，停止接收线程。"""
+        """关闭串口，停止接收线程."""
         self._running = False
         if self._rx_thread and self._rx_thread.is_alive():
             self._rx_thread.join(timeout=1.0)
@@ -67,7 +67,8 @@ class SerialPort:
             self._serial.close()
 
     def read_frames(self, max_frames=None):
-        """从接收缓冲区解析完整帧，返回 [(cmd, payload), ...] 列表。
+        """
+        从接收缓冲区解析完整帧，返回 [(cmd, payload), ...] 列表.
 
         解析流程：找帧头 → 读长度 → 等够整帧 → 校验 → 返回。
         帧头错位、长度非法、校验失败均跳过并继续搜索下一帧。
@@ -123,7 +124,7 @@ class SerialPort:
         return frames
 
     def read_raw(self, n=0):
-        """读取接收缓冲区的原始字节（调试用）。"""
+        """读取接收缓冲区的原始字节（调试用）."""
         with self._lock:
             if n > 0:
                 data = bytes(self._rx_buf[:n])
@@ -134,7 +135,7 @@ class SerialPort:
             return data
 
     def write(self, data):
-        """发送原始字节到串口，支持 bytes/bytearray/list。"""
+        """发送原始字节到串口，支持 bytes/bytearray/list."""
         if not self._serial or not self._serial.is_open:
             return
         if isinstance(data, list):
@@ -150,11 +151,11 @@ class SerialPort:
             return 0
 
     def write_frame(self, cmd, payload=b''):
-        """构建并发送一帧协议数据。"""
+        """构建并发送一帧协议数据."""
         return self.write(build_frame(cmd, payload))
 
     def _rx_task(self):
-        """后台接收线程：持续读串口，数据放入 _rx_buf。"""
+        """后台接收线程：持续读串口，数据放入 _rx_buf."""
         while self._running:
             try:
                 chunk = self._serial.read(64)  # 每次最多读64字节
@@ -170,8 +171,7 @@ class SerialPort:
 
 
 def main():
-    """简单测试：发送一帧舵机指令。"""
-
+    """简单测试：发送一帧舵机指令."""
     read_response = False
     timeout = 1.0
     sp = SerialPort()

@@ -23,38 +23,38 @@
 #include "realtime_tools/realtime_publisher.hpp"
 #include "std_msgs/msg/float64_multi_array.hpp"
 
-#include "robot_description/visibility_control.h"
+#include "robot_hardware/visibility_control.h"
 
-namespace robot_description
+namespace robot_hardware
 {
 class DiffRobotHardware : public hardware_interface::SystemInterface
 {
 public:
-  RCLCPP_SHARED_PTR_DEFINITIONS(DiffRobotHardware);
+  RCLCPP_SHARED_PTR_DEFINITIONS(DiffRobotHardware)
 
-  ROBOT_DESCRIPTION_PUBLIC
+  ROBOT_HARDWARE_PUBLIC
   hardware_interface::CallbackReturn on_init(
     const hardware_interface::HardwareInfo & info) override;
 
-  ROBOT_DESCRIPTION_PUBLIC
+  ROBOT_HARDWARE_PUBLIC
   std::vector<hardware_interface::StateInterface> export_state_interfaces() override;
 
-  ROBOT_DESCRIPTION_PUBLIC
+  ROBOT_HARDWARE_PUBLIC
   std::vector<hardware_interface::CommandInterface> export_command_interfaces() override;
 
-  ROBOT_DESCRIPTION_PUBLIC
+  ROBOT_HARDWARE_PUBLIC
   hardware_interface::CallbackReturn on_activate(
     const rclcpp_lifecycle::State & previous_state) override;
 
-  ROBOT_DESCRIPTION_PUBLIC
+  ROBOT_HARDWARE_PUBLIC
   hardware_interface::CallbackReturn on_deactivate(
     const rclcpp_lifecycle::State & previous_state) override;
 
-  ROBOT_DESCRIPTION_PUBLIC
+  ROBOT_HARDWARE_PUBLIC
   hardware_interface::return_type read(
     const rclcpp::Time & time, const rclcpp::Duration & period) override;
 
-  ROBOT_DESCRIPTION_PUBLIC
+  ROBOT_HARDWARE_PUBLIC
   hardware_interface::return_type write(
     const rclcpp::Time & time, const rclcpp::Duration & period) override;
 
@@ -71,6 +71,6 @@ private:
   std::shared_ptr<rclcpp::Publisher<std_msgs::msg::Float64MultiArray>> cmd_publisher = nullptr;
 };
 
-}  // namespace robot_description
+}  // namespace robot_hardware
 
 #endif  // DIFF_ROBOT_HARDWARE_HPP_

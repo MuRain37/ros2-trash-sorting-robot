@@ -1,4 +1,4 @@
-#include "robot_description/arm_robot_hardware.hpp"
+#include "robot_hardware/arm_robot_hardware.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -19,7 +19,7 @@ constexpr auto DEFAULT_STATE_TOPIC = "arm_position_fb";
 constexpr std::size_t DEFAULT_REAL_JOINT_COUNT = 5;
 }  // namespace
 
-namespace robot_description
+namespace robot_hardware
 {
 hardware_interface::CallbackReturn ArmRobotHardware::on_init(
   const hardware_interface::HardwareInfo & info)
@@ -319,7 +319,7 @@ bool ArmRobotHardware::joint_has_interface(
       return interface_info.name == name;
     });
 }
-}  // namespace robot_description
+}  // namespace robot_hardware
 
 PLUGINLIB_EXPORT_CLASS(
-  robot_description::ArmRobotHardware, hardware_interface::SystemInterface)
+  robot_hardware::ArmRobotHardware, hardware_interface::SystemInterface)

@@ -1,14 +1,14 @@
 <?xml version="1.0"?>
-<library path="robot_description">
-  <class name="robot_description/DiffRobotHardware"
-         type="robot_description::DiffRobotHardware"
+<library path="robot_hardware">
+  <class name="robot_hardware/DiffRobotHardware"
+         type="robot_hardware::DiffRobotHardware"
          base_class_type="hardware_interface::SystemInterface">
     <description>
     Four-wheel differential drive robot hardware interface.
     </description>
   </class>
-  <class name="robot_description/ArmRobotHardware"
-         type="robot_description::ArmRobotHardware"
+  <class name="robot_hardware/ArmRobotHardware"
+         type="robot_hardware::ArmRobotHardware"
          base_class_type="hardware_interface::SystemInterface">
     <description>
     Topic-based arm position hardware interface.

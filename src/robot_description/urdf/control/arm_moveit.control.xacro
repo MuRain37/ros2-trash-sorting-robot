@@ -5,7 +5,7 @@
 
     <ros2_control name="${name}" type="system">
       <hardware>
-        <plugin>robot_description/ArmRobotHardware</plugin>
+        <plugin>robot_hardware/ArmRobotHardware</plugin>
         <param name="command_topic">arm_position_cmd</param>
         <param name="state_topic">arm_position_fb</param>
         <param name="real_joint_count">5</param>

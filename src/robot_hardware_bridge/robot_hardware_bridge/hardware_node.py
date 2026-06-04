@@ -1,6 +1,7 @@
-"""硬件通信节点：整合串口、电机桥接、舵机桥接和反馈分发。
+"""
+硬件通信节点：整合串口、电机桥接、舵机桥接和反馈分发.
 
-这是整个 robot_controller 的入口节点，启动后负责 ROS2 与 STM32 之间的所有通信。
+这是整个 robot_hardware_bridge 的入口节点，启动后负责 ROS2 与 STM32 之间的所有通信。
 """
 
 import rclpy
@@ -9,16 +10,17 @@ from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.parameter import Parameter
 
-from robot_controller.arm_bridge import ArmBridge
-from robot_controller.motor_bridge import MotorBridge
-from robot_controller.serial_feedback_dispatcher import (
+from robot_hardware_bridge.arm_bridge import ArmBridge
+from robot_hardware_bridge.motor_bridge import MotorBridge
+from robot_hardware_bridge.serial_feedback_dispatcher import (
     SerialFeedbackDispatcher,
 )
-from robot_controller.serial_port import SerialPort
+from robot_hardware_bridge.serial_port import SerialPort
 
 
 class HardwareNode(Node):
-    """硬件通信主节点。
+    """
+    硬件通信主节点.
 
     组件关系：
     SerialPort（串口收发） → MotorBridge（轮速指令/反馈）
@@ -127,7 +129,8 @@ class HardwareNode(Node):
         )
 
     def _optional_bool_parameter(self, name, default_value):
-        """读取可选布尔参数，未设置时返回默认值。
+        """
+        读取可选布尔参数，未设置时返回默认值.
 
         name: ROS 参数名。
         default_value: 参数未设置时使用的布尔值。
@@ -138,13 +141,13 @@ class HardwareNode(Node):
         return bool(parameter.value)
 
     def destroy_node(self):
-        """销毁节点前关闭串口。"""
+        """销毁节点前关闭串口."""
         self._serial.close()
         super().destroy_node()
 
 
 def main(args=None):
-    """入口函数：初始化节点并进入 spin 循环。"""
+    """入口函数：初始化节点并进入 spin 循环."""
     rclpy.init(args=args)
     node = HardwareNode()
     try:

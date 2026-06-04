@@ -1,4 +1,4 @@
-"""Nav2 启动入口：合并拆分参数文件并启动 bringup 与 RViz。"""
+"""Nav2 启动入口：合并拆分参数文件并启动 bringup 与 RViz."""
 
 import os
 import tempfile
@@ -25,7 +25,7 @@ NAV2_PARAM_FILES = [
 
 
 def _merged_nav2_params(context):
-    """返回单个 Nav2 参数文件；未指定时合并 config/nav2_params。"""
+    """返回单个 Nav2 参数文件；未指定时合并 config/nav2_params."""
     params_file = launch.substitutions.LaunchConfiguration(
         'params_file').perform(context)
     if params_file:
@@ -46,14 +46,14 @@ def _merged_nav2_params(context):
         merged_params.update(data)
 
     output = tempfile.NamedTemporaryFile(
-        mode='w', prefix='robot_navgation2_nav2_', suffix='.yaml', delete=False)
+        mode='w', prefix='robot_nav2_nav2_', suffix='.yaml', delete=False)
     with output:
         yaml.safe_dump(merged_params, output, default_flow_style=False, sort_keys=False)
     return output.name
 
 
 def _include_nav2_bringup(context, nav2_bringup_dir, map_yaml_path, use_sim_time):
-    """包含 nav2_bringup 的 bringup_launch.py。"""
+    """包含 nav2_bringup 的 bringup_launch.py."""
     nav2_param_path = _merged_nav2_params(context)
     return [
         launch.actions.IncludeLaunchDescription(
@@ -68,21 +68,19 @@ def _include_nav2_bringup(context, nav2_bringup_dir, map_yaml_path, use_sim_time
 
 
 def generate_launch_description():
-    """生成 Nav2 bringup 与 RViz 启动项。"""
-    robot_navgation2_dir = get_package_share_directory(
-        'robot_navgation2')
+    """生成 Nav2 bringup 与 RViz 启动项."""
+    robot_nav2_dir = get_package_share_directory(
+        'robot_nav2')
     nav2_bringup_dir = get_package_share_directory('nav2_bringup')
     rviz_config_dir = os.path.join(
-        os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(
-            robot_navgation2_dir)))),
-        'src', 'robot_navgation2', 'rviz', 'nav2_default_view.rviz')
+        robot_nav2_dir, 'rviz', 'nav2_default_view.rviz')
 
     use_sim_time = launch.substitutions.LaunchConfiguration(
         'use_sim_time', default='true')
     map_yaml_path = launch.substitutions.LaunchConfiguration(
-        'map', default=os.path.join(robot_navgation2_dir, 'maps', 'room.yaml'))
+        'map', default=os.path.join(robot_nav2_dir, 'maps', 'room.yaml'))
     nav2_param_dir = launch.substitutions.LaunchConfiguration(
-        'params_dir', default=os.path.join(robot_navgation2_dir, 'config', 'nav2_params'))
+        'params_dir', default=os.path.join(robot_nav2_dir, 'config', 'nav2_params'))
     nav2_param_path = launch.substitutions.LaunchConfiguration(
         'params_file', default='')
 
@@ -91,10 +89,19 @@ def generate_launch_description():
                                              description='Use simulation (Gazebo) clock if true'),
         launch.actions.DeclareLaunchArgument('map', default_value=map_yaml_path,
                                              description='Full path to map file to load'),
-        launch.actions.DeclareLaunchArgument('params_dir', default_value=nav2_param_dir,
-                                             description='Directory containing split Nav2 param files'),
-        launch.actions.DeclareLaunchArgument('params_file', default_value=nav2_param_path,
-                                             description='Full path to a single Nav2 param file to load. Overrides params_dir when set.'),
+        launch.actions.DeclareLaunchArgument(
+            'params_dir',
+            default_value=nav2_param_dir,
+            description='Directory containing split Nav2 param files',
+        ),
+        launch.actions.DeclareLaunchArgument(
+            'params_file',
+            default_value=nav2_param_path,
+            description=(
+                'Full path to a single Nav2 param file to load. '
+                'Overrides params_dir when set.'
+            ),
+        ),
 
         launch.actions.OpaqueFunction(
             function=_include_nav2_bringup,

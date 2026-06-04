@@ -1,6 +1,6 @@
 from setuptools import find_packages, setup
 
-package_name = 'robot_controller'
+package_name = 'robot_hardware_bridge'
 
 setup(
     name=package_name,
@@ -15,7 +15,7 @@ setup(
     zip_safe=True,
     maintainer='murain',
     maintainer_email='16939672+murain37@user.noreply.gitee.com',
-    description='TODO: Package description',
+    description='ROS to MCU serial hardware bridge for the robot.',
     license='TODO: License declaration',
     extras_require={
         'test': [
@@ -24,7 +24,7 @@ setup(
     },
     entry_points={
         'console_scripts': [
-            'hardware_node = robot_controller.hardware_node:main',
+            'hardware_node = robot_hardware_bridge.hardware_node:main',
         ],
     },
 )

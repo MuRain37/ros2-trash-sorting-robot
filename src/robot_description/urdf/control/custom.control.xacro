@@ -5,7 +5,7 @@
     <xacro:macro name="robot_custom_ros2_control">
         <ros2_control name="RobotCustomSystem" type="system">
             <hardware>
-                <plugin>robot_description/DiffRobotHardware</plugin>
+                <plugin>robot_hardware/DiffRobotHardware</plugin>
             </hardware>
             <xacro:wheel_joints/>
         </ros2_control>

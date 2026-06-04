@@ -39,12 +39,12 @@ ENCODER_PAYLOAD_SIZE = struct.calcsize(ENCODER_FORMAT)
 
 
 def pack_motor_command(values):
-    """4个电机速度 → 16字节负载（小端 float32）。"""
+    """4个电机速度 → 16字节负载（小端 float32）."""
     return struct.pack(MOTOR_FORMAT, *(float(value) for value in values))
 
 
 def pack_servo_command(servo_id, position, duration_ms=1000.0):
-    """舵机位置指令 → 16字节负载：[子命令|ID|原始位置|时长ms]。"""
+    """舵机位置指令 → 16字节负载：[子命令|ID|原始位置|时长ms]."""
     return struct.pack(
         SERVO_SET_POSITION_FORMAT,
         SERVO_CMD_SET_POSITION,
@@ -55,7 +55,7 @@ def pack_servo_command(servo_id, position, duration_ms=1000.0):
 
 
 def pack_servo_change_id_command(servo_id, new_id):
-    """舵机改ID → 12字节负载：[子命令|当前ID|新ID]。"""
+    """舵机改ID → 12字节负载：[子命令|当前ID|新ID]."""
     return struct.pack(
         SERVO_CHANGE_ID_FORMAT,
         SERVO_CMD_CHANGE_ID,
@@ -65,7 +65,7 @@ def pack_servo_change_id_command(servo_id, new_id):
 
 
 def pack_servo_probe_id_command(probe_id):
-    """舵机ID探测 → 8字节负载：[子命令|探测ID]。"""
+    """舵机ID探测 → 8字节负载：[子命令|探测ID]."""
     return struct.pack(
         SERVO_PROBE_ID_FORMAT,
         SERVO_CMD_PROBE_ID,
@@ -74,7 +74,7 @@ def pack_servo_probe_id_command(probe_id):
 
 
 def unpack_encoder_feedback(payload):
-    """16字节电机状态负载 → [state1, state2, state3, state4]。"""
+    """16字节电机状态负载 → [state1, state2, state3, state4]."""
     if len(payload) != ENCODER_PAYLOAD_SIZE:
         raise ValueError(
             'invalid encoder feedback payload length: '
@@ -84,12 +84,12 @@ def unpack_encoder_feedback(payload):
 
 
 def unpack_motor_state(payload):
-    """电机状态反馈 → 4个轮子状态值。"""
+    """电机状态反馈 → 4个轮子状态值."""
     return unpack_encoder_feedback(payload)
 
 
 def unpack_servo_feedback(payload):
-    """舵机反馈 → (子命令, 舵机ID, 当前位置, 时长)。"""
+    """舵机反馈 → (子命令, 舵机ID, 当前位置, 时长)."""
     if len(payload) != SERVO_SET_POSITION_PAYLOAD_SIZE:
         raise ValueError(
             'invalid servo feedback payload length: '
@@ -99,7 +99,7 @@ def unpack_servo_feedback(payload):
 
 
 def build_frame(cmd, payload=b''):
-    """构建一帧：帧头 + 命令 + 长度 + 负载 + 累加和校验。"""
+    """构建一帧：帧头 + 命令 + 长度 + 负载 + 累加和校验."""
     if not 0 <= cmd <= 0xFF:
         raise ValueError('cmd must fit in one byte')
     if payload is None:
