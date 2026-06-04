@@ -1,4 +1,4 @@
-"""Extract arm link lengths from the URDF published on /robot_description."""
+"""从 /robot_description 发布的 URDF 中提取机械臂连杆长度。"""
 
 import xml.etree.ElementTree as ET
 
@@ -18,7 +18,7 @@ _TARGET_JOINTS = [
 
 
 def extract_link_lengths(urdf_text):
-    """Return (l1, l2, l3, l4) in centimeters, or None on parse failure."""
+    """返回厘米单位的 (l1, l2, l3, l4)，解析失败返回 None。"""
     root = ET.fromstring(urdf_text)
 
     joint_z = {}
@@ -49,7 +49,7 @@ def extract_link_lengths(urdf_text):
 
 
 def install_urdf_link_length_loader(node, on_lengths):
-    """Subscribe to /robot_description and call on_lengths((l1,l2,l3,l4))."""
+    """订阅 /robot_description 并在解析成功后回调 on_lengths。"""
 
     def callback(msg):
         try:

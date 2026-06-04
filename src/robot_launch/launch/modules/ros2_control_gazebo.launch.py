@@ -1,3 +1,5 @@
+"""启动 Gazebo 模式的 ros2_control 控制器。"""
+
 import os
 
 from ament_index_python.packages import get_package_share_directory
@@ -9,6 +11,7 @@ from launch_ros.actions import Node
 
 
 def gazebo_controller_spawners():
+    """创建 Gazebo 控制器 spawner 节点。"""
     controller_config = os.path.join(
         get_package_share_directory('robot_description'),
         'config',

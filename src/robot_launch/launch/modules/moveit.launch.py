@@ -1,3 +1,5 @@
+"""启动 MoveIt move_group、RViz 和机械臂目标 Action 节点。"""
+
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
@@ -7,6 +9,7 @@ from launch_ros.actions import Node
 
 
 def generate_launch_description():
+    """生成 MoveIt 相关启动项。"""
     declare_use_sim_time = DeclareLaunchArgument(
         'use_sim_time',
         default_value='false',

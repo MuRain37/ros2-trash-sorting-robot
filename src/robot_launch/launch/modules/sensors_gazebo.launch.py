@@ -1,8 +1,11 @@
+"""启动仿真传感器数据转换节点。"""
+
 from launch import LaunchDescription
 from launch_ros.actions import Node
 
 
 def generate_launch_description():
+    """生成 Gazebo 传感器辅助节点。"""
     pointcloud_to_laserscan = Node(
         package='pointcloud_to_laserscan',
         executable='pointcloud_to_laserscan_node',

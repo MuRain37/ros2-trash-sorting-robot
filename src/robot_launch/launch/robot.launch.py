@@ -1,3 +1,5 @@
+"""机器人总启动入口：按模式组合描述、控制、传感器、Nav2、MoveIt 和 RViz。"""
+
 import os
 import importlib.util
 
@@ -15,10 +17,12 @@ from launch.substitutions import LaunchConfiguration
 
 
 def _as_bool(value):
+    """把 Launch 字符串参数解析为布尔值。"""
     return str(value).lower() in ('1', 'true', 'yes', 'on')
 
 
 def _module_source(name):
+    """返回 robot_launch/modules 下指定 launch 模块的来源。"""
     return PythonLaunchDescriptionSource([
         get_package_share_directory('robot_launch'),
         '/launch/modules/',
@@ -28,6 +32,7 @@ def _module_source(name):
 
 
 def _load_module(name):
+    """直接加载 launch 模块以复用其中的动作工厂函数。"""
     module_path = os.path.join(
         get_package_share_directory('robot_launch'),
         'launch',
@@ -41,6 +46,7 @@ def _load_module(name):
 
 
 def _include_module(name, launch_arguments=None):
+    """按名称包含 robot_launch/modules 下的 launch 文件。"""
     return IncludeLaunchDescription(
         _module_source(name),
         launch_arguments=(launch_arguments or {}).items(),
@@ -48,10 +54,12 @@ def _include_module(name, launch_arguments=None):
 
 
 def _resolve_auto(value, default):
+    """把 auto 参数替换为当前模式的默认值。"""
     return default if value == 'auto' else value
 
 
 def _source_rviz_path(robot_launch_pkg, filename):
+    """优先使用源码目录中的 RViz 配置，安装后回退到 share 目录。"""
     workspace = os.path.dirname(
         os.path.dirname(
             os.path.dirname(
@@ -73,6 +81,7 @@ def _source_rviz_path(robot_launch_pkg, filename):
 
 
 def launch_setup(context):
+    """根据 mode 和功能开关组装实际启动动作。"""
     mode = LaunchConfiguration('mode').perform(context)
     if mode not in ('gazebo', 'custom'):
         raise RuntimeError("mode must be 'gazebo' or 'custom'")
@@ -189,6 +198,7 @@ def launch_setup(context):
 
 
 def generate_launch_description():
+    """声明总启动参数并延迟生成启动动作。"""
     return LaunchDescription([
         DeclareLaunchArgument(
             'mode',

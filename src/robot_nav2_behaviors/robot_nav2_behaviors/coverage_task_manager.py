@@ -1,3 +1,5 @@
+"""覆盖任务管理节点：排队矩形任务并协调 Nav2 进入与清扫。"""
+
 import math
 from collections import deque
 from dataclasses import dataclass
@@ -23,6 +25,8 @@ from tf2_ros import (
 
 @dataclass
 class CoverageTask:
+    """单个矩形覆盖任务。"""
+
     sequence: int
     min_x: float
     min_y: float
@@ -50,20 +54,28 @@ class CoverageTask:
 
 
 class CoverageTaskManager(Node):
+    """管理矩形任务队列、中心导航和覆盖路径执行。"""
+
     def __init__(self):
         super().__init__('coverage_task_manager')
-        for name, value in (
-            ('frame_id', 'map'),
-            ('task_service', 'add_coverage_rectangle'),
-            ('coverage_path_service', 'generate_coverage_path'),
-            ('navigate_to_pose_action', 'navigate_to_pose'),
-            ('execute_coverage_action', 'execute_coverage_path'),
-            ('robot_base_frame', 'base_link'),
-            ('task_entry_margin', 0.0),
-            ('tf_timeout_sec', 0.2),
-            ('server_timeout_sec', 5.0),
-        ):
-            self.declare_parameter(name, value)
+        # 覆盖任务使用的坐标系
+        self.declare_parameter('frame_id', 'map')
+        # 添加覆盖矩形的服务名
+        self.declare_parameter('task_service', 'add_coverage_rectangle')
+        # 覆盖路径生成服务名
+        self.declare_parameter('coverage_path_service', 'generate_coverage_path')
+        # Nav2 单点导航 Action 名
+        self.declare_parameter('navigate_to_pose_action', 'navigate_to_pose')
+        # 覆盖路径执行 Action 名
+        self.declare_parameter('execute_coverage_action', 'execute_coverage_path')
+        # 机器人底盘坐标系
+        self.declare_parameter('robot_base_frame', 'base_link')
+        # 判断进入区域时内缩的边距（m）
+        self.declare_parameter('task_entry_margin', 0.0)
+        # 查询 TF 的超时时间（s）
+        self.declare_parameter('tf_timeout_sec', 0.2)
+        # 等待服务或 Action 的超时时间（s）
+        self.declare_parameter('server_timeout_sec', 5.0)
 
         self.task_service = self.create_service(
             AddCoverageRectangle,
@@ -105,6 +117,7 @@ class CoverageTaskManager(Node):
         )
 
     def handle_add_rectangle(self, request, response):
+        """把矩形区域加入任务队列。"""
         min_x = min(request.min_x, request.max_x)
         max_x = max(request.min_x, request.max_x)
         min_y = min(request.min_y, request.max_y)
@@ -141,6 +154,7 @@ class CoverageTaskManager(Node):
         return len(self.queue) + (1 if self.active_task is not None else 0)
 
     def start_next_task(self):
+        """空闲时启动下一个覆盖任务。"""
         if self.active_task is not None or not self.queue:
             return
 
@@ -189,6 +203,7 @@ class CoverageTaskManager(Node):
 
         if not goal_handle.accepted:
             if self.entry_detected:
+                # 目标被拒但机器人已在区域内，直接从当前位置开始清扫。
                 self.start_scanning_from_current_pose('center goal rejected')
             else:
                 self.finish_active_task(False, 'center goal rejected')
@@ -198,9 +213,11 @@ class CoverageTaskManager(Node):
         result_future = goal_handle.get_result_async()
         result_future.add_done_callback(self.handle_center_result)
         if self.entry_detected:
+            # 可能在等待目标响应期间已经进入区域，立即取消中心导航。
             self.cancel_center_goal()
 
     def monitor_task_entry(self):
+        """检测机器人是否已进入当前任务区域。"""
         if self.active_task is None or self.scan_started:
             return
 
@@ -222,6 +239,7 @@ class CoverageTaskManager(Node):
                 f'x={robot_position[0]:.3f}, y={robot_position[1]:.3f}'
             )
 
+        # 进入区域后不再强制走到中心点，减少无意义绕行。
         self.cancel_center_goal()
 
     def cancel_center_goal(self):
@@ -251,6 +269,7 @@ class CoverageTaskManager(Node):
             return
 
         if status == GoalStatus.STATUS_SUCCEEDED or self.entry_detected:
+            # 到达中心或已进入区域，都可以开始生成覆盖路径。
             self.start_scanning_from_current_pose(
                 'center navigation completed'
                 if status == GoalStatus.STATUS_SUCCEEDED
@@ -264,12 +283,14 @@ class CoverageTaskManager(Node):
         )
 
     def start_scanning_from_current_pose(self, reason):
+        """从当前位置请求覆盖路径并开始清扫。"""
         if self.active_task is None or self.scan_started:
             return
 
         self.scan_started = True
         start_position = self.get_robot_position(self.active_task.frame_id)
         if start_position is None:
+            # TF 暂不可用时退回矩形中心，保证任务流程能继续。
             start_position = self.active_task.center
 
         request = GenerateCoveragePath.Request()
@@ -320,6 +341,7 @@ class CoverageTaskManager(Node):
             )
             return
 
+        # 路径生成完成后交给 CoverageNavigator 统一调用 NavigateThroughPoses。
         if not self.coverage_client.wait_for_server(
             timeout_sec=float(self.get_parameter('server_timeout_sec').value),
         ):
@@ -384,6 +406,7 @@ class CoverageTaskManager(Node):
             )
 
     def finish_active_task(self, success, message):
+        """结束当前任务并释放队列调度。"""
         if self.active_task is None:
             return
 
@@ -428,6 +451,7 @@ class CoverageTaskManager(Node):
 
 
 def main(args=None):
+    """启动覆盖任务管理节点。"""
     rclpy.init(args=args)
     node = CoverageTaskManager()
     try:

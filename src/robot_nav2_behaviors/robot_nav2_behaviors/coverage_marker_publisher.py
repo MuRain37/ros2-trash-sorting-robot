@@ -1,3 +1,5 @@
+"""覆盖预览 Marker 节点：在 RViz 中显示矩形和清扫路径。"""
+
 import rclpy
 from geometry_msgs.msg import Point, PolygonStamped
 from nav_msgs.msg import Path
@@ -6,12 +8,19 @@ from visualization_msgs.msg import Marker
 
 
 class CoverageMarkerPublisher(Node):
+    """订阅覆盖区域和路径预览并发布 Marker。"""
+
     def __init__(self):
         super().__init__('coverage_marker_publisher')
+        # Marker 重发周期（s）
         self.declare_parameter('publish_period', 0.5)
+        # RViz 线宽（m）
         self.declare_parameter('marker_line_width', 0.02)
+        # Marker 输出话题
         self.declare_parameter('marker_topic', 'center_square_marker')
+        # 覆盖矩形输入话题
         self.declare_parameter('rectangle_topic', 'coverage_rectangle')
+        # 覆盖路径输入话题
         self.declare_parameter('coverage_path_topic', 'coverage_path_preview')
 
         marker_topic = self.get_parameter('marker_topic').value
@@ -40,6 +49,7 @@ class CoverageMarkerPublisher(Node):
         )
 
     def handle_rectangle(self, rectangle):
+        """把 PolygonStamped 矩形转换为绿色 Marker。"""
         points = [
             (point.x, point.y)
             for point in rectangle.polygon.points
@@ -56,6 +66,7 @@ class CoverageMarkerPublisher(Node):
         self.publish_markers()
 
     def handle_coverage_path(self, path):
+        """把 Path 转换为红色 Marker。"""
         points = [
             (pose.pose.position.x, pose.pose.position.y)
             for pose in path.poses
@@ -89,6 +100,7 @@ class CoverageMarkerPublisher(Node):
         blue=0.0,
         z=0.03,
     ):
+        """创建一条 LINE_STRIP Marker。"""
         marker = Marker()
         marker.header.frame_id = frame_id
         marker.header.stamp = self.get_clock().now().to_msg()
@@ -107,6 +119,7 @@ class CoverageMarkerPublisher(Node):
 
 
 def main(args=None):
+    """启动覆盖预览 Marker 节点。"""
     rclpy.init(args=args)
     node = CoverageMarkerPublisher()
     try:

@@ -1,3 +1,5 @@
+"""初始位姿发布节点：启动时重复向 AMCL 发布 /initialpose。"""
+
 import math
 
 import rclpy
@@ -6,16 +8,27 @@ from rclpy.node import Node
 
 
 class InitialPosePublisher(Node):
+    """按固定次数发布带协方差的初始位姿。"""
+
     def __init__(self):
         super().__init__('initial_pose_publisher')
+        # AMCL 初始位姿话题
         self.declare_parameter('initial_pose_topic', '/initialpose')
+        # 初始位姿所在坐标系
         self.declare_parameter('frame_id', 'map')
+        # 初始 x 坐标（m）
         self.declare_parameter('initial_pose_x', 0.0)
+        # 初始 y 坐标（m）
         self.declare_parameter('initial_pose_y', 0.0)
+        # 初始航向角（rad）
         self.declare_parameter('initial_pose_yaw', 0.0)
+        # x/y 协方差标准差（m）
         self.declare_parameter('position_stddev', 0.25)
+        # yaw 协方差标准差（rad）
         self.declare_parameter('yaw_stddev', 0.3)
+        # 重复发布周期（s）
         self.declare_parameter('publish_period', 1.0)
+        # 重复发布次数
         self.declare_parameter('publish_attempts', 10)
 
         topic = self.get_parameter('initial_pose_topic').value
@@ -52,6 +65,7 @@ class InitialPosePublisher(Node):
         )
 
     def publish_initial_pose(self):
+        """发布一次初始位姿，次数耗尽后停止定时器。"""
         if self.remaining_attempts <= 0:
             self.timer.cancel()
             return
@@ -63,6 +77,7 @@ class InitialPosePublisher(Node):
         msg.pose.pose.position.y = self.initial_pose_y
         msg.pose.pose.orientation.z = math.sin(self.initial_pose_yaw / 2.0)
         msg.pose.pose.orientation.w = math.cos(self.initial_pose_yaw / 2.0)
+        # AMCL 只关心 x、y、yaw 的初始不确定性，这里填 6x6 协方差矩阵对应位置。
         covariance = [0.0] * 36
         covariance[0] = self.position_stddev ** 2
         covariance[7] = self.position_stddev ** 2
@@ -81,6 +96,7 @@ class InitialPosePublisher(Node):
 
 
 def main(args=None):
+    """启动初始位姿发布节点。"""
     rclpy.init(args=args)
     node = InitialPosePublisher()
     try:

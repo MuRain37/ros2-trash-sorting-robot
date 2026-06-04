@@ -1,3 +1,5 @@
+"""启动 Gazebo 仿真世界并生成机器人实体。"""
+
 import os
 
 from ament_index_python.packages import get_package_share_directory
@@ -9,6 +11,7 @@ from launch_ros.actions import Node
 
 
 def generate_launch_description():
+    """生成 Gazebo 相关启动项。"""
     default_world = os.path.join(
         get_package_share_directory('robot_description'),
         'world',

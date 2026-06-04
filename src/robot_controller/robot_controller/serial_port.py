@@ -1,34 +1,18 @@
 import threading
 import serial
 
-
-FRAME_HEAD = bytes([0xAA, 0xBB])
-FRAME_OVERHEAD = 5
-MAX_PAYLOAD_LEN = 250
-
-
-def build_frame(cmd, payload=b''):
-    """Build one STM32 binary protocol frame."""
-    if not 0 <= cmd <= 0xFF:
-        raise ValueError('cmd must fit in one byte')
-    if payload is None:
-        payload = b''
-    payload = bytes(payload)
-    if len(payload) > MAX_PAYLOAD_LEN:
-        raise ValueError(
-            f'payload too large: {len(payload)} > {MAX_PAYLOAD_LEN}'
-        )
-
-    frame = bytearray(FRAME_HEAD)
-    frame.append(cmd)
-    frame.append(len(payload))
-    frame.extend(payload)
-    frame.append(sum(frame) & 0xFF)
-    return bytes(frame)
+from robot_controller.packet_protocol import (
+    FRAME_HEAD,
+    FRAME_OVERHEAD,
+    MAX_PAYLOAD_LEN,
+    PACKET_CMD_SERVO,
+    build_frame,
+    pack_servo_command,
+)
 
 
 class SerialPort:
-    """STM32 serial communication module."""
+    """STM32 串口通信模块，负责字节流收发和帧解析。"""
 
     def __init__(
         self, port='/dev/ttyACM0', baudrate=115200, debug=False, logger=None
@@ -41,7 +25,7 @@ class SerialPort:
         self._running = False
         self._rx_thread = None
         self._lock = threading.Lock()
-        self._rx_buf = bytearray()
+        self._rx_buf = bytearray()  # 接收字节缓冲区
 
         self.open()
 
@@ -52,6 +36,7 @@ class SerialPort:
             print(msg)
 
     def open(self):
+        """打开串口并启动接收线程。"""
         if self._serial and self._serial.is_open:
             return True
         try:
@@ -62,6 +47,7 @@ class SerialPort:
             self._serial.dtr = False
             self._serial.reset_input_buffer()
             self._running = True
+            # 后台线程持续读串口，数据放入 _rx_buf
             self._rx_thread = threading.Thread(
                 target=self._rx_task, daemon=True
             )
@@ -73,6 +59,7 @@ class SerialPort:
             return False
 
     def close(self):
+        """关闭串口，停止接收线程。"""
         self._running = False
         if self._rx_thread and self._rx_thread.is_alive():
             self._rx_thread.join(timeout=1.0)
@@ -80,32 +67,45 @@ class SerialPort:
             self._serial.close()
 
     def read_frames(self, max_frames=None):
-        """Read complete binary protocol frames from the receive buffer."""
+        """从接收缓冲区解析完整帧，返回 [(cmd, payload), ...] 列表。
+
+        解析流程：找帧头 → 读长度 → 等够整帧 → 校验 → 返回。
+        帧头错位、长度非法、校验失败均跳过并继续搜索下一帧。
+        """
         frames = []
         with self._lock:
             while max_frames is None or len(frames) < max_frames:
+                # 查找帧头
                 head_idx = self._rx_buf.find(FRAME_HEAD)
                 if head_idx < 0:
+                    # 未找到帧头，保留最后1字节防止 AA 被截断
                     if len(self._rx_buf) > 1:
                         del self._rx_buf[:-1]
                     break
 
+                # 丢弃帧头前的废字节
                 if head_idx > 0:
                     del self._rx_buf[:head_idx]
 
+                # 数据不够最小完整帧，等下次
                 if len(self._rx_buf) < FRAME_OVERHEAD:
                     break
 
-                payload_len = self._rx_buf[3]
+                payload_len = self._rx_buf[3]  # 第4字节 = 负载长度
                 frame_len = FRAME_OVERHEAD + payload_len
+
+                # 负载长度超限，丢弃当前帧头字节后重试
                 if payload_len > MAX_PAYLOAD_LEN:
                     del self._rx_buf[0]
                     continue
+
+                # 数据不够完整帧，等下次
                 if len(self._rx_buf) < frame_len:
                     break
 
                 frame = bytes(self._rx_buf[:frame_len])
 
+                # 累加和校验
                 checksum = sum(frame[:-1]) & 0xFF
                 if checksum != frame[-1]:
                     if self._debug:
@@ -113,16 +113,17 @@ class SerialPort:
                             '[SerialPort] 丢弃校验失败帧: '
                             f'expected=0x{checksum:02X}, got=0x{frame[-1]:02X}'
                         )
-                    del self._rx_buf[0]
+                    del self._rx_buf[0]  # 丢弃帧头字节，继续搜索
                     continue
 
+                # 校验通过，移除该帧并记录
                 del self._rx_buf[:frame_len]
-                frames.append((frame[2], frame[4:-1]))
+                frames.append((frame[2], frame[4:-1]))  # (cmd, payload)
 
         return frames
 
     def read_raw(self, n=0):
-        """Read raw bytes from the receive buffer for debugging."""
+        """读取接收缓冲区的原始字节（调试用）。"""
         with self._lock:
             if n > 0:
                 data = bytes(self._rx_buf[:n])
@@ -133,11 +134,7 @@ class SerialPort:
             return data
 
     def write(self, data):
-        """
-        Send data to the serial port.
-
-        data: bytes 或 bytearray 或 list[int]
-        """
+        """发送原始字节到串口，支持 bytes/bytearray/list。"""
         if not self._serial or not self._serial.is_open:
             return
         if isinstance(data, list):
@@ -153,13 +150,14 @@ class SerialPort:
             return 0
 
     def write_frame(self, cmd, payload=b''):
-        """Build and send one binary protocol frame."""
+        """构建并发送一帧协议数据。"""
         return self.write(build_frame(cmd, payload))
 
     def _rx_task(self):
+        """后台接收线程：持续读串口，数据放入 _rx_buf。"""
         while self._running:
             try:
-                chunk = self._serial.read(64)
+                chunk = self._serial.read(64)  # 每次最多读64字节
                 if chunk:
                     if self._debug:
                         self._log(f'[SerialPort] RX {len(chunk)}B: {chunk!r}')
@@ -172,16 +170,12 @@ class SerialPort:
 
 
 def main():
-
-    from robot_controller.packet_protocol import (
-        PACKET_CMD_SERVO,
-        pack_servo_command,
-    )
+    """简单测试：发送一帧舵机指令。"""
 
     read_response = False
     timeout = 1.0
     sp = SerialPort()
-    
+
     payload = pack_servo_command(1, 400.0, 1000.0)
     sent = sp.write_frame(PACKET_CMD_SERVO, payload)
     if sent:

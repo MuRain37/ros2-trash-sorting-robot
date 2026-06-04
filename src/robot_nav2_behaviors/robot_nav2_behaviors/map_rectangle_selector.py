@@ -1,3 +1,5 @@
+"""地图矩形选择器：在 OpenCV 地图窗口中框选覆盖任务区域。"""
+
 import os
 
 import cv2
@@ -16,15 +18,21 @@ DEFAULT_MAP_YAML = os.path.join(
 
 
 class MapRectangleSelector(Node):
+    """把鼠标框选的地图矩形提交给覆盖任务服务。"""
+
     CONTROL_BAR_HEIGHT = 64
     SEND_BUTTON = (16, 14, 148, 50)
     UNDO_BUTTON = (164, 14, 296, 50)
 
     def __init__(self):
         super().__init__('map_rectangle_selector')
+        # 用于显示和选区的地图 yaml 路径
         self.declare_parameter('map_yaml', DEFAULT_MAP_YAML)
+        # OpenCV 窗口标题
         self.declare_parameter('window_name', 'room map')
+        # 提交矩形任务时使用的坐标系
         self.declare_parameter('frame_id', 'map')
+        # 覆盖任务添加服务名
         self.declare_parameter('task_service', 'add_coverage_rectangle')
 
         self.map_yaml = self.get_parameter('map_yaml').value
@@ -50,11 +58,13 @@ class MapRectangleSelector(Node):
         self.dragging = False
         self.start_pixel = None
         self.end_pixel = None
+        # 每个矩形保存像素边界、map 边界和提交状态
         self.rectangles = []
         self.sent = False
         self.redraw_display()
 
     def load_map_info(self, yaml_path):
+        """读取地图图片路径、分辨率和原点。"""
         info = self.read_simple_yaml(yaml_path)
         image_path = info.get('image')
         if image_path is None:
@@ -86,8 +96,10 @@ class MapRectangleSelector(Node):
         return data
 
     def pixel_to_map(self, pixel):
+        """把图像像素坐标转换为 map 坐标。"""
         px, py = pixel
         height = self.image.shape[0]
+        # 图像 y 轴向下，map y 轴向上，因此这里需要用 height - py 翻转。
         map_x = self.origin[0] + px * self.resolution
         map_y = self.origin[1] + (height - py) * self.resolution
         return map_x, map_y
@@ -110,6 +122,7 @@ class MapRectangleSelector(Node):
         for rectangle in self.rectangles:
             top_left = rectangle['top_left']
             bottom_right = rectangle['bottom_right']
+            # 颜色区分：红色未提交，黄色提交中，橙色已入队。
             color = (0, 0, 255)
             if rectangle['submitting']:
                 color = (0, 255, 255)
@@ -200,6 +213,7 @@ class MapRectangleSelector(Node):
         self.display = cv2.vconcat([self.map_display, controls])
 
     def mouse_callback(self, event, x, y, flags, userdata):
+        """处理地图拖拽和底部按钮点击。"""
         del flags, userdata
         image_height = self.image.shape[0]
         if y >= image_height:
@@ -211,6 +225,7 @@ class MapRectangleSelector(Node):
 
         current = (x, y)
 
+        # 鼠标按下记录起点，移动更新预览，松开后固化为一个矩形。
         if event == cv2.EVENT_LBUTTONDOWN:
             self.dragging = True
             self.start_pixel = current
@@ -234,6 +249,7 @@ class MapRectangleSelector(Node):
             if not self.can_send():
                 self.get_logger().warn('draw a rectangle before adding')
                 return
+            # Send 后一次性提交所有尚未提交的矩形，避免重复入队。
             self.call_pending_task_services()
             self.sent = True
             self.redraw_display()
@@ -281,6 +297,7 @@ class MapRectangleSelector(Node):
         return top_left, top_right, bottom_right, bottom_left
 
     def print_and_store_rectangle(self):
+        """保存当前框选矩形并记录 map 坐标边界。"""
         top_left, top_right, bottom_right, bottom_left = (
             self.get_rectangle_points()
         )
@@ -307,6 +324,7 @@ class MapRectangleSelector(Node):
             f'bottom_right=({map_bottom_right[0]:.3f}, '
             f'{map_bottom_right[1]:.3f})'
         )
+        # 服务只需要轴对齐边界，因此把四个角压缩成 min/max。
         min_x = min(map_bottom_left[0], map_bottom_right[0], map_top_right[0],
                     map_top_left[0])
         max_x = max(map_bottom_left[0], map_bottom_right[0], map_top_right[0],
@@ -337,6 +355,7 @@ class MapRectangleSelector(Node):
             self.call_task_service(rectangle)
 
     def call_task_service(self, rectangle):
+        """提交单个矩形任务。"""
         if not self.task_client.wait_for_service(timeout_sec=1.0):
             self.get_logger().warn(
                 'coverage task service is not available: '
@@ -344,6 +363,7 @@ class MapRectangleSelector(Node):
             )
             return
 
+        # 标记 submitting 后刷新界面，避免提交过程里继续撤销。
         rectangle['submitting'] = True
         self.redraw_display()
         min_x, min_y, max_x, max_y = rectangle['map_bounds']
@@ -354,6 +374,7 @@ class MapRectangleSelector(Node):
         request.max_y = max_y
         request.frame_id = self.frame_id
         future = self.task_client.call_async(request)
+        # 异步回调里继续更新该矩形的 queued/submitting 状态。
         future.add_done_callback(
             lambda future, rectangle=rectangle: self.handle_task_response(
                 future,
@@ -384,6 +405,7 @@ class MapRectangleSelector(Node):
             self.get_logger().warn(response.message)
 
     def run(self):
+        """运行 OpenCV 窗口并处理 ROS 回调。"""
         self.get_logger().info(f'Loaded map image: {self.map_image_path}')
         self.get_logger().info(
             f'resolution={self.resolution}, origin={self.origin}'
@@ -403,6 +425,7 @@ class MapRectangleSelector(Node):
 
 
 def main(args=None):
+    """启动地图矩形选择器。"""
     rclpy.init(args=args)
     node = MapRectangleSelector()
     try:

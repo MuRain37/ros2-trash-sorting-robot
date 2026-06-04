@@ -1,3 +1,5 @@
+"""覆盖路径执行节点：把自定义覆盖 Action 转发给 Nav2 多点导航。"""
+
 from action_msgs.msg import GoalStatus
 from nav2_msgs.action import NavigateThroughPoses
 import rclpy
@@ -7,10 +9,15 @@ from robot_interfaces.action import ExecuteCoveragePath
 
 
 class CoverageNavigator(Node):
+    """接收覆盖路径并调用 NavigateThroughPoses 执行。"""
+
     def __init__(self):
         super().__init__('coverage_navigator')
+        # 对外提供的覆盖路径执行 Action 名
         self.declare_parameter('execute_action', 'execute_coverage_path')
+        # Nav2 NavigateThroughPoses Action 名
         self.declare_parameter('navigate_action', 'navigate_through_poses')
+        # 等待 Nav2 Action 服务的超时时间（s）
         self.declare_parameter('server_timeout_sec', 5.0)
 
         self.execute_action = self.get_parameter('execute_action').value
@@ -33,6 +40,7 @@ class CoverageNavigator(Node):
         )
 
     async def execute_callback(self, goal_handle):
+        """执行一条 nav_msgs/Path 覆盖路径。"""
         result = ExecuteCoveragePath.Result()
         path = goal_handle.request.path
 
@@ -58,6 +66,7 @@ class CoverageNavigator(Node):
             f'executing coverage path with {len(nav_goal.poses)} poses'
         )
 
+        # 覆盖 Action 不直接导航，只把路径转交给 Nav2 多点导航。
         nav_goal_future = self.navigate_client.send_goal_async(
             nav_goal,
             feedback_callback=lambda feedback: self.publish_feedback(
@@ -75,6 +84,7 @@ class CoverageNavigator(Node):
         nav_result_future = nav_goal_handle.get_result_async()
         nav_result = await nav_result_future
 
+        # Nav2 的状态决定自定义覆盖 Action 的最终状态。
         if nav_result.status == GoalStatus.STATUS_SUCCEEDED:
             result.success = True
             result.message = 'coverage path executed'
@@ -91,6 +101,7 @@ class CoverageNavigator(Node):
         return result
 
     def publish_feedback(self, goal_handle, feedback):
+        """转发 Nav2 剩余路点数量。"""
         execute_feedback = ExecuteCoveragePath.Feedback()
         execute_feedback.remaining_poses = (
             feedback.feedback.number_of_poses_remaining
@@ -99,6 +110,7 @@ class CoverageNavigator(Node):
 
 
 def main(args=None):
+    """启动覆盖路径执行节点。"""
     rclpy.init(args=args)
     node = CoverageNavigator()
     try:

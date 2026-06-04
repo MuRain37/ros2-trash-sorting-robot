@@ -1,3 +1,5 @@
+"""机械臂目标 Action 节点：接收坐标目标并委托 MoveIt 执行。"""
+
 import rclpy
 from rclpy.action import ActionServer
 from rclpy.action import GoalResponse
@@ -11,13 +13,16 @@ from robot_interfaces.action import ArmTarget
 
 
 class ArmMoveItTargetController(Node):
-    """Expose /arm_target and delegate motion execution to MoveIt."""
+    """提供 /arm_moveit_target Action 服务。"""
 
     def __init__(self):
         super().__init__('arm_moveit_target_controller')
 
+        # MoveIt 规划组名
         self.declare_parameter('group_name', 'plan')
+        # MoveGroup Action 名
         self.declare_parameter('move_action_name', '/move_action')
+        # 对外提供的机械臂目标 Action 名
         self.declare_parameter('action_name', '/arm_moveit_target')
 
         self._group_name = self.get_parameter('group_name').value
@@ -50,6 +55,7 @@ class ArmMoveItTargetController(Node):
         )
 
     def _handle_arm_target(self, goal_request):
+        """接受机械臂目标请求。"""
         self.get_logger().info(
             f'MoveIt target: [{goal_request.x:.2f}, '
             f'{goal_request.y:.2f}, {goal_request.z:.2f}] cm, '
@@ -58,6 +64,7 @@ class ArmMoveItTargetController(Node):
         return GoalResponse.ACCEPT
 
     def _execute_arm_target(self, goal_handle):
+        """执行目标并回传进度。"""
         goal = goal_handle.request
         pitch = None if goal.end_angle < -0.5 else goal.end_angle
 
@@ -99,6 +106,7 @@ class ArmMoveItTargetController(Node):
 
 
 def main(args=None):
+    """启动机械臂 MoveIt 目标节点。"""
     rclpy.init(args=args)
     node = ArmMoveItTargetController()
     executor = rclpy.executors.MultiThreadedExecutor()

@@ -18,13 +18,14 @@ from robot_controller.packet_protocol import (  # noqa: E402
     PACKET_CMD_SERVO,
     PACKET_TYPE_MOTOR_STATE,
     PACKET_TYPE_SERVO_STATE,
+    build_frame,
     pack_motor_command,
     pack_servo_command,
 )
 from robot_controller.serial_feedback_dispatcher import (  # noqa: E402
     SerialFeedbackDispatcher,
 )
-from robot_controller.serial_port import SerialPort, build_frame  # noqa: E402
+from robot_controller.serial_port import SerialPort  # noqa: E402
 
 
 class FakeLogger:

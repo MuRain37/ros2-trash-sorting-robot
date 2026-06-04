@@ -31,7 +31,7 @@ hardware_interface::CallbackReturn DiffRobotHardware::on_init(
     return hardware_interface::CallbackReturn::ERROR;
   }
 
-  // 四轮机器人需要 4 个 joint
+  // 四轮底盘固定使用 4 个轮关节。
   if (info_.joints.size() != 4)
   {
     RCLCPP_FATAL(
@@ -51,7 +51,7 @@ hardware_interface::CallbackReturn DiffRobotHardware::on_init(
 
   for (const hardware_interface::ComponentInfo & joint : info_.joints)
   {
-    // Each joint has one velocity command interface and two state interfaces (position, velocity)
+    // 每个轮关节需要速度命令、位置状态和速度状态接口。
     if (joint.command_interfaces.size() != 1)
     {
       RCLCPP_FATAL(
@@ -132,7 +132,7 @@ hardware_interface::CallbackReturn DiffRobotHardware::on_activate(
 {
   RCLCPP_INFO(rclcpp::get_logger("DiffRobotHardware"), "Activating ...please wait...");
 
-  // set some default values
+  // 激活时初始化状态缓存。
   for (auto i = 0u; i < hw_positions_.size(); i++)
   {
     if (std::isnan(hw_positions_[i]))
@@ -153,7 +153,7 @@ hardware_interface::CallbackReturn DiffRobotHardware::on_activate(
   }
   received_fb_msg_ptr_.set(std::make_shared<std_msgs::msg::Float64MultiArray>(empty_int16array));
 
-  //订阅者，接收外部反馈数据
+  // 订阅硬件桥接节点发布的轮子反馈。
   fb_subscriber_ =
     this->node_->create_subscription<std_msgs::msg::Float64MultiArray>(
     DEFAULT_STATE_TOPIC, rclcpp::SystemDefaultsQoS(),
@@ -168,7 +168,7 @@ hardware_interface::CallbackReturn DiffRobotHardware::on_activate(
       received_fb_msg_ptr_.set(std::move(msg));
     });
 
-  //发布者，发送命令数据
+  // 发布控制器写入的轮速命令。
   cmd_publisher = this->node_->create_publisher<std_msgs::msg::Float64MultiArray>(DEFAULT_COMMAND_TOPIC, rclcpp::SystemDefaultsQoS());
   realtime_cmd_publisher_ = std::make_shared<realtime_tools::RealtimePublisher<std_msgs::msg::Float64MultiArray>>(cmd_publisher);
 
@@ -202,6 +202,7 @@ hardware_interface::return_type DiffRobotHardware::read(
   {
     if (i < hw_velocities_.size())
     {
+      // 反馈话题给出轮速；ros2_control 的 position 状态用周期积分得到。
       hw_velocities_[i] = fb_msg->data[i];
       hw_positions_[i] += period.seconds() * hw_velocities_[i];
     }
@@ -217,6 +218,7 @@ hardware_interface::return_type DiffRobotHardware::write(
   {
     auto & cmd_msg = realtime_cmd_publisher_->msg_;
     cmd_msg.data.resize(hw_commands_.size());
+    // 控制器写入的速度命令直接转发给 Python 硬件桥接节点。
     for (auto i = 0u; i < hw_commands_.size(); i++)
     {
       cmd_msg.data[i] = hw_commands_[i];

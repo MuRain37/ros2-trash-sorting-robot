@@ -1,3 +1,5 @@
+"""启动 Nav2 和覆盖导航辅助节点。"""
+
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
@@ -6,6 +8,7 @@ from launch.substitutions import LaunchConfiguration
 
 
 def generate_launch_description():
+    """生成导航相关启动项。"""
     declare_use_sim_time = DeclareLaunchArgument(
         'use_sim_time',
         default_value='true',

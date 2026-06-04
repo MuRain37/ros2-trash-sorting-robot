@@ -1,3 +1,5 @@
+"""启动真实硬件模式的 ros2_control、控制器和硬件通信节点。"""
+
 import os
 
 from ament_index_python.packages import get_package_share_directory
@@ -10,6 +12,7 @@ from launch_ros.parameter_descriptions import ParameterValue
 
 
 def custom_control_actions():
+    """创建真实硬件控制链路的启动动作。"""
     robot_description_pkg = get_package_share_directory('robot_description')
     moveit_pkg = get_package_share_directory('robot_moveit_config')
 

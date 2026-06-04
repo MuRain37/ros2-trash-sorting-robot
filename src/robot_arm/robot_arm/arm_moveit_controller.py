@@ -1,3 +1,5 @@
+"""机械臂 MoveIt 控制器：计算 IK 并发送 MoveGroup 执行目标。"""
+
 import math
 import time
 
@@ -23,7 +25,7 @@ MOVEIT_ERROR_NAMES = {
 
 
 class ArmMoveItController:
-    """Compute and execute arm targets through MoveIt."""
+    """封装 MoveIt IK、规划和执行流程。"""
 
     ALLOWED_PLANNING_TIME = 5.0
     AUTO_PITCH_VALUES = [45, 60, 30, 75, 15, 90, 0, -15, -30, -45, -60, -75, -90]
@@ -79,6 +81,7 @@ class ArmMoveItController:
         )
 
     def set_link_lengths(self, lengths):
+        """更新从 URDF 解析出的机械臂连杆长度。"""
         self._arm_link_lengths_cm = lengths
         self._node.get_logger().info(
             'Loaded arm link lengths from /robot_description: '
@@ -87,6 +90,7 @@ class ArmMoveItController:
         )
 
     def move_to_target(self, x, y, z, pitch, feedback_callback=None):
+        """按厘米坐标和末端俯仰角移动机械臂。"""
         pitch_text = 'auto' if pitch is None else f'{pitch:.2f} deg'
         self._node.get_logger().info(
             f'MoveIt pose target: link={self.TARGET_LINK}, '
@@ -97,6 +101,7 @@ class ArmMoveItController:
 
         last_failure = None
         for candidate_pitch in self._pitch_candidates(pitch):
+            # pitch 为 auto 时按候选角逐个试 IK，成功后立即执行。
             ik_result = self._compute_moveit_ik(
                 x,
                 y,
@@ -195,6 +200,7 @@ class ArmMoveItController:
         return True, final_angles, None
 
     def _compute_moveit_ik(self, x_cm, y_cm, z_cm, pitch_deg, feedback_callback):
+        """使用多个初始种子求解 MoveIt IK。"""
         if not self._compute_ik.wait_for_service(
             timeout_sec=self.WAIT_FOR_IK_TIMEOUT
         ):
@@ -208,6 +214,7 @@ class ArmMoveItController:
             z_cm,
             pitch_deg,
         ):
+            # 不同 seed 可帮助 MoveIt 跳出局部无解或碰到关节边界的情况。
             request = self._build_ik_request(
                 x_cm,
                 y_cm,
@@ -244,6 +251,7 @@ class ArmMoveItController:
                 continue
 
             if not self._fixed_end_joints_match(positions):
+                # 末端虚拟关节只用于约束姿态，不允许 IK 改动它们。
                 self._last_ik_error = (
                     'IK changed fixed end joints: '
                     f'{self._format_joint_positions(positions, self.FIXED_END_JOINTS)}'
@@ -314,6 +322,7 @@ class ArmMoveItController:
         seeds = []
 
         seeds.extend(self._geometric_seed_positions(x_cm, y_cm, z_cm, pitch_deg))
+        # 几何解失败时仍保留零位和朝向目标的 base yaw 作为兜底种子。
         seeds.extend([
             {},
             {
@@ -324,6 +333,7 @@ class ArmMoveItController:
         unique_seeds = []
         seen = set()
         for seed in seeds:
+            # 固定末端关节后去重，避免重复请求 /compute_ik。
             fixed_seed = {
                 joint_name: seed.get(joint_name, 0.0)
                 for joint_name in self.MOVEIT_JOINTS
@@ -341,6 +351,7 @@ class ArmMoveItController:
         return unique_seeds
 
     def _geometric_seed_positions(self, x_cm, y_cm, z_cm, pitch_deg):
+        """用四连杆几何解生成 IK 初始种子。"""
         if self._arm_link_lengths_cm is None:
             return []
 
@@ -354,6 +365,7 @@ class ArmMoveItController:
         wrist_x = x_cm - l4 * end_dir_x
         wrist_y = y_cm - l4 * end_dir_y
         wrist_z = z_cm - l4 * end_dir_z
+        # 先从目标点扣掉末端连杆，得到腕关节目标点。
         r = wrist_x * math.cos(theta1) + wrist_y * math.sin(theta1)
         z_from_shoulder = wrist_z - l1
         distance = math.hypot(r, z_from_shoulder)

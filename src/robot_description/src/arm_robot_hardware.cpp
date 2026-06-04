@@ -220,6 +220,7 @@ hardware_interface::return_type ArmRobotHardware::read(
   received_fb_msg_ptr_.get(fb_msg);
   if (fb_msg)
   {
+    // 真实关节使用硬件桥接节点反馈；数量不足时只更新已有部分。
     const std::size_t feedback_count =
       std::min(real_joint_count_, static_cast<std::size_t>(fb_msg->data.size()));
     if (feedback_count < real_joint_count_)
@@ -236,6 +237,7 @@ hardware_interface::return_type ArmRobotHardware::read(
     for (std::size_t i = 0; i < feedback_count; ++i)
     {
       const double position = fb_msg->data[i];
+      // 反馈只有位置，速度由两次位置差估算。
       hw_velocities_[i] = dt > 0.0 ? (position - last_positions_[i]) / dt : 0.0;
       hw_positions_[i] = position;
       last_positions_[i] = position;
@@ -249,6 +251,7 @@ hardware_interface::return_type ArmRobotHardware::write(
   const rclcpp::Time & /*time*/, const rclcpp::Duration & period)
 {
   const double dt = period.seconds();
+  // 虚拟末端关节没有真实硬件，直接跟随控制器命令更新状态。
   for (std::size_t i = real_joint_count_; i < hw_commands_.size(); ++i)
   {
     if (!std::isnan(hw_commands_[i]))
@@ -263,6 +266,7 @@ hardware_interface::return_type ArmRobotHardware::write(
   {
     auto & cmd_msg = realtime_cmd_publisher_->msg_;
     cmd_msg.data.resize(real_joint_count_);
+    // 只发送真实关节命令，虚拟关节留给 MoveIt 约束使用。
     for (std::size_t i = 0; i < real_joint_count_; ++i)
     {
       cmd_msg.data[i] = hw_commands_[i];

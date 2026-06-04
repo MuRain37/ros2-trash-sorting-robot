@@ -59,15 +59,14 @@ public:
     const rclcpp::Time & time, const rclcpp::Duration & period) override;
 
 private:
+  // 四轮底盘 ros2_control 硬件接口：订阅反馈、发布轮速命令。
   std::vector<double> hw_velocities_;
   std::vector<double> hw_commands_;
   std::vector<double> hw_positions_;
   std::shared_ptr<rclcpp::Node> node_;
-  // subscribe wheel feedback
   bool subscriber_is_active_ = false;
   rclcpp::Subscription<std_msgs::msg::Float64MultiArray>::SharedPtr fb_subscriber_ = nullptr;
   realtime_tools::RealtimeBox<std::shared_ptr<std_msgs::msg::Float64MultiArray>> received_fb_msg_ptr_{nullptr};
-  // publish wheel command
   std::shared_ptr<realtime_tools::RealtimePublisher<std_msgs::msg::Float64MultiArray>> realtime_cmd_publisher_ = nullptr;
   std::shared_ptr<rclcpp::Publisher<std_msgs::msg::Float64MultiArray>> cmd_publisher = nullptr;
 };

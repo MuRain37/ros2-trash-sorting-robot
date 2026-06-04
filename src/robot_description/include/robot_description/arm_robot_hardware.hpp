@@ -55,6 +55,7 @@ public:
     const rclcpp::Time & time, const rclcpp::Duration & period) override;
 
 private:
+  // 机械臂 ros2_control 硬件接口：前 real_joint_count_ 个关节走真实话题反馈。
   double initial_position_for_joint(const hardware_interface::ComponentInfo & joint) const;
   bool joint_has_interface(
     const std::vector<hardware_interface::InterfaceInfo> & interfaces,

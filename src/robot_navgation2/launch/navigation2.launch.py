@@ -1,3 +1,5 @@
+"""Nav2 启动入口：合并拆分参数文件并启动 bringup 与 RViz。"""
+
 import os
 import tempfile
 
@@ -23,6 +25,7 @@ NAV2_PARAM_FILES = [
 
 
 def _merged_nav2_params(context):
+    """返回单个 Nav2 参数文件；未指定时合并 config/nav2_params。"""
     params_file = launch.substitutions.LaunchConfiguration(
         'params_file').perform(context)
     if params_file:
@@ -50,12 +53,12 @@ def _merged_nav2_params(context):
 
 
 def _include_nav2_bringup(context, nav2_bringup_dir, map_yaml_path, use_sim_time):
+    """包含 nav2_bringup 的 bringup_launch.py。"""
     nav2_param_path = _merged_nav2_params(context)
     return [
         launch.actions.IncludeLaunchDescription(
             PythonLaunchDescriptionSource(
                 [nav2_bringup_dir, '/launch', '/bringup_launch.py']),
-            # 使用 Launch 参数替换原有参数
             launch_arguments={
                 'map': map_yaml_path,
                 'use_sim_time': use_sim_time,
@@ -65,7 +68,7 @@ def _include_nav2_bringup(context, nav2_bringup_dir, map_yaml_path, use_sim_time
 
 
 def generate_launch_description():
-    # 获取与拼接默认路径
+    """生成 Nav2 bringup 与 RViz 启动项。"""
     robot_navgation2_dir = get_package_share_directory(
         'robot_navgation2')
     nav2_bringup_dir = get_package_share_directory('nav2_bringup')
@@ -74,7 +77,6 @@ def generate_launch_description():
             robot_navgation2_dir)))),
         'src', 'robot_navgation2', 'rviz', 'nav2_default_view.rviz')
 
-    # 创建 Launch 配置
     use_sim_time = launch.substitutions.LaunchConfiguration(
         'use_sim_time', default='true')
     map_yaml_path = launch.substitutions.LaunchConfiguration(
@@ -85,7 +87,6 @@ def generate_launch_description():
         'params_file', default='')
 
     return launch.LaunchDescription([
-        # 声明新的 Launch 参数
         launch.actions.DeclareLaunchArgument('use_sim_time', default_value=use_sim_time,
                                              description='Use simulation (Gazebo) clock if true'),
         launch.actions.DeclareLaunchArgument('map', default_value=map_yaml_path,

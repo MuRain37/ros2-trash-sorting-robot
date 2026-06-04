@@ -1,3 +1,5 @@
+"""MoveIt move_group 启动入口。"""
+
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
 from launch.substitutions import LaunchConfiguration
@@ -7,6 +9,7 @@ from moveit_configs_utils.launches import generate_move_group_launch
 
 
 def generate_launch_description():
+    """生成 move_group，并透传 use_sim_time。"""
     moveit_config = MoveItConfigsBuilder("four_wheel_robot", package_name="robot_moveit_config").to_moveit_configs()
     move_group_launch = generate_move_group_launch(moveit_config)
 

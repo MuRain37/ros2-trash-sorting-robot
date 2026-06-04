@@ -1,3 +1,5 @@
+"""启动 robot_state_publisher 并发布由 xacro 生成的机器人描述。"""
+
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
 from launch.substitutions import Command, LaunchConfiguration
@@ -6,6 +8,7 @@ from launch_ros.parameter_descriptions import ParameterValue
 
 
 def generate_launch_description():
+    """生成机器人描述发布节点。"""
     declare_model = DeclareLaunchArgument(
         'model',
         description='Robot xacro file path',

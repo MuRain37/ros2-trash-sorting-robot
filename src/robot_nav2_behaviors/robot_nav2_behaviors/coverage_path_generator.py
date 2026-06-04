@@ -1,3 +1,5 @@
+"""覆盖路径生成节点：将矩形区域转换为往返式清扫路径。"""
+
 import math
 
 import rclpy
@@ -8,15 +10,22 @@ from robot_interfaces.srv import GenerateCoveragePath
 
 
 class CoveragePathGenerator(Node):
+    """提供覆盖路径生成服务，并发布预览矩形和路径。"""
+
     def __init__(self):
         super().__init__('coverage_path_generator')
+        # 输出路径和预览 Marker 使用的默认坐标系
         self.declare_parameter('frame_id', 'map')
+        # 往返扫描线间距（m）
         self.declare_parameter('zigzag_spacing', 1.0)
+        # 覆盖路径生成服务名
         self.declare_parameter(
             'coverage_path_service',
             'generate_coverage_path',
         )
+        # 矩形预览话题
         self.declare_parameter('rectangle_topic', 'coverage_rectangle')
+        # 路径预览话题
         self.declare_parameter('coverage_path_topic', 'coverage_path_preview')
 
         service_name = self.get_parameter('coverage_path_service').value
@@ -41,6 +50,7 @@ class CoveragePathGenerator(Node):
         self.get_logger().info(f'coverage path service ready: {service_name}')
 
     def handle_generate_coverage_path(self, request, response):
+        """根据矩形边界生成覆盖路径。"""
         min_x = min(request.min_x, request.max_x)
         max_x = max(request.min_x, request.max_x)
         min_y = min(request.min_y, request.max_y)
@@ -56,6 +66,7 @@ class CoveragePathGenerator(Node):
         frame_id = request.frame_id or self.get_parameter('frame_id').value
         start_point = None
         if request.use_start:
+            # 起点用于选择离机器人当前位置最近的扫描入口。
             start_point = (
                 float(request.start_x),
                 float(request.start_y),
@@ -93,6 +104,7 @@ class CoveragePathGenerator(Node):
         return f'({start_x:.3f}, {start_y:.3f})'
 
     def publish_rectangle(self, frame_id, min_x, min_y, max_x, max_y):
+        """发布矩形边界预览。"""
         rectangle = PolygonStamped()
         rectangle.header.frame_id = frame_id
         rectangle.header.stamp = self.get_clock().now().to_msg()
@@ -106,6 +118,7 @@ class CoveragePathGenerator(Node):
         self.rectangle_publisher.publish(rectangle)
 
     def create_coverage_path(self, frame_id, zigzag_points):
+        """把二维点列转换为 nav_msgs/Path。"""
         path = Path()
         path.header.frame_id = frame_id
         path.header.stamp = self.get_clock().now().to_msg()
@@ -125,9 +138,11 @@ class CoveragePathGenerator(Node):
                 dy = next_y - y
                 if dx != 0.0 or dy != 0.0:
                     last_yaw = math.atan2(dy, dx)
+            # 最后一个点沿用上一段朝向，避免没有下一点时 yaw 归零。
             yield x, y, last_yaw
 
     def create_pose_stamped(self, frame_id, x, y, yaw):
+        """创建单个路径点。"""
         pose = PoseStamped()
         pose.header.frame_id = frame_id
         pose.header.stamp = self.get_clock().now().to_msg()
@@ -145,8 +160,10 @@ class CoveragePathGenerator(Node):
         max_y,
         start_point=None,
     ):
+        """按区域长边方向生成往返扫描点。"""
         spacing = float(self.get_parameter('zigzag_spacing').value)
         if spacing <= 0.0:
+            # 非法间距退化为一条扫描线，保证仍能生成路径。
             spacing = max_x - min_x
 
         width = max_x - min_x
@@ -155,6 +172,7 @@ class CoveragePathGenerator(Node):
             return []
 
         if width >= height:
+            # 宽区域沿 x 方向扫，扫描线在 y 方向排列。
             tracks = self.create_tracks(min_y, max_y, spacing)
             return self.select_zigzag(
                 tracks,
@@ -164,6 +182,7 @@ class CoveragePathGenerator(Node):
                 max_x,
             )
 
+        # 高区域沿 y 方向扫，扫描线在 x 方向排列。
         tracks = self.create_tracks(min_x, max_x, spacing)
         return self.select_zigzag(
             tracks,
@@ -174,8 +193,10 @@ class CoveragePathGenerator(Node):
         )
 
     def create_tracks(self, min_value, max_value, spacing):
+        """生成等间距扫描线坐标。"""
         span = max_value - min_value
         track_count = max(1, int(math.ceil(span / spacing)))
+        # 居中分布扫描线，避免最后一条贴边而另一侧留下大空隙。
         margin = (span - (track_count - 1) * spacing) / 2.0
         return [
             min_value + margin + index * spacing
@@ -183,7 +204,9 @@ class CoveragePathGenerator(Node):
         ]
 
     def select_zigzag(self, tracks, start_point, builder, low, high):
+        """选择离起点最近的扫描方向。"""
         reversed_tracks = list(reversed(tracks))
+        # 同一组扫描线有四种入口方向，选离 start_point 最近的一种。
         variants = [
             builder(tracks, low, high, True),
             builder(tracks, low, high, False),
@@ -292,6 +315,7 @@ class CoveragePathGenerator(Node):
     def append_line_with_midpoint(self, points, start, end):
         start_x, start_y = start
         end_x, end_y = end
+        # 每条直线加入中点，让 Nav2 路径更贴近完整覆盖线段。
         points.extend([
             start,
             (
@@ -303,6 +327,7 @@ class CoveragePathGenerator(Node):
 
 
 def main(args=None):
+    """启动覆盖路径生成节点。"""
     rclpy.init(args=args)
     node = CoveragePathGenerator()
     try:

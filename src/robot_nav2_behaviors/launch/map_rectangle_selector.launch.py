@@ -1,3 +1,5 @@
+"""启动覆盖区域选择、路径生成、任务管理和 RViz 预览节点。"""
+
 import os
 
 from ament_index_python.packages import get_package_share_directory
@@ -8,6 +10,7 @@ from launch_ros.actions import Node
 
 
 def generate_launch_description():
+    """生成覆盖导航辅助节点的 LaunchDescription。"""
     default_map_yaml = os.path.join(
         get_package_share_directory('robot_navgation2'),
         'maps',
