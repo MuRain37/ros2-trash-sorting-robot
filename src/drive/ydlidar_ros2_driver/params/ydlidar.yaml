@@ -1,6 +1,6 @@
 ydlidar_ros2_driver_node:
   ros__parameters:
-    port: /dev/ttyUSB0
+    port: /dev/ydlidar
     frame_id: lidar_link
     ignore_array: ""
     baudrate: 230400
@@ -13,7 +13,7 @@ ydlidar_ros2_driver_node:
     abnormal_check_count: 4
     fixed_resolution: true
     reversion: false
-    inverted: false
+    inverted: true
     auto_reconnect: true
     support_motor_dtr: false
     angle_max: 180.0

@@ -75,6 +75,20 @@ def test_build_motor_frame_checksum():
     assert frame[-1] == (sum(frame[:-1]) & 0xFF)
 
 
+def test_build_servo_set_position_frame_matches_protocol_example():
+    payload = pack_servo_command(1, 500.0, 1000.0)
+    frame = build_frame(PACKET_CMD_SERVO, payload)
+
+    assert frame == bytes.fromhex(
+        'AA BB 04 10 '
+        '00 00 80 3F '
+        '00 00 80 3F '
+        '00 00 FA 43 '
+        '00 00 7A 44 '
+        'F2'
+    )
+
+
 def test_read_frames_handles_noise_partial_and_multiple_frames():
     encoder_payload = pack_motor_command([1.0, 2.0, 3.0, 4.0])
     servo_payload = pack_servo_command(2, 1.5)
@@ -132,7 +146,10 @@ def test_arm_bridge_sends_one_frame_per_servo():
     bridge._on_command(msg)
 
     assert [cmd for cmd, payload in sent] == [PACKET_CMD_SERVO] * 5
-    assert [struct.unpack('<Bf', payload)[0] for cmd, payload in sent] == [
+    assert [struct.unpack('<ffff', payload)[0] for cmd, payload in sent] == [
+        1.0, 1.0, 1.0, 1.0, 1.0
+    ]
+    assert [struct.unpack('<ffff', payload)[1] for cmd, payload in sent] == [
         1, 2, 3, 4, 5
     ]
 

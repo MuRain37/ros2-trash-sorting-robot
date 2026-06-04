@@ -10,11 +10,19 @@ PACKET_TYPE_MOTOR_STATE = 0x82
 PACKET_TYPE_SERVO_STATE = 0x83
 
 MOTOR_FORMAT = '<ffff'
-SERVO_FORMAT = '<Bf'
+SERVO_SET_POSITION_FORMAT = '<ffff'
+SERVO_CHANGE_ID_FORMAT = '<fff'
+SERVO_PROBE_ID_FORMAT = '<ff'
 ENCODER_FORMAT = '<ffff'
 
+SERVO_CMD_SET_POSITION = 1.0
+SERVO_CMD_CHANGE_ID = 2.0
+SERVO_CMD_PROBE_ID = 3.0
+
 MOTOR_PAYLOAD_SIZE = struct.calcsize(MOTOR_FORMAT)
-SERVO_PAYLOAD_SIZE = struct.calcsize(SERVO_FORMAT)
+SERVO_SET_POSITION_PAYLOAD_SIZE = struct.calcsize(SERVO_SET_POSITION_FORMAT)
+SERVO_CHANGE_ID_PAYLOAD_SIZE = struct.calcsize(SERVO_CHANGE_ID_FORMAT)
+SERVO_PROBE_ID_PAYLOAD_SIZE = struct.calcsize(SERVO_PROBE_ID_FORMAT)
 ENCODER_PAYLOAD_SIZE = struct.calcsize(ENCODER_FORMAT)
 
 
@@ -23,9 +31,34 @@ def pack_motor_command(values):
     return struct.pack(MOTOR_FORMAT, *(float(value) for value in values))
 
 
-def pack_servo_command(servo_id, position):
-    """Pack one servo id and target position."""
-    return struct.pack(SERVO_FORMAT, int(servo_id), float(position))
+def pack_servo_command(servo_id, position, duration_ms=1000.0):
+    """Pack one bus-servo set-position command."""
+    return struct.pack(
+        SERVO_SET_POSITION_FORMAT,
+        SERVO_CMD_SET_POSITION,
+        float(servo_id),
+        float(position),
+        float(duration_ms),
+    )
+
+
+def pack_servo_change_id_command(servo_id, new_id):
+    """Pack one bus-servo hardware id change command."""
+    return struct.pack(
+        SERVO_CHANGE_ID_FORMAT,
+        SERVO_CMD_CHANGE_ID,
+        float(servo_id),
+        float(new_id),
+    )
+
+
+def pack_servo_probe_id_command(probe_id):
+    """Pack one bus-servo hardware id probe command."""
+    return struct.pack(
+        SERVO_PROBE_ID_FORMAT,
+        SERVO_CMD_PROBE_ID,
+        float(probe_id),
+    )
 
 
 def unpack_encoder_feedback(payload):
@@ -44,10 +77,10 @@ def unpack_motor_state(payload):
 
 
 def unpack_servo_feedback(payload):
-    """Unpack one servo id and feedback position."""
-    if len(payload) != SERVO_PAYLOAD_SIZE:
+    """Unpack one reported servo position command payload."""
+    if len(payload) != SERVO_SET_POSITION_PAYLOAD_SIZE:
         raise ValueError(
             'invalid servo feedback payload length: '
-            f'{len(payload)} != {SERVO_PAYLOAD_SIZE}'
+            f'{len(payload)} != {SERVO_SET_POSITION_PAYLOAD_SIZE}'
         )
-    return struct.unpack(SERVO_FORMAT, payload)
+    return struct.unpack(SERVO_SET_POSITION_FORMAT, payload)

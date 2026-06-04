@@ -174,16 +174,20 @@ class SerialPort:
 def main():
 
     from robot_controller.packet_protocol import (
-        PACKET_CMD_MOTOR,
-        pack_motor_command,
+        PACKET_CMD_SERVO,
+        pack_servo_command,
     )
 
     read_response = False
     timeout = 1.0
     sp = SerialPort()
     
-    payload = pack_motor_command([0.0, 0.0, 0.0, 0.0])
-    sp.write_frame(PACKET_CMD_MOTOR, payload)
+    payload = pack_servo_command(1, 500.0, 1000.0)
+    sent = sp.write_frame(PACKET_CMD_SERVO, payload)
+    if sent:
+        print(f'发送成功: {sent} 字节')
+    else:
+        print('发送失败')
 
     if read_response:
         import time
