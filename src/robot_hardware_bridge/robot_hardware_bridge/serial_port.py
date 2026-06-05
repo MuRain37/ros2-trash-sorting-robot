@@ -184,7 +184,7 @@ def main():
         (5, 488.0),
     ]
     for servo_id, position in servo_targets:
-        payload = pack_servo_command(servo_id, position, 3000.0)
+        payload = pack_servo_command(servo_id, position, 1000.0)
         sent = sp.write_frame(PACKET_CMD_SERVO, payload)
         if sent:
             print(f'舵机{servo_id}发送成功: {sent} 字节')

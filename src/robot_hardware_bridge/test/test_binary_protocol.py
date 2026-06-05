@@ -50,19 +50,11 @@ class FakePublisher:
         self.messages.append(msg)
 
 
-class FakeTimer:
-
-    def __init__(self, period, callback):
-        self.period = period
-        self.callback = callback
-
-
 class FakeNode:
 
     def __init__(self):
         self.logger = FakeLogger()
         self.publisher = FakePublisher()
-        self.timers = []
 
     def get_logger(self):
         return self.logger
@@ -72,11 +64,6 @@ class FakeNode:
 
     def create_subscription(self, msg_type, topic, callback, depth):
         return callback
-
-    def create_timer(self, period, callback):
-        timer = FakeTimer(period, callback)
-        self.timers.append(timer)
-        return timer
 
 
 def make_serial_with_buffer(data):
@@ -89,11 +76,6 @@ def make_serial_with_buffer(data):
 
 def unpack_servo_payload(payload):
     return struct.unpack('<ffff', payload)
-
-
-def drain_servo_targets(bridge):
-    while bridge._pending_servo_positions is not None:
-        bridge._send_next_servo_target()
 
 
 def test_build_motor_frame_checksum():
@@ -174,7 +156,6 @@ def test_arm_bridge_sends_center_command_as_servo_raw_positions():
     msg.data = [0.0, 0.0, 0.0, 0.0, 0.0]
 
     bridge._on_command(msg)
-    drain_servo_targets(bridge)
 
     assert [cmd for cmd, payload in sent] == [PACKET_CMD_SERVO] * 5
     assert [unpack_servo_payload(payload)[0] for cmd, payload in sent] == [
@@ -207,7 +188,6 @@ def test_arm_bridge_sends_positive_limit_as_servo_raw_positions():
     ]
 
     bridge._on_command(msg)
-    drain_servo_targets(bridge)
 
     assert [unpack_servo_payload(payload)[2] for cmd, payload in sent] == [
         0, 0, 0, 0, 1000
@@ -230,7 +210,6 @@ def test_arm_bridge_sends_negative_limit_as_servo_raw_positions():
     ]
 
     bridge._on_command(msg)
-    drain_servo_targets(bridge)
 
     assert [unpack_servo_payload(payload)[2] for cmd, payload in sent] == [
         1000, 1000, 1000, 1000, 0
@@ -292,35 +271,9 @@ def test_arm_bridge_limits_servo_send_rate_to_10hz(monkeypatch):
             lambda value=now: value,
         )
         bridge._on_command(msg)
-        drain_servo_targets(bridge)
         now += 0.01
 
     assert len(sent) == 10
-
-
-def test_arm_bridge_spreads_servo_frames_across_send_period():
-    sent = []
-    node = FakeNode()
-    bridge = ArmBridge(
-        node,
-        cmd_callback=lambda cmd, payload: sent.append((cmd, payload)),
-        send_rate=10.0,
-    )
-    msg = Float64MultiArray()
-    msg.data = [0.0, 0.0, 0.0, 0.0, 0.0]
-
-    bridge._on_command(msg)
-
-    assert node.timers[-1].period == 0.02
-    assert sent == []
-
-    node.timers[-1].callback()
-    assert len(sent) == 1
-    assert unpack_servo_payload(sent[0][1])[1] == 1
-
-    node.timers[-1].callback()
-    assert len(sent) == 2
-    assert unpack_servo_payload(sent[1][1])[1] == 2
 
 
 def test_feedback_dispatcher_publishes_feedback():
