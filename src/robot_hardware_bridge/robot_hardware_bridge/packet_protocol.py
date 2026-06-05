@@ -10,6 +10,7 @@ MAX_PAYLOAD_LEN = 250
 
 # 命令码（ROS2 → STM32）
 PACKET_CMD_MOTOR = 0x01  # 电机速度指令
+PACKET_CMD_STEPPER = 0x02  # 步进电机绝对步数指令
 PACKET_CMD_SERVO = 0x04  # 舵机控制指令
 
 # 反馈类型码（STM32 → ROS2）
@@ -20,6 +21,7 @@ PACKET_TYPE_SERVO_STATE = 0x83   # 舵机状态（位置反馈）
 
 # struct 格式串（'<'=小端，'f'=float32，与 STM32 一致）
 MOTOR_FORMAT = '<ffff'               # 4个轮速/电机状态值
+STEPPER_FORMAT = '<f'                # 1个步进电机目标绝对步数
 SERVO_SET_POSITION_FORMAT = '<ffff'  # [子命令, 舵机ID, 位置, 时长]
 SERVO_CHANGE_ID_FORMAT = '<fff'      # [子命令, 当前ID, 新ID]
 SERVO_PROBE_ID_FORMAT = '<ff'        # [子命令, 探测ID]
@@ -32,6 +34,7 @@ SERVO_CMD_PROBE_ID = 3.0      # 探测ID是否存在
 
 # 各负载字节长度
 MOTOR_PAYLOAD_SIZE = struct.calcsize(MOTOR_FORMAT)
+STEPPER_PAYLOAD_SIZE = struct.calcsize(STEPPER_FORMAT)
 SERVO_SET_POSITION_PAYLOAD_SIZE = struct.calcsize(SERVO_SET_POSITION_FORMAT)
 SERVO_CHANGE_ID_PAYLOAD_SIZE = struct.calcsize(SERVO_CHANGE_ID_FORMAT)
 SERVO_PROBE_ID_PAYLOAD_SIZE = struct.calcsize(SERVO_PROBE_ID_FORMAT)
@@ -41,6 +44,11 @@ ENCODER_PAYLOAD_SIZE = struct.calcsize(ENCODER_FORMAT)
 def pack_motor_command(values):
     """4个电机速度 → 16字节负载（小端 float32）."""
     return struct.pack(MOTOR_FORMAT, *(float(value) for value in values))
+
+
+def pack_stepper_command(target_steps):
+    """步进电机目标绝对步数 → 4字节负载（小端 float32）."""
+    return struct.pack(STEPPER_FORMAT, float(target_steps))
 
 
 def pack_servo_command(servo_id, position, duration_ms=1000.0):

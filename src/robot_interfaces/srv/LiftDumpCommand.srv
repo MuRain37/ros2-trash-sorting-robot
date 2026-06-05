@@ -1,0 +1,7 @@
+float64 lift_position
+float64 horizontal_rotation
+float64 gripper_rotation
+float64 gripper_open_ratio
+---
+bool success
+string message

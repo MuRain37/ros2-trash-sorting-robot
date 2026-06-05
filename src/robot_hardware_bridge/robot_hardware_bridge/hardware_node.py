@@ -11,6 +11,7 @@ from rclpy.node import Node
 from rclpy.parameter import Parameter
 
 from robot_hardware_bridge.arm_bridge import ArmBridge
+from robot_hardware_bridge.lift_dump_bridge import LiftDumpBridge
 from robot_hardware_bridge.motor_bridge import MotorBridge
 from robot_hardware_bridge.serial_feedback_dispatcher import (
     SerialFeedbackDispatcher,
@@ -41,8 +42,6 @@ class HardwareNode(Node):
         self.declare_parameter('debug', False)
         # 旧版总开环开关；分项参数未设置时作为默认值
         self.declare_parameter('open_loop_control', False)
-        # True 时机械臂只打印目标，不写串口
-        self.declare_parameter('arm_print_only', False)
         # 舵机指令发送频率上限（Hz）
         self.declare_parameter('arm_servo_send_rate', 10.0)
         # 舵机运动完成时间（ms）
@@ -65,7 +64,6 @@ class HardwareNode(Node):
         baudrate = self.get_parameter('baudrate').value
         read_rate = self.get_parameter('read_rate').value
         debug = self.get_parameter('debug').value
-        arm_print_only = bool(self.get_parameter('arm_print_only').value)
         arm_servo_send_rate = float(
             self.get_parameter('arm_servo_send_rate').value
         )
@@ -104,9 +102,14 @@ class HardwareNode(Node):
             self,
             cmd_callback=self._serial.write_frame,
             open_loop_control=self._arm_open_loop_control,
-            print_only=arm_print_only,
             send_rate=arm_servo_send_rate,
             duration_ms=arm_servo_duration_ms,
+        )
+
+        # 升降-倾倒结构桥接负责步进电机和三路舵机的开环控制
+        self._lift_dump = LiftDumpBridge(
+            self,
+            cmd_callback=self._serial.write_frame,
         )
 
         # 串口反馈分发器
@@ -123,7 +126,6 @@ class HardwareNode(Node):
             f'rate: {read_rate}Hz, '
             f'motor_open_loop_control: {self._motor_open_loop_control}, '
             f'arm_open_loop_control: {self._arm_open_loop_control}, '
-            f'arm_print_only: {arm_print_only}, '
             f'arm_servo_send_rate: {arm_servo_send_rate}Hz, '
             f'arm_servo_duration_ms: {arm_servo_duration_ms})'
         )

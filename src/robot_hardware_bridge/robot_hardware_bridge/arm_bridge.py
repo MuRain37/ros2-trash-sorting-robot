@@ -3,7 +3,7 @@
 import math
 import time
 
-from std_msgs.msg import Float64MultiArray
+from std_msgs.msg import Float64, Float64MultiArray
 
 from robot_hardware_bridge.packet_protocol import (
     PACKET_CMD_SERVO,
@@ -13,6 +13,12 @@ from robot_hardware_bridge.packet_protocol import (
 
 # 机械臂关节数量（5自由度）
 DEFAULT_ARM_JOINT_COUNT = 5
+
+# 夹爪舵机配置
+DEFAULT_GRIPPER_SERVO_ID = 6
+GRIPPER_OPEN_RAW = 150.0
+GRIPPER_CLOSE_RAW = 700.0
+
 # 舵机指令发送频率（Hz）
 DEFAULT_SERVO_SEND_RATE = 10.0
 # ArmBridge 默认舵机运动完成时间（ms）
@@ -80,14 +86,15 @@ class ArmBridge:
 
     def __init__(self, node, cmd_topic='arm_position_cmd',
                  fb_topic='arm_position_fb', cmd_callback=None,
-                 open_loop_control=False, print_only=False,
+                 open_loop_control=False,
                  send_rate=DEFAULT_SERVO_SEND_RATE,
-                 duration_ms=DEFAULT_SERVO_DURATION_MS):
+                 duration_ms=DEFAULT_SERVO_DURATION_MS,
+                 gripper_topic='gripper_cmd'):
         self._node = node
         self._cmd_callback = cmd_callback  # 发送回调，签名为 (cmd, payload)
         self._open_loop_control = open_loop_control
         self._joint_count = DEFAULT_ARM_JOINT_COUNT
-        self._print_only = print_only  # True 时只打印不发送（调试用）
+        self._gripper_servo_id = DEFAULT_GRIPPER_SERVO_ID
         self._send_period = 1.0 / float(send_rate) if send_rate > 0.0 else 0.0
         self._duration_ms = float(duration_ms)
         self._last_send_time = None
@@ -100,6 +107,13 @@ class ArmBridge:
             Float64MultiArray,
             cmd_topic,
             self._on_command,
+            10,
+        )
+        # 夹爪开环控制：0.0=关，1.0=开
+        self._gripper_sub = node.create_subscription(
+            Float64,
+            gripper_topic,
+            self._on_gripper_command,
             10,
         )
 
@@ -125,7 +139,6 @@ class ArmBridge:
 
         # 按发送频率节流，避免打爆串口
         if self._should_send_now():
-            self._log_servo_targets(servo_positions)
             self._send_servo_targets(servo_positions)
 
         # 开环模式：把目标值直接当反馈发出
@@ -140,20 +153,9 @@ class ArmBridge:
         msg.data = list(self._positions)
         self._fb_pub.publish(msg)
 
-    def _log_servo_targets(self, servo_positions):
-        """打印舵机目标原始位置值（调试用）."""
-        targets = ', '.join(
-            f'servo{index + 1}={position:.1f}'
-            for index, position in enumerate(servo_positions)
-        )
-        mode = 'print-only' if self._print_only else 'send'
-        self._node.get_logger().info(
-            f'Arm servo targets ({mode}): {targets}'
-        )
-
     def _send_servo_targets(self, servo_positions):
         """逐个打包舵机指令并通过回调发送."""
-        if not self._cmd_callback or self._print_only:
+        if not self._cmd_callback:
             return
 
         for index, position in enumerate(servo_positions):
@@ -164,6 +166,37 @@ class ArmBridge:
                 self._duration_ms,
             )
             self._cmd_callback(PACKET_CMD_SERVO, payload)
+
+    def _on_gripper_command(self, msg: Float64):
+        """收到夹爪开度比例指令，转换为 servo6 原始位置指令."""
+        open_ratio = float(msg.data)
+        if not 0.0 <= open_ratio <= 1.0:
+            self._node.get_logger().warning(
+                f'Invalid gripper command: open ratio {open_ratio} '
+                'not in [0.0, 1.0]'
+            )
+            return
+
+        position = GRIPPER_CLOSE_RAW + open_ratio * (
+            GRIPPER_OPEN_RAW - GRIPPER_CLOSE_RAW
+        )
+        if not self._send_gripper_target(position):
+            self._node.get_logger().warning(
+                'Ignoring gripper command because command callback unavailable'
+            )
+
+    def _send_gripper_target(self, position):
+        """打包夹爪舵机指令并通过回调发送."""
+        if not self._cmd_callback:
+            return False
+
+        payload = pack_servo_command(
+            self._gripper_servo_id,
+            position,
+            self._duration_ms,
+        )
+        self._cmd_callback(PACKET_CMD_SERVO, payload)
+        return True
 
     def _should_send_now(self):
         """发送节流：距上次发送不足 send_period 则跳过."""
@@ -184,6 +217,9 @@ class ArmBridge:
         servo_id: 1-based 舵机编号
         position: 舵机原始位置值
         """
+        if servo_id == self._gripper_servo_id:
+            return
+
         if not 1 <= servo_id <= self._joint_count:
             self._node.get_logger().warning(
                 f'Ignoring servo feedback with invalid id: {servo_id}'

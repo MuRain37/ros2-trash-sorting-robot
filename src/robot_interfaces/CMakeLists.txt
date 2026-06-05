@@ -9,6 +9,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "action/ExecuteCoveragePath.action"
   "srv/AddCoverageRectangle.srv"
   "srv/GenerateCoveragePath.srv"
+  "srv/LiftDumpCommand.srv"
   DEPENDENCIES nav_msgs
 )
 
