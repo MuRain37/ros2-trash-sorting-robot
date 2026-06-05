@@ -22,7 +22,6 @@ DEFAULT_GRIPPER_ROTATE_DIRECTION = 1.0
 DEFAULT_LIFT_GRIPPER_SERVO_ID = 9
 DEFAULT_LIFT_GRIPPER_OPEN_RAW = 150.0
 DEFAULT_LIFT_GRIPPER_CLOSE_RAW = 700.0
-DEFAULT_SEND_RATE_HZ = 10.0
 DEFAULT_SERVO_DURATION_MS = 100.0
 
 SERVO_CENTER = 500.0
@@ -73,19 +72,17 @@ def gripper_open_ratio_to_servo_raw(open_ratio):
 
 
 class LiftDumpBridge:
-    """升降-倾倒结构桥接器：服务更新目标，10Hz 持续发送."""
+    """升降-倾倒结构桥接器：服务收到目标后发送一次."""
 
     def __init__(
         self,
         node,
         service_name='lift_dump_cmd',
         cmd_callback=None,
-        send_rate=DEFAULT_SEND_RATE_HZ,
         servo_duration_ms=DEFAULT_SERVO_DURATION_MS,
     ):
         self._node = node
         self._cmd_callback = cmd_callback
-        self._send_period = 1.0 / float(send_rate) if send_rate > 0.0 else 0.0
         self._servo_duration_ms = float(servo_duration_ms)
 
         self._target_steps = 0.0
@@ -98,14 +95,9 @@ class LiftDumpBridge:
             service_name,
             self._on_command,
         )
-        self._timer = node.create_timer(
-            self._send_period,
-            self._publish_current_targets,
-        )
-        self._publish_current_targets()
 
     def _on_command(self, request, response):
-        """接收新目标，校验并更新当前开环目标."""
+        """接收新目标，校验后立即发送一次."""
         try:
             lift_position = lift_position_to_steps(request.lift_position)
             horizontal_raw = angle_to_servo_raw(
@@ -131,12 +123,14 @@ class LiftDumpBridge:
         self._gripper_rotation_servo_raw = gripper_rotation_raw
         self._gripper_servo_raw = gripper_raw
 
+        self._send_current_targets()
+
         response.success = True
         response.message = 'lift-dump command accepted'
         return response
 
-    def _publish_current_targets(self):
-        """按 10Hz 发送当前目标到下位机."""
+    def _send_current_targets(self):
+        """发送当前目标到下位机一次."""
         if not self._cmd_callback:
             return
 

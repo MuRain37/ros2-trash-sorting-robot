@@ -98,6 +98,8 @@ class ArmBridge:
         self._send_period = 1.0 / float(send_rate) if send_rate > 0.0 else 0.0
         self._duration_ms = float(duration_ms)
         self._last_send_time = None
+        self._last_sent_servo_positions = None
+        self._last_sent_gripper_position = None
         self._positions = [0.0] * self._joint_count  # 当前各关节角度（弧度）
 
         # 发布关节角度反馈
@@ -137,13 +139,20 @@ class ArmBridge:
             self._node.get_logger().warning(f'Invalid arm command: {e}')
             return
 
-        # 按发送频率节流，避免打爆串口
-        if self._should_send_now():
-            self._send_servo_targets(servo_positions)
+        if servo_positions == self._last_sent_servo_positions:
+            if self._open_loop_control:
+                self.publish_feedback(command)
+            return
+
+        # 目标未变化时不重复发送；目标变化时按发送频率节流，避免打爆串口
+        if (
+            self._should_send_now()
+            and self._send_servo_targets(servo_positions)
+        ):
+            self._last_sent_servo_positions = list(servo_positions)
 
         # 开环模式：把目标值直接当反馈发出
         if self._open_loop_control:
-            self._positions = command
             self.publish_feedback(command)
 
     def publish_feedback(self, data: list):
@@ -156,7 +165,7 @@ class ArmBridge:
     def _send_servo_targets(self, servo_positions):
         """逐个打包舵机指令并通过回调发送."""
         if not self._cmd_callback:
-            return
+            return False
 
         for index, position in enumerate(servo_positions):
             servo_id = index + 1  # 舵机ID从1开始
@@ -166,6 +175,7 @@ class ArmBridge:
                 self._duration_ms,
             )
             self._cmd_callback(PACKET_CMD_SERVO, payload)
+        return True
 
     def _on_gripper_command(self, msg: Float64):
         """收到夹爪开度比例指令，转换为 servo6 原始位置指令."""
@@ -180,10 +190,16 @@ class ArmBridge:
         position = GRIPPER_CLOSE_RAW + open_ratio * (
             GRIPPER_OPEN_RAW - GRIPPER_CLOSE_RAW
         )
+        if position == self._last_sent_gripper_position:
+            return
+
         if not self._send_gripper_target(position):
             self._node.get_logger().warning(
                 'Ignoring gripper command because command callback unavailable'
             )
+            return
+
+        self._last_sent_gripper_position = position
 
     def _send_gripper_target(self, position):
         """打包夹爪舵机指令并通过回调发送."""
@@ -236,7 +252,4 @@ class ArmBridge:
                 f'Ignoring servo feedback: {e}'
             )
             return
-        self.publish_feedback(self._positions)
-
-    def _publish_feedback(self):
         self.publish_feedback(self._positions)

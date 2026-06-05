@@ -258,7 +258,22 @@ def test_arm_bridge_rejects_out_of_range_command():
     assert node.logger.warnings
 
 
-def test_arm_bridge_limits_servo_send_rate_to_10hz(monkeypatch):
+def test_arm_bridge_skips_unchanged_servo_targets():
+    sent = []
+    node = FakeNode()
+    bridge = ArmBridge(node, cmd_callback=lambda cmd, payload: sent.append(
+        (cmd, payload)
+    ))
+    msg = Float64MultiArray()
+    msg.data = [0.0, 0.0, 0.0, 0.0, 0.0]
+
+    bridge._on_command(msg)
+    bridge._on_command(msg)
+
+    assert len(sent) == 5
+
+
+def test_arm_bridge_limits_changed_servo_targets_to_10hz(monkeypatch):
     sent = []
     now = 0.0
     node = FakeNode()
@@ -267,10 +282,9 @@ def test_arm_bridge_limits_servo_send_rate_to_10hz(monkeypatch):
         cmd_callback=lambda cmd, payload: sent.append((cmd, payload)),
         send_rate=10.0,
     )
-    msg = Float64MultiArray()
-    msg.data = [0.0, 0.0, 0.0, 0.0, 0.0]
-
-    for _ in range(20):
+    for index in range(20):
+        msg = Float64MultiArray()
+        msg.data = [0.0, 0.0, 0.0, 0.0, math.radians(index)]
         monkeypatch.setattr(
             arm_bridge_module.time,
             'monotonic',
@@ -337,7 +351,7 @@ def make_lift_dump_request(
     return request
 
 
-def test_lift_dump_bridge_sends_default_targets_on_startup():
+def test_lift_dump_bridge_does_not_send_default_targets_on_startup():
     sent = []
     node = FakeNode()
 
@@ -345,29 +359,16 @@ def test_lift_dump_bridge_sends_default_targets_on_startup():
         (cmd, payload)
     ))
 
-    assert [cmd for cmd, payload in sent] == [
-        PACKET_CMD_STEPPER,
-        PACKET_CMD_SERVO,
-        PACKET_CMD_SERVO,
-        PACKET_CMD_SERVO,
-    ]
-    assert unpack_stepper_payload(sent[0][1]) == 0.0
-    assert [unpack_servo_payload(payload)[1] for cmd, payload in sent[1:]] == [
-        7, 8, 9
-    ]
-    assert [unpack_servo_payload(payload)[2] for cmd, payload in sent[1:]] == [
-        500, 500, 700
-    ]
+    assert sent == []
 
 
-def test_lift_dump_bridge_service_updates_targets_for_timer_send():
+def test_lift_dump_bridge_service_sends_targets_once():
     sent = []
     node = FakeNode()
     bridge = LiftDumpBridge(
         node,
         cmd_callback=lambda cmd, payload: sent.append((cmd, payload)),
     )
-    sent.clear()
     request = make_lift_dump_request(
         0.5,
         0.0,
@@ -377,11 +378,51 @@ def test_lift_dump_bridge_service_updates_targets_for_timer_send():
     response = LiftDumpCommand.Response()
 
     result = bridge._on_command(request, response)
-    bridge._publish_current_targets()
 
     assert result.success is True
     assert result.message == 'lift-dump command accepted'
     assert [cmd for cmd, payload in sent] == [
+        PACKET_CMD_STEPPER,
+        PACKET_CMD_SERVO,
+        PACKET_CMD_SERVO,
+        PACKET_CMD_SERVO,
+    ]
+    assert unpack_stepper_payload(sent[0][1]) == 500.0
+    assert [unpack_servo_payload(payload)[1] for cmd, payload in sent[1:]] == [
+        7, 8, 9
+    ]
+    assert [unpack_servo_payload(payload)[2] for cmd, payload in sent[1:]] == [
+        500, 500, 425
+    ]
+
+
+def test_lift_dump_bridge_repeated_service_sends_each_request_once():
+    sent = []
+    node = FakeNode()
+    bridge = LiftDumpBridge(
+        node,
+        cmd_callback=lambda cmd, payload: sent.append((cmd, payload)),
+    )
+    request = make_lift_dump_request(
+        0.5,
+        0.0,
+        0.0,
+        0.5,
+    )
+    response = LiftDumpCommand.Response()
+
+    result = bridge._on_command(request, response)
+    bridge._on_command(request, LiftDumpCommand.Response())
+
+    assert result.success is True
+    assert result.message == 'lift-dump command accepted'
+    assert [cmd for cmd, payload in sent[:4]] == [
+        PACKET_CMD_STEPPER,
+        PACKET_CMD_SERVO,
+        PACKET_CMD_SERVO,
+        PACKET_CMD_SERVO,
+    ]
+    assert [cmd for cmd, payload in sent[4:]] == [
         PACKET_CMD_STEPPER,
         PACKET_CMD_SERVO,
         PACKET_CMD_SERVO,
@@ -410,12 +451,12 @@ def test_lift_dump_bridge_rejects_invalid_command_without_updating_targets():
     response = LiftDumpCommand.Response()
 
     result = bridge._on_command(invalid_request, response)
-    bridge._publish_current_targets()
 
     assert result.success is False
     assert result.message == (
         'lift position out of range: 1.1 not in [0.0, 1.0]'
     )
+    assert len(sent) == 4
     assert unpack_stepper_payload(sent[0][1]) == 500.0
     assert [unpack_servo_payload(payload)[2] for cmd, payload in sent[1:]] == [
         500, 500, 425
