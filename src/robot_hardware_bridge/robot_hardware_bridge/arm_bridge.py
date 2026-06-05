@@ -89,8 +89,14 @@ class ArmBridge:
         self._joint_count = DEFAULT_ARM_JOINT_COUNT
         self._print_only = print_only  # True 时只打印不发送（调试用）
         self._send_period = 1.0 / float(send_rate) if send_rate > 0.0 else 0.0
+        self._servo_send_period = (
+            self._send_period / self._joint_count
+            if self._send_period > 0.0 else 0.0
+        )
         self._duration_ms = float(duration_ms)
         self._last_send_time = None
+        self._pending_servo_positions = None
+        self._next_servo_index = 0
         self._positions = [0.0] * self._joint_count  # 当前各关节角度（弧度）
 
         # 发布关节角度反馈
@@ -102,6 +108,12 @@ class ArmBridge:
             self._on_command,
             10,
         )
+        self._servo_send_timer = None
+        if self._servo_send_period > 0.0:
+            self._servo_send_timer = node.create_timer(
+                self._servo_send_period,
+                self._send_next_servo_target,
+            )
 
     def _on_command(self, msg: Float64MultiArray):
         """收到关节角度指令（弧度），转换并发送."""
@@ -126,7 +138,7 @@ class ArmBridge:
         # 按发送频率节流，避免打爆串口
         if self._should_send_now():
             self._log_servo_targets(servo_positions)
-            self._send_servo_targets(servo_positions)
+            self._queue_servo_targets(servo_positions)
 
         # 开环模式：把目标值直接当反馈发出
         if self._open_loop_control:
@@ -157,13 +169,48 @@ class ArmBridge:
             return
 
         for index, position in enumerate(servo_positions):
-            servo_id = index + 1  # 舵机ID从1开始
-            payload = pack_servo_command(
-                servo_id,
-                position,
-                self._duration_ms,
-            )
-            self._cmd_callback(PACKET_CMD_SERVO, payload)
+            self._send_servo_target(index, position)
+
+    def _queue_servo_targets(self, servo_positions):
+        """缓存一组舵机目标，并按定时器节奏逐个发送."""
+        if not self._servo_send_timer:
+            self._send_servo_targets(servo_positions)
+            return
+
+        self._pending_servo_positions = list(servo_positions)
+        self._next_servo_index = 0
+
+    def _send_next_servo_target(self):
+        """发送当前缓存目标中的下一个舵机命令."""
+        if not self._pending_servo_positions:
+            return
+
+        if self._next_servo_index >= len(self._pending_servo_positions):
+            self._pending_servo_positions = None
+            self._next_servo_index = 0
+            return
+
+        index = self._next_servo_index
+        position = self._pending_servo_positions[index]
+        self._next_servo_index += 1
+        self._send_servo_target(index, position)
+
+        if self._next_servo_index >= len(self._pending_servo_positions):
+            self._pending_servo_positions = None
+            self._next_servo_index = 0
+
+    def _send_servo_target(self, index, position):
+        """发送单个舵机目标."""
+        if not self._cmd_callback or self._print_only:
+            return
+
+        servo_id = index + 1  # 舵机ID从1开始
+        payload = pack_servo_command(
+            servo_id,
+            position,
+            self._duration_ms,
+        )
+        self._cmd_callback(PACKET_CMD_SERVO, payload)
 
     def _should_send_now(self):
         """发送节流：距上次发送不足 send_period 则跳过."""

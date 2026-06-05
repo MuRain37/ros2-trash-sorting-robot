@@ -175,13 +175,23 @@ def main():
     read_response = False
     timeout = 1.0
     sp = SerialPort()
+    import time
+    servo_targets = [
+        (1, 511.2),
+        (2, 317.0),
+        (3, 118.5),
+        (4, 354.6),
+        (5, 488.0),
+    ]
+    for servo_id, position in servo_targets:
+        payload = pack_servo_command(servo_id, position, 3000.0)
+        sent = sp.write_frame(PACKET_CMD_SERVO, payload)
+        if sent:
+            print(f'舵机{servo_id}发送成功: {sent} 字节')
+        else:
+            print(f'舵机{servo_id}发送失败')
+        time.sleep(0.01)
 
-    payload = pack_servo_command(1, 400.0, 1000.0)
-    sent = sp.write_frame(PACKET_CMD_SERVO, payload)
-    if sent:
-        print(f'发送成功: {sent} 字节')
-    else:
-        print('发送失败')
 
     if read_response:
         import time
