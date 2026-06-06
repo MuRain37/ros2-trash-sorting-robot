@@ -178,18 +178,23 @@ class ArmBridge:
 
     def _on_gripper_command(self, request, response):
         """收到夹爪开度比例服务请求，转换为 servo6 原始位置指令."""
-        open_ratio = float(request.open_ratio)
-        if not 0.0 <= open_ratio <= 1.0:
+        try:
+            open_ratio = float(request.open_ratio)
+            if not 0.0 <= open_ratio <= 1.0:
+                raise ValueError(
+                    f'open ratio {open_ratio} not in [0.0, 1.0]'
+                )
+            duration_ms = float(request.duration_ms)
+            if duration_ms < 0.0:
+                raise ValueError(f'duration_ms must be >= 0: {duration_ms}')
+        except ValueError as e:
             response.success = False
-            response.message = (
-                f'open ratio {open_ratio} not in [0.0, 1.0]'
-            )
+            response.message = str(e)
             return response
 
         position = GRIPPER_CLOSE_RAW + open_ratio * (
             GRIPPER_OPEN_RAW - GRIPPER_CLOSE_RAW
         )
-        duration_ms = float(request.duration_ms)
 
         if not self._send_gripper_target(position, duration_ms):
             response.success = False

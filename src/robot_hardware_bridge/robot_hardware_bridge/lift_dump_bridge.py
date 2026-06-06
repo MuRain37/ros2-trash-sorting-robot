@@ -12,20 +12,27 @@ from robot_hardware_bridge.packet_protocol import (
 )
 
 
+# 7 号舵机：水平旋转 (Horizontal Rotation)
 DEFAULT_HORIZONTAL_SERVO_ID = 7
-DEFAULT_HORIZONTAL_MAX_DEGREES = 180.0
-DEFAULT_HORIZONTAL_DIRECTION = 1.0
-DEFAULT_GRIPPER_ROTATE_SERVO_ID = 8
-DEFAULT_GRIPPER_ROTATE_MAX_DEGREES = 180.0
-DEFAULT_GRIPPER_ROTATE_DIRECTION = 1.0
-DEFAULT_LIFT_GRIPPER_SERVO_ID = 9
-DEFAULT_LIFT_GRIPPER_OPEN_RAW = 400.0
-DEFAULT_LIFT_GRIPPER_CLOSE_RAW = 640.0
-DEFAULT_SERVO_DURATION_MS = 100.0
+DEFAULT_HORIZONTAL_MAX_DEGREES = 180.0       # 最大转动角度（度）
+DEFAULT_HORIZONTAL_DIRECTION = 1.0           # 转动方向（1.0 正向, -1.0 反向）
 
-SERVO_CENTER = 500.0
-SERVO_RAW_MIN = 0.0
-SERVO_RAW_MAX = 1000.0
+# 8 号舵机：夹爪旋转 (Gripper Rotation)
+DEFAULT_GRIPPER_ROTATE_SERVO_ID = 8
+DEFAULT_GRIPPER_ROTATE_MAX_DEGREES = 180.0   # 最大转动角度（度）
+DEFAULT_GRIPPER_ROTATE_DIRECTION = 1.0       # 转动方向（1.0 正向, -1.0 反向）
+
+# 9 号舵机：夹爪开度 (Gripper Open/Close)
+DEFAULT_LIFT_GRIPPER_SERVO_ID = 9
+DEFAULT_LIFT_GRIPPER_OPEN_RAW = 400.0        # 夹爪全开时的 raw 值
+DEFAULT_LIFT_GRIPPER_CLOSE_RAW = 640.0       # 夹爪全闭时的 raw 值
+
+# 舵机通用默认值
+DEFAULT_SERVO_DURATION_MS = 100.0            # 默认运动时长（毫秒）
+
+SERVO_CENTER = 500.0                         # 舵机中位 raw 值
+SERVO_RAW_MIN = 0.0                          # 舵机 raw 最小值
+SERVO_RAW_MAX = 1000.0                       # 舵机 raw 最大值
 
 
 def clamp_servo_raw(position):
@@ -130,6 +137,8 @@ class LiftDumpBridge:
                 DEFAULT_HORIZONTAL_DIRECTION,
             )
             duration_ms = float(request.duration_ms)
+            if duration_ms < 0.0:
+                raise ValueError(f'duration_ms must be >= 0: {duration_ms}')
         except ValueError as e:
             response.success = False
             response.message = str(e)
@@ -159,6 +168,8 @@ class LiftDumpBridge:
                 DEFAULT_GRIPPER_ROTATE_DIRECTION,
             )
             duration_ms = float(request.duration_ms)
+            if duration_ms < 0.0:
+                raise ValueError(f'duration_ms must be >= 0: {duration_ms}')
         except ValueError as e:
             response.success = False
             response.message = str(e)
@@ -184,6 +195,8 @@ class LiftDumpBridge:
         try:
             gripper_raw = gripper_open_ratio_to_servo_raw(request.open_ratio)
             duration_ms = float(request.duration_ms)
+            if duration_ms < 0.0:
+                raise ValueError(f'duration_ms must be >= 0: {duration_ms}')
         except ValueError as e:
             response.success = False
             response.message = str(e)
