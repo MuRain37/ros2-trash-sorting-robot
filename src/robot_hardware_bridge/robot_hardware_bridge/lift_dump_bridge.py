@@ -2,7 +2,7 @@
 
 import math
 
-from robot_interfaces.srv import LiftDumpCommand
+from robot_interfaces.srv import SetGripper, SetLiftSteps, SetServoAngle
 
 from robot_hardware_bridge.packet_protocol import (
     PACKET_CMD_SERVO,
@@ -12,7 +12,6 @@ from robot_hardware_bridge.packet_protocol import (
 )
 
 
-DEFAULT_STEPPER_MAX_STEPS = 1000.0
 DEFAULT_HORIZONTAL_SERVO_ID = 7
 DEFAULT_HORIZONTAL_MAX_DEGREES = 180.0
 DEFAULT_HORIZONTAL_DIRECTION = 1.0
@@ -20,8 +19,8 @@ DEFAULT_GRIPPER_ROTATE_SERVO_ID = 8
 DEFAULT_GRIPPER_ROTATE_MAX_DEGREES = 180.0
 DEFAULT_GRIPPER_ROTATE_DIRECTION = 1.0
 DEFAULT_LIFT_GRIPPER_SERVO_ID = 9
-DEFAULT_LIFT_GRIPPER_OPEN_RAW = 150.0
-DEFAULT_LIFT_GRIPPER_CLOSE_RAW = 700.0
+DEFAULT_LIFT_GRIPPER_OPEN_RAW = 400.0
+DEFAULT_LIFT_GRIPPER_CLOSE_RAW = 640.0
 DEFAULT_SERVO_DURATION_MS = 100.0
 
 SERVO_CENTER = 500.0
@@ -35,8 +34,8 @@ def clamp_servo_raw(position):
 
 
 def angle_to_servo_raw(value, max_degrees, direction):
-    """角度（弧度）→ 舵机原始位置值."""
-    degrees = math.degrees(float(value))
+    """角度（度）→ 舵机原始位置值."""
+    degrees = float(value)
     if not -max_degrees <= degrees <= max_degrees:
         raise ValueError(
             f'angle out of range: {degrees} not in '
@@ -45,17 +44,6 @@ def angle_to_servo_raw(value, max_degrees, direction):
     return clamp_servo_raw(
         SERVO_CENTER + direction * degrees * (SERVO_CENTER / max_degrees)
     )
-
-
-def lift_position_to_steps(lift_position):
-    """升降相对位置 → 步进电机绝对步数."""
-    lift_position = float(lift_position)
-    if not 0.0 <= lift_position <= 1.0:
-        raise ValueError(
-            f'lift position out of range: {lift_position} '
-            'not in [0.0, 1.0]'
-        )
-    return lift_position * DEFAULT_STEPPER_MAX_STEPS
 
 
 def gripper_open_ratio_to_servo_raw(open_ratio):
@@ -72,12 +60,15 @@ def gripper_open_ratio_to_servo_raw(open_ratio):
 
 
 class LiftDumpBridge:
-    """升降-倾倒结构桥接器：服务收到目标后发送一次."""
+    """升降-倾倒结构桥接器：拆分步进电机和舵机控制服务."""
 
     def __init__(
         self,
         node,
-        service_name='lift_dump_cmd',
+        lift_steps_service='set_lift_steps',
+        horizontal_rotation_service='set_lift_horizontal_rotation',
+        gripper_rotation_service='set_lift_gripper_rotation',
+        gripper_service='set_lift_gripper',
         cmd_callback=None,
         servo_duration_ms=DEFAULT_SERVO_DURATION_MS,
     ):
@@ -90,75 +81,151 @@ class LiftDumpBridge:
         self._gripper_rotation_servo_raw = SERVO_CENTER
         self._gripper_servo_raw = DEFAULT_LIFT_GRIPPER_CLOSE_RAW
 
-        self._service = node.create_service(
-            LiftDumpCommand,
-            service_name,
-            self._on_command,
+        self._lift_steps_service = node.create_service(
+            SetLiftSteps,
+            lift_steps_service,
+            self._on_lift_steps_command,
+        )
+        self._horizontal_rotation_service = node.create_service(
+            SetServoAngle,
+            horizontal_rotation_service,
+            self._on_horizontal_rotation_command,
+        )
+        self._gripper_rotation_service = node.create_service(
+            SetServoAngle,
+            gripper_rotation_service,
+            self._on_gripper_rotation_command,
+        )
+        self._gripper_service = node.create_service(
+            SetGripper,
+            gripper_service,
+            self._on_gripper_command,
         )
 
-    def _on_command(self, request, response):
-        """接收新目标，校验后立即发送一次."""
+    def _on_lift_steps_command(self, request, response):
+        """接收步进电机目标步数，校验后立即发送一次."""
+        target_steps = float(request.target_steps)
+        if not math.isfinite(target_steps):
+            response.success = False
+            response.message = f'target steps must be finite: {target_steps}'
+            return response
+
+        if not self._send_stepper_target(target_steps):
+            response.success = False
+            response.message = 'command callback unavailable'
+            return response
+
+        self._target_steps = target_steps
+
+        response.success = True
+        response.message = 'lift steps command accepted'
+        return response
+
+    def _on_horizontal_rotation_command(self, request, response):
+        """接收水平旋转舵机目标，校验后立即发送一次."""
         try:
-            lift_position = lift_position_to_steps(request.lift_position)
             horizontal_raw = angle_to_servo_raw(
-                request.horizontal_rotation,
+                request.angle,
                 DEFAULT_HORIZONTAL_MAX_DEGREES,
                 DEFAULT_HORIZONTAL_DIRECTION,
             )
-            gripper_rotation_raw = angle_to_servo_raw(
-                request.gripper_rotation,
-                DEFAULT_GRIPPER_ROTATE_MAX_DEGREES,
-                DEFAULT_GRIPPER_ROTATE_DIRECTION,
-            )
-            gripper_raw = gripper_open_ratio_to_servo_raw(
-                request.gripper_open_ratio
-            )
+            duration_ms = float(request.duration_ms)
         except ValueError as e:
             response.success = False
             response.message = str(e)
             return response
 
-        self._target_steps = lift_position
-        self._horizontal_servo_raw = horizontal_raw
-        self._gripper_rotation_servo_raw = gripper_rotation_raw
-        self._gripper_servo_raw = gripper_raw
+        if not self._send_servo_target(
+            DEFAULT_HORIZONTAL_SERVO_ID,
+            horizontal_raw,
+            duration_ms,
+        ):
+            response.success = False
+            response.message = 'command callback unavailable'
+            return response
 
-        self._send_current_targets()
+        self._horizontal_servo_raw = horizontal_raw
 
         response.success = True
-        response.message = 'lift-dump command accepted'
+        response.message = 'lift horizontal rotation command accepted'
         return response
 
-    def _send_current_targets(self):
-        """发送当前目标到下位机一次."""
+    def _on_gripper_rotation_command(self, request, response):
+        """接收夹爪旋转舵机目标，校验后立即发送一次."""
+        try:
+            gripper_rotation_raw = angle_to_servo_raw(
+                request.angle,
+                DEFAULT_GRIPPER_ROTATE_MAX_DEGREES,
+                DEFAULT_GRIPPER_ROTATE_DIRECTION,
+            )
+            duration_ms = float(request.duration_ms)
+        except ValueError as e:
+            response.success = False
+            response.message = str(e)
+            return response
+
+        if not self._send_servo_target(
+            DEFAULT_GRIPPER_ROTATE_SERVO_ID,
+            gripper_rotation_raw,
+            duration_ms,
+        ):
+            response.success = False
+            response.message = 'command callback unavailable'
+            return response
+
+        self._gripper_rotation_servo_raw = gripper_rotation_raw
+
+        response.success = True
+        response.message = 'lift gripper rotation command accepted'
+        return response
+
+    def _on_gripper_command(self, request, response):
+        """接收夹爪开度比例，校验后立即发送一次."""
+        try:
+            gripper_raw = gripper_open_ratio_to_servo_raw(request.open_ratio)
+            duration_ms = float(request.duration_ms)
+        except ValueError as e:
+            response.success = False
+            response.message = str(e)
+            return response
+
+        if not self._send_servo_target(
+            DEFAULT_LIFT_GRIPPER_SERVO_ID,
+            gripper_raw,
+            duration_ms,
+        ):
+            response.success = False
+            response.message = 'command callback unavailable'
+            return response
+
+        self._gripper_servo_raw = gripper_raw
+
+        response.success = True
+        response.message = 'lift gripper command accepted'
+        return response
+
+    def _send_stepper_target(self, target_steps):
+        """发送步进电机目标到下位机一次."""
         if not self._cmd_callback:
-            return
+            return False
 
         self._cmd_callback(
             PACKET_CMD_STEPPER,
-            pack_stepper_command(self._target_steps),
+            pack_stepper_command(target_steps),
         )
+        return True
+
+    def _send_servo_target(self, servo_id, raw_position, duration_ms):
+        """发送单路舵机目标到下位机一次."""
+        if not self._cmd_callback:
+            return False
+
         self._cmd_callback(
             PACKET_CMD_SERVO,
             pack_servo_command(
-                DEFAULT_HORIZONTAL_SERVO_ID,
-                self._horizontal_servo_raw,
-                self._servo_duration_ms,
+                servo_id,
+                raw_position,
+                duration_ms,
             ),
         )
-        self._cmd_callback(
-            PACKET_CMD_SERVO,
-            pack_servo_command(
-                DEFAULT_GRIPPER_ROTATE_SERVO_ID,
-                self._gripper_rotation_servo_raw,
-                self._servo_duration_ms,
-            ),
-        )
-        self._cmd_callback(
-            PACKET_CMD_SERVO,
-            pack_servo_command(
-                DEFAULT_LIFT_GRIPPER_SERVO_ID,
-                self._gripper_servo_raw,
-                self._servo_duration_ms,
-            ),
-        )
+        return True

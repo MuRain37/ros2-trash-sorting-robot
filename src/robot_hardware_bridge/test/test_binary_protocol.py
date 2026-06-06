@@ -4,7 +4,8 @@ import threading
 import math
 from pathlib import Path
 
-from std_msgs.msg import Float64, Float64MultiArray
+from robot_interfaces.srv import SetGripper, SetLiftSteps, SetServoAngle
+from std_msgs.msg import Float64MultiArray
 
 
 PACKAGE_ROOT = Path(__file__).resolve().parents[1]
@@ -14,7 +15,7 @@ import robot_hardware_bridge.arm_bridge as arm_bridge_module  # noqa: E402
 from robot_hardware_bridge.arm_bridge import ArmBridge  # noqa: E402
 from robot_hardware_bridge.lift_dump_bridge import (  # noqa: E402
     LiftDumpBridge,
-    LiftDumpCommand,
+    gripper_open_ratio_to_servo_raw,
 )
 from robot_hardware_bridge.motor_bridge import MotorBridge  # noqa: E402
 from robot_hardware_bridge.packet_protocol import (  # noqa: E402
@@ -304,9 +305,15 @@ def test_arm_bridge_gripper_command_maps_open_ratio_to_servo_raw():
     ))
 
     for open_ratio in [0.0, 0.5, 1.0]:
-        msg = Float64()
-        msg.data = open_ratio
-        bridge._on_gripper_command(msg)
+        request = SetGripper.Request()
+        request.open_ratio = open_ratio
+        request.duration_ms = 250.0
+        response = bridge._on_gripper_command(
+            request,
+            SetGripper.Response(),
+        )
+        assert response.success is True
+        assert response.message == 'gripper command accepted'
 
     assert [cmd for cmd, payload in sent] == [PACKET_CMD_SERVO] * 3
     assert [unpack_servo_payload(payload)[1] for cmd, payload in sent] == [
@@ -316,7 +323,7 @@ def test_arm_bridge_gripper_command_maps_open_ratio_to_servo_raw():
         700, 425, 150
     ]
     assert [unpack_servo_payload(payload)[3] for cmd, payload in sent] == [
-        100, 100, 100
+        250, 250, 250
     ]
 
 
@@ -326,28 +333,36 @@ def test_arm_bridge_gripper_command_rejects_out_of_range_ratio():
     bridge = ArmBridge(node, cmd_callback=lambda cmd, payload: sent.append(
         (cmd, payload)
     ))
-    msg = Float64()
-    msg.data = 1.1
+    request = SetGripper.Request()
+    request.open_ratio = 1.1
+    request.duration_ms = 100.0
 
-    bridge._on_gripper_command(msg)
+    response = bridge._on_gripper_command(request, SetGripper.Response())
 
     assert sent == []
-    assert node.logger.warnings[-1] == (
-        'Invalid gripper command: open ratio 1.1 not in [0.0, 1.0]'
-    )
+    assert response.success is False
+    assert response.message == 'open ratio 1.1 not in [0.0, 1.0]'
 
 
-def make_lift_dump_request(
-    lift_position,
-    horizontal_rotation,
-    gripper_rotation,
-    gripper_open_ratio,
+def make_lift_steps_request(
+    target_steps,
 ):
-    request = LiftDumpCommand.Request()
-    request.lift_position = lift_position
-    request.horizontal_rotation = horizontal_rotation
-    request.gripper_rotation = gripper_rotation
-    request.gripper_open_ratio = gripper_open_ratio
+    request = SetLiftSteps.Request()
+    request.target_steps = target_steps
+    return request
+
+
+def make_servo_angle_request(angle, duration_ms=100.0):
+    request = SetServoAngle.Request()
+    request.angle = angle
+    request.duration_ms = duration_ms
+    return request
+
+
+def make_gripper_request(open_ratio, duration_ms=100.0):
+    request = SetGripper.Request()
+    request.open_ratio = open_ratio
+    request.duration_ms = duration_ms
     return request
 
 
@@ -362,105 +377,166 @@ def test_lift_dump_bridge_does_not_send_default_targets_on_startup():
     assert sent == []
 
 
-def test_lift_dump_bridge_service_sends_targets_once():
+def test_lift_dump_bridge_lift_steps_service_sends_stepper_once():
     sent = []
     node = FakeNode()
     bridge = LiftDumpBridge(
         node,
         cmd_callback=lambda cmd, payload: sent.append((cmd, payload)),
     )
-    request = make_lift_dump_request(
-        0.5,
-        0.0,
-        0.0,
-        0.5,
-    )
-    response = LiftDumpCommand.Response()
+    request = make_lift_steps_request(-250.0)
+    response = SetLiftSteps.Response()
 
-    result = bridge._on_command(request, response)
+    result = bridge._on_lift_steps_command(request, response)
 
     assert result.success is True
-    assert result.message == 'lift-dump command accepted'
+    assert result.message == 'lift steps command accepted'
+    assert [cmd for cmd, payload in sent] == [PACKET_CMD_STEPPER]
+    assert unpack_stepper_payload(sent[0][1]) == -250.0
+
+
+def test_lift_dump_bridge_repeated_lift_steps_service_sends_each_request():
+    sent = []
+    node = FakeNode()
+    bridge = LiftDumpBridge(
+        node,
+        cmd_callback=lambda cmd, payload: sent.append((cmd, payload)),
+    )
+    request = make_lift_steps_request(-250.0)
+    response = SetLiftSteps.Response()
+
+    result = bridge._on_lift_steps_command(request, response)
+    bridge._on_lift_steps_command(request, SetLiftSteps.Response())
+
+    assert result.success is True
+    assert result.message == 'lift steps command accepted'
     assert [cmd for cmd, payload in sent] == [
         PACKET_CMD_STEPPER,
-        PACKET_CMD_SERVO,
-        PACKET_CMD_SERVO,
-        PACKET_CMD_SERVO,
+        PACKET_CMD_STEPPER,
     ]
-    assert unpack_stepper_payload(sent[0][1]) == 500.0
-    assert [unpack_servo_payload(payload)[1] for cmd, payload in sent[1:]] == [
-        7, 8, 9
-    ]
-    assert [unpack_servo_payload(payload)[2] for cmd, payload in sent[1:]] == [
-        500, 500, 425
-    ]
+    assert unpack_stepper_payload(sent[0][1]) == -250.0
+    assert unpack_stepper_payload(sent[1][1]) == -250.0
 
 
-def test_lift_dump_bridge_repeated_service_sends_each_request_once():
+def test_lift_dump_bridge_horizontal_rotation_service_sends_servo_once():
     sent = []
     node = FakeNode()
     bridge = LiftDumpBridge(
         node,
         cmd_callback=lambda cmd, payload: sent.append((cmd, payload)),
     )
-    request = make_lift_dump_request(
-        0.5,
-        0.0,
-        0.0,
-        0.5,
-    )
-    response = LiftDumpCommand.Response()
+    request = make_servo_angle_request(0.0, duration_ms=350.0)
+    response = SetServoAngle.Response()
 
-    result = bridge._on_command(request, response)
-    bridge._on_command(request, LiftDumpCommand.Response())
+    result = bridge._on_horizontal_rotation_command(request, response)
 
     assert result.success is True
-    assert result.message == 'lift-dump command accepted'
-    assert [cmd for cmd, payload in sent[:4]] == [
-        PACKET_CMD_STEPPER,
-        PACKET_CMD_SERVO,
-        PACKET_CMD_SERVO,
-        PACKET_CMD_SERVO,
-    ]
-    assert [cmd for cmd, payload in sent[4:]] == [
-        PACKET_CMD_STEPPER,
-        PACKET_CMD_SERVO,
-        PACKET_CMD_SERVO,
-        PACKET_CMD_SERVO,
-    ]
-    assert unpack_stepper_payload(sent[0][1]) == 500.0
-    assert [unpack_servo_payload(payload)[1] for cmd, payload in sent[1:]] == [
-        7, 8, 9
-    ]
-    assert [unpack_servo_payload(payload)[2] for cmd, payload in sent[1:]] == [
-        500, 500, 425
-    ]
+    assert result.message == 'lift horizontal rotation command accepted'
+    assert [cmd for cmd, payload in sent] == [PACKET_CMD_SERVO]
+    assert unpack_servo_payload(sent[0][1])[1] == 7
+    assert unpack_servo_payload(sent[0][1])[2] == 500
+    assert unpack_servo_payload(sent[0][1])[3] == 350
 
 
-def test_lift_dump_bridge_rejects_invalid_command_without_updating_targets():
+def test_lift_dump_bridge_gripper_rotation_service_sends_servo_once():
     sent = []
     node = FakeNode()
     bridge = LiftDumpBridge(
         node,
         cmd_callback=lambda cmd, payload: sent.append((cmd, payload)),
     )
-    valid_request = make_lift_dump_request(0.5, 0.0, 0.0, 0.5)
-    bridge._on_command(valid_request, LiftDumpCommand.Response())
-    sent.clear()
-    invalid_request = make_lift_dump_request(1.1, 0.0, 0.0, 1.0)
-    response = LiftDumpCommand.Response()
+    request = make_servo_angle_request(0.0, duration_ms=360.0)
+    response = SetServoAngle.Response()
 
-    result = bridge._on_command(invalid_request, response)
+    result = bridge._on_gripper_rotation_command(request, response)
+
+    assert result.success is True
+    assert result.message == 'lift gripper rotation command accepted'
+    assert [cmd for cmd, payload in sent] == [PACKET_CMD_SERVO]
+    assert unpack_servo_payload(sent[0][1])[1] == 8
+    assert unpack_servo_payload(sent[0][1])[2] == 500
+    assert unpack_servo_payload(sent[0][1])[3] == 360
+
+
+def test_lift_dump_bridge_gripper_service_sends_servo_once():
+    sent = []
+    node = FakeNode()
+    bridge = LiftDumpBridge(
+        node,
+        cmd_callback=lambda cmd, payload: sent.append((cmd, payload)),
+    )
+    request = make_gripper_request(0.5, duration_ms=370.0)
+    response = SetGripper.Response()
+
+    result = bridge._on_gripper_command(request, response)
+
+    assert result.success is True
+    assert result.message == 'lift gripper command accepted'
+    assert [cmd for cmd, payload in sent] == [PACKET_CMD_SERVO]
+    assert [unpack_servo_payload(payload)[1] for cmd, payload in sent] == [
+        9
+    ]
+    assert [unpack_servo_payload(payload)[2] for cmd, payload in sent] == [
+        gripper_open_ratio_to_servo_raw(0.5)
+    ]
+    assert [unpack_servo_payload(payload)[3] for cmd, payload in sent] == [
+        370
+    ]
+
+
+def test_lift_dump_bridge_rejects_invalid_stepper_target():
+    sent = []
+    node = FakeNode()
+    bridge = LiftDumpBridge(
+        node,
+        cmd_callback=lambda cmd, payload: sent.append((cmd, payload)),
+    )
+    invalid_request = make_lift_steps_request(float('inf'))
+    response = SetLiftSteps.Response()
+
+    result = bridge._on_lift_steps_command(invalid_request, response)
+
+    assert result.success is False
+    assert result.message == 'target steps must be finite: inf'
+    assert sent == []
+
+
+def test_lift_dump_bridge_rejects_invalid_servo_angle():
+    sent = []
+    node = FakeNode()
+    bridge = LiftDumpBridge(
+        node,
+        cmd_callback=lambda cmd, payload: sent.append((cmd, payload)),
+    )
+    invalid_request = make_servo_angle_request(math.radians(181.0))
+    response = SetServoAngle.Response()
+
+    result = bridge._on_horizontal_rotation_command(invalid_request, response)
 
     assert result.success is False
     assert result.message == (
-        'lift position out of range: 1.1 not in [0.0, 1.0]'
+        'angle out of range: 181.0 not in [-180.0, 180.0] deg'
     )
-    assert len(sent) == 4
-    assert unpack_stepper_payload(sent[0][1]) == 500.0
-    assert [unpack_servo_payload(payload)[2] for cmd, payload in sent[1:]] == [
-        500, 500, 425
-    ]
+    assert sent == []
+
+
+def test_lift_dump_bridge_rejects_invalid_lift_gripper_target():
+    sent = []
+    node = FakeNode()
+    bridge = LiftDumpBridge(
+        node,
+        cmd_callback=lambda cmd, payload: sent.append((cmd, payload)),
+    )
+    invalid_request = make_gripper_request(1.1)
+    response = SetGripper.Response()
+
+    result = bridge._on_gripper_command(invalid_request, response)
+
+    assert result.success is False
+    assert result.message == (
+        'gripper open ratio out of range: 1.1 not in [0.0, 1.0]'
+    )
+    assert sent == []
 
 
 def test_feedback_dispatcher_publishes_feedback():

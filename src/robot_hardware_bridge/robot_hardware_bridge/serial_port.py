@@ -192,7 +192,6 @@ def main():
             print(f'舵机{servo_id}发送失败')
         time.sleep(0.01)
 
-
     if read_response:
         import time
         deadline = time.time() + timeout

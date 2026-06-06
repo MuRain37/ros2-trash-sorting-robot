@@ -3,7 +3,8 @@
 import math
 import time
 
-from std_msgs.msg import Float64, Float64MultiArray
+from robot_interfaces.srv import SetGripper
+from std_msgs.msg import Float64MultiArray
 
 from robot_hardware_bridge.packet_protocol import (
     PACKET_CMD_SERVO,
@@ -89,7 +90,7 @@ class ArmBridge:
                  open_loop_control=False,
                  send_rate=DEFAULT_SERVO_SEND_RATE,
                  duration_ms=DEFAULT_SERVO_DURATION_MS,
-                 gripper_topic='gripper_cmd'):
+                 gripper_service='set_gripper'):
         self._node = node
         self._cmd_callback = cmd_callback  # 发送回调，签名为 (cmd, payload)
         self._open_loop_control = open_loop_control
@@ -99,7 +100,6 @@ class ArmBridge:
         self._duration_ms = float(duration_ms)
         self._last_send_time = None
         self._last_sent_servo_positions = None
-        self._last_sent_gripper_position = None
         self._positions = [0.0] * self._joint_count  # 当前各关节角度（弧度）
 
         # 发布关节角度反馈
@@ -111,12 +111,11 @@ class ArmBridge:
             self._on_command,
             10,
         )
-        # 夹爪开环控制：0.0=关，1.0=开
-        self._gripper_sub = node.create_subscription(
-            Float64,
-            gripper_topic,
+        # 夹爪开环控制服务：0.0=关，1.0=开
+        self._gripper_service = node.create_service(
+            SetGripper,
+            gripper_service,
             self._on_gripper_command,
-            10,
         )
 
     def _on_command(self, msg: Float64MultiArray):
@@ -177,31 +176,31 @@ class ArmBridge:
             self._cmd_callback(PACKET_CMD_SERVO, payload)
         return True
 
-    def _on_gripper_command(self, msg: Float64):
-        """收到夹爪开度比例指令，转换为 servo6 原始位置指令."""
-        open_ratio = float(msg.data)
+    def _on_gripper_command(self, request, response):
+        """收到夹爪开度比例服务请求，转换为 servo6 原始位置指令."""
+        open_ratio = float(request.open_ratio)
         if not 0.0 <= open_ratio <= 1.0:
-            self._node.get_logger().warning(
-                f'Invalid gripper command: open ratio {open_ratio} '
-                'not in [0.0, 1.0]'
+            response.success = False
+            response.message = (
+                f'open ratio {open_ratio} not in [0.0, 1.0]'
             )
-            return
+            return response
 
         position = GRIPPER_CLOSE_RAW + open_ratio * (
             GRIPPER_OPEN_RAW - GRIPPER_CLOSE_RAW
         )
-        if position == self._last_sent_gripper_position:
-            return
+        duration_ms = float(request.duration_ms)
 
-        if not self._send_gripper_target(position):
-            self._node.get_logger().warning(
-                'Ignoring gripper command because command callback unavailable'
-            )
-            return
+        if not self._send_gripper_target(position, duration_ms):
+            response.success = False
+            response.message = 'command callback unavailable'
+            return response
 
-        self._last_sent_gripper_position = position
+        response.success = True
+        response.message = 'gripper command accepted'
+        return response
 
-    def _send_gripper_target(self, position):
+    def _send_gripper_target(self, position, duration_ms):
         """打包夹爪舵机指令并通过回调发送."""
         if not self._cmd_callback:
             return False
@@ -209,7 +208,7 @@ class ArmBridge:
         payload = pack_servo_command(
             self._gripper_servo_id,
             position,
-            self._duration_ms,
+            duration_ms,
         )
         self._cmd_callback(PACKET_CMD_SERVO, payload)
         return True
