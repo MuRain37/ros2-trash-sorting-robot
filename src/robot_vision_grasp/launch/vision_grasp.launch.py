@@ -26,9 +26,13 @@ def generate_launch_description():
             'camera_frame',
             default_value='camera_optical_link',
         ),
-        DeclareLaunchArgument('use_tf_camera_pose', default_value='true'),
+        DeclareLaunchArgument('use_tf_camera_pose', default_value='false'),
         DeclareLaunchArgument('fallback_manual_fk', default_value='true'),
-        DeclareLaunchArgument('return_home', default_value='false'),
+        DeclareLaunchArgument('return_home', default_value='true'),
+        DeclareLaunchArgument('invert_target_lateral', default_value='true'),
+        DeclareLaunchArgument('target_forward_offset_cm', default_value='0.0'),
+        DeclareLaunchArgument('target_right_offset_cm', default_value='0.0'),
+        DeclareLaunchArgument('target_up_offset_cm', default_value='8.0'),
         Node(
             package='robot_vision_grasp',
             executable='vision_grasp_node',
@@ -51,6 +55,22 @@ def generate_launch_description():
                 'return_home': ParameterValue(
                     LaunchConfiguration('return_home'),
                     value_type=bool,
+                ),
+                'invert_target_lateral': ParameterValue(
+                    LaunchConfiguration('invert_target_lateral'),
+                    value_type=bool,
+                ),
+                'target_forward_offset_cm': ParameterValue(
+                    LaunchConfiguration('target_forward_offset_cm'),
+                    value_type=float,
+                ),
+                'target_right_offset_cm': ParameterValue(
+                    LaunchConfiguration('target_right_offset_cm'),
+                    value_type=float,
+                ),
+                'target_up_offset_cm': ParameterValue(
+                    LaunchConfiguration('target_up_offset_cm'),
+                    value_type=float,
                 ),
             }],
         ),

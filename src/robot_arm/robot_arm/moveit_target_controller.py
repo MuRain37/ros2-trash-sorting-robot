@@ -56,10 +56,16 @@ class ArmMoveItTargetController(Node):
 
     def _handle_arm_target(self, goal_request):
         """接受机械臂目标请求。"""
+        pitch_text = (
+            'auto'
+            if goal_request.end_angle < -0.5
+            else f'{goal_request.end_angle:.2f} deg'
+        )
         self.get_logger().info(
             f'MoveIt target: [{goal_request.x:.2f}, '
             f'{goal_request.y:.2f}, {goal_request.z:.2f}] cm, '
-            f'pitch={goal_request.end_angle:.2f} deg'
+            f'pitch={pitch_text}, '
+            f'tool_yaw={goal_request.tool_yaw:.2f} deg'
         )
         return GoalResponse.ACCEPT
 
@@ -74,6 +80,7 @@ class ArmMoveItTargetController(Node):
             goal.y,
             goal.z,
             pitch,
+            goal.tool_yaw,
             lambda progress, angles: self._publish_feedback(
                 goal_handle,
                 progress,

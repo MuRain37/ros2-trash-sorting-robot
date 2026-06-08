@@ -69,7 +69,7 @@ def _get_axis_angle(points_cam, cam_pitch=0.0):
         angle -= 180.0
     elif angle < -90.0:
         angle += 180.0
-    return -angle
+    return angle
 
 
 def get_ik_pitch(class_name, points_cam=None, cam_pitch=0.0,
@@ -104,12 +104,7 @@ def get_gripper_yaw(class_name, angle_3d=None, is_upright=True):
     return float(angle_3d)
 
 
-def gripper_close_open_ratio(
-    class_name,
-    open_raw=0.0,
-    close_raw=10 00.0,
-):
-    """Map the old pulse-based close table to SetGripper.open_ratio."""
+def gripper_close_open_ratio(class_name, open_raw=0.0, close_raw=1000.0):
     width_cm_by_class = {
         'bottle': 3.5,
         'can': 3.0,

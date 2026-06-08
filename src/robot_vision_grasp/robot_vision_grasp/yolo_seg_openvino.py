@@ -94,7 +94,8 @@ class YOLOSegOpenVINO:
         orig_h, orig_w = img.shape[:2]
         blob, scale, pad_w, pad_h, new_h, new_w = self._preprocess(img)
 
-        raw = self._compiled({self._input_name: blob})
+        infer_request = self._compiled.create_infer_request()
+        raw = infer_request.infer({self._input_name: blob})
         outputs = [raw[name] for name in self._output_names]
         det_out = next((out for out in outputs if out.ndim == 3), None)
         proto = next((out for out in outputs if out.ndim == 4), None)

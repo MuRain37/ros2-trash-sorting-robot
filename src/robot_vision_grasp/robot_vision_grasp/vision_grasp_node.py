@@ -8,8 +8,6 @@ from pathlib import Path
 import cv2
 import numpy as np
 import rclpy
-from builtin_interfaces.msg import Duration as DurationMsg
-from control_msgs.action import FollowJointTrajectory
 from cv_bridge import CvBridge
 from rclpy.action import ActionClient
 from rclpy.callback_groups import ReentrantCallbackGroup
@@ -25,8 +23,6 @@ from sensor_msgs.msg import JointState
 from tf2_ros import Buffer
 from tf2_ros import TransformException
 from tf2_ros import TransformListener
-from trajectory_msgs.msg import JointTrajectory
-from trajectory_msgs.msg import JointTrajectoryPoint
 
 from robot_vision_grasp.grasp_geometry import get_gripper_yaw
 from robot_vision_grasp.grasp_geometry import get_ik_pitch
@@ -44,7 +40,6 @@ MOVEIT_JOINTS = [
     'virtual_tool_pitch_joint',
     'virtual_tool_yaw_joint',
 ]
-REAL_ARM_JOINTS = MOVEIT_JOINTS[:5]
 FALLBACK_LINK_LENGTHS_CM = (3.38648, 12.9416, 12.9444, 11.38648)
 
 
@@ -59,6 +54,8 @@ class VisionGraspNode(Node):
         self._load_parameters()
 
         self._state_lock = threading.Lock()
+        self._vision_lock = threading.Lock()
+        self._sequence_lock = threading.Lock()
         self._depth = None
         self._camera_info_ready = False
         self._intrinsics = (383.0, 383.0, 320.0, 240.0)
@@ -79,18 +76,11 @@ class VisionGraspNode(Node):
             self._arm_action_name,
             callback_group=callback_group,
         )
-        self._trajectory_action = ActionClient(
-            self,
-            FollowJointTrajectory,
-            self._trajectory_action_name,
-            callback_group=callback_group,
-        )
         self._gripper_client = self.create_client(
             SetGripper,
             self._gripper_service_name,
             callback_group=callback_group,
         )
-
         self.create_subscription(
             Image,
             self._color_topic,
@@ -153,12 +143,12 @@ class VisionGraspNode(Node):
         self.declare_parameter('joint_states_topic', '/joint_states')
         self.declare_parameter('base_frame', 'base_link')
         self.declare_parameter('camera_frame', 'camera_optical_link')
-        self.declare_parameter('use_tf_camera_pose', True)
+        self.declare_parameter('use_tf_camera_pose', False)
         self.declare_parameter('fallback_manual_fk', True)
         self.declare_parameter('arm_origin_m', [0.10, 0.0, 0.025])
         self.declare_parameter(
             'manual_camera_offset_m',
-            [-0.033, 0.079, 0.020],
+            [-0.033, 0.089, 0.020],
         )
         self.declare_parameter('depth_scale', 0.001)
         self.declare_parameter('min_depth_m', 0.05)
@@ -166,26 +156,34 @@ class VisionGraspNode(Node):
         self.declare_parameter('depth_reg_x', 0)
         self.declare_parameter('depth_reg_y', 0)
         self.declare_parameter('target_timeout', 2.0)
-        self.declare_parameter('target_forward_offset_cm', 5.0)
+        self.declare_parameter('target_forward_offset_cm', 0.0)
         self.declare_parameter('target_right_offset_cm', 0.0)
-        self.declare_parameter('target_up_offset_cm', 5.0)
+        self.declare_parameter('target_up_offset_cm', 2.0)
+        self.declare_parameter('invert_target_lateral', True)
         self.declare_parameter('erode_iterations', 2)
         self.declare_parameter('arm_action_name', '/arm_target')
-        self.declare_parameter(
-            'trajectory_action_name',
-            '/plan_controller/follow_joint_trajectory',
-        )
         self.declare_parameter('gripper_service_name', '/set_gripper')
         self.declare_parameter('arm_goal_duration', 3.0)
         self.declare_parameter('action_timeout', 30.0)
+        self.declare_parameter('retry_auto_pitch_on_failure', True)
         self.declare_parameter('gripper_duration_ms', 1000.0)
+        self.declare_parameter('gripper_open_wait_sec', 1.0)
+        self.declare_parameter('gripper_close_wait_sec', 1.0)
         self.declare_parameter('open_gripper_before_move', True)
         self.declare_parameter('enable_tool_yaw', True)
-        self.declare_parameter('tool_yaw_duration', 1.0)
-        self.declare_parameter('return_home', False)
+        self.declare_parameter('return_home', True)
         self.declare_parameter(
             'home_joint_positions',
-            [0.0, -0.4155, 0.9526, 1.4134, 0.0, 0.0, 0.0, 0.0],
+            [
+                0.0,
+                -1.2566370614359172,
+                2.0943951023931953,
+                1.4660765716752369,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+            ],
         )
         self.declare_parameter('home_duration', 2.0)
 
@@ -237,13 +235,13 @@ class VisionGraspNode(Node):
             float(self.get_parameter('target_right_offset_cm').value),
             float(self.get_parameter('target_up_offset_cm').value),
         ])
+        self._invert_target_lateral = bool(
+            self.get_parameter('invert_target_lateral').value
+        )
         self._erode_iterations = int(
             self.get_parameter('erode_iterations').value
         )
         self._arm_action_name = self.get_parameter('arm_action_name').value
-        self._trajectory_action_name = self.get_parameter(
-            'trajectory_action_name'
-        ).value
         self._gripper_service_name = self.get_parameter(
             'gripper_service_name'
         ).value
@@ -253,17 +251,23 @@ class VisionGraspNode(Node):
         self._action_timeout = float(
             self.get_parameter('action_timeout').value
         )
+        self._retry_auto_pitch_on_failure = bool(
+            self.get_parameter('retry_auto_pitch_on_failure').value
+        )
         self._gripper_duration_ms = float(
             self.get_parameter('gripper_duration_ms').value
+        )
+        self._gripper_open_wait_sec = float(
+            self.get_parameter('gripper_open_wait_sec').value
+        )
+        self._gripper_close_wait_sec = float(
+            self.get_parameter('gripper_close_wait_sec').value
         )
         self._open_gripper_before_move = bool(
             self.get_parameter('open_gripper_before_move').value
         )
         self._enable_tool_yaw = bool(
             self.get_parameter('enable_tool_yaw').value
-        )
-        self._tool_yaw_duration = float(
-            self.get_parameter('tool_yaw_duration').value
         )
         self._return_home = bool(self.get_parameter('return_home').value)
         self._home_joint_positions = [
@@ -353,46 +357,71 @@ class VisionGraspNode(Node):
             self._joint_positions.update(updates)
 
     def _color_cb(self, msg):
-        if self._busy or self._model is None:
+        if self._model is None:
             return
         if not self._target_timeout_elapsed():
             return
-
-        with self._state_lock:
-            depth = None if self._depth is None else self._depth.copy()
-            camera_info_ready = self._camera_info_ready
-            intrinsics = tuple(self._intrinsics)
-
-        if depth is None or not camera_info_ready:
+        if not self._sequence_lock.acquire(blocking=False):
             return
 
+        sequence_locked = True
+        vision_locked = False
         try:
-            cv_img = self._bridge.imgmsg_to_cv2(
-                msg,
-                desired_encoding='bgr8',
+            if not self._vision_lock.acquire(blocking=False):
+                return
+            vision_locked = True
+
+            with self._state_lock:
+                depth = None if self._depth is None else self._depth.copy()
+                camera_info_ready = self._camera_info_ready
+                intrinsics = tuple(self._intrinsics)
+
+            if depth is None or not camera_info_ready:
+                return
+
+            try:
+                cv_img = self._bridge.imgmsg_to_cv2(
+                    msg,
+                    desired_encoding='bgr8',
+                )
+            except Exception as exc:
+                self.get_logger().error(f'Color convert failed: {exc}')
+                return
+
+            try:
+                target = self._select_target(cv_img, depth, intrinsics)
+            except Exception as exc:
+                self.get_logger().warning(f'Vision frame skipped: {exc}')
+                return
+
+            if target is None:
+                return
+
+            with self._state_lock:
+                self._busy = True
+                self._last_target_time = self.get_clock().now()
+            thread = threading.Thread(
+                target=self._run_grasp_sequence,
+                args=(target,),
+                daemon=True,
             )
-        except Exception as exc:
-            self.get_logger().error(f'Color convert failed: {exc}')
-            return
-
-        target = self._select_target(cv_img, depth, intrinsics)
-        if target is None:
-            return
-
-        self._busy = True
-        self._last_target_time = self.get_clock().now()
-        thread = threading.Thread(
-            target=self._run_grasp_sequence,
-            args=(target,),
-            daemon=True,
-        )
-        thread.start()
+            thread.start()
+            sequence_locked = False
+        finally:
+            if vision_locked:
+                self._vision_lock.release()
+            if sequence_locked:
+                with self._state_lock:
+                    self._busy = False
+                self._sequence_lock.release()
 
     def _target_timeout_elapsed(self):
-        if self._last_target_time is None:
+        with self._state_lock:
+            last_target_time = self._last_target_time
+        if last_target_time is None:
             return True
         now = self.get_clock().now()
-        elapsed_ns = (now - self._last_target_time).nanoseconds
+        elapsed_ns = (now - last_target_time).nanoseconds
         return elapsed_ns >= self._target_timeout * 1e9
 
     def _select_target(self, cv_img, depth, intrinsics):
@@ -560,8 +589,10 @@ class VisionGraspNode(Node):
         if self._use_tf_camera_pose:
             transform = self._lookup_tf_camera_transform()
             if transform is not None:
+                self.get_logger().info('Using TF camera pose', once=True)
                 return transform
         if self._fallback_manual_fk:
+            self.get_logger().info('Using manual FK camera pose', once=True)
             return self._manual_fk_camera_transform()
         return None
 
@@ -672,9 +703,10 @@ class VisionGraspNode(Node):
     ):
         arm_relative_cm = (object_base_m - self._arm_origin_m) * 100.0
         target_cm = arm_relative_cm + self._target_offsets_cm
+        target_cm[2] -= 2.0
 
         if class_name == 'paper':
-            target_cm[0] -= (1.5 - pitch_deg / 90.0)
+            target_cm[0] -= (1.0 - pitch_deg / 90.0)
             target_cm[2] += 0.8 * pitch_deg / 90.0
         elif class_name in ('bottle', 'can', 'cup'):
             target_cm[2] -= 4.0
@@ -685,36 +717,43 @@ class VisionGraspNode(Node):
         elif class_name == 'pen':
             target_cm[2] += 2.0
 
+        if self._invert_target_lateral:
+            target_cm[1] = -target_cm[1]
+
         return target_cm
 
     def _run_grasp_sequence(self, target):
         try:
             class_name = target['class_name']
             if self._open_gripper_before_move:
-                self._call_gripper(1.0, self._gripper_duration_ms)
+                if self._call_gripper(1.0, self._gripper_duration_ms):
+                    time.sleep(max(0.0, self._gripper_open_wait_sec))
 
             if not self._send_arm_target(target):
                 return
 
-            yaw_deg = float(target['yaw_deg'])
-            if self._enable_tool_yaw and abs(yaw_deg) > 1.0:
-                self._send_tool_yaw(math.radians(yaw_deg))
-
             close_ratio = gripper_close_open_ratio(class_name)
-            self._call_gripper(close_ratio, self._gripper_duration_ms)
+            if self._call_gripper(close_ratio, self._gripper_duration_ms):
+                time.sleep(max(0.0, self._gripper_close_wait_sec))
 
             if self._return_home:
-                self._send_joint_trajectory(
-                    self._home_joint_positions,
-                    self._home_duration,
-                    'home',
-                )
+                home_reached = self._send_home_via_moveit()
+                if home_reached and self._home_duration > 0.0:
+                    time.sleep(self._home_duration)
+                elif not home_reached:
+                    self.get_logger().warning(
+                        'HOME target was not reached; keeping vision paused '
+                        'until this grasp sequence exits'
+                    )
 
             self.get_logger().info(f'Grasp sequence finished for {class_name}')
         except Exception as exc:
             self.get_logger().error(f'Grasp sequence failed: {exc}')
         finally:
-            self._busy = False
+            with self._state_lock:
+                self._busy = False
+                self._last_target_time = self.get_clock().now()
+            self._sequence_lock.release()
 
     def _send_arm_target(self, target):
         if not self._arm_action.wait_for_server(timeout_sec=5.0):
@@ -723,17 +762,37 @@ class VisionGraspNode(Node):
             )
             return False
 
+        pitch = float(target['pitch_deg'])
+        if self._send_single_arm_target(target, pitch):
+            return True
+
+        if not self._retry_auto_pitch_on_failure:
+            return False
+
+        self.get_logger().warning(
+            f'Arm target failed at pitch={self._pitch_text(pitch)}; '
+            'retrying with MoveIt auto pitch'
+        )
+        return self._send_single_arm_target(target, -1.0)
+
+    def _send_single_arm_target(self, target, pitch):
         goal = ArmTarget.Goal()
         goal.x = float(target['target_cm'][0])
         goal.y = float(target['target_cm'][1])
         goal.z = float(target['target_cm'][2])
         goal.duration = self._arm_goal_duration
-        goal.end_angle = float(target['pitch_deg'])
+        goal.end_angle = float(pitch)
+        if self._enable_tool_yaw:
+            goal.tool_yaw = float(target.get('yaw_deg', 0.0))
+        else:
+            goal.tool_yaw = 0.0
 
         send_future = self._arm_action.send_goal_async(goal)
         goal_handle = self._wait_for_future(send_future, 5.0)
         if goal_handle is None or not goal_handle.accepted:
-            self.get_logger().warning('Arm target rejected')
+            self.get_logger().warning(
+                f'Arm target rejected at pitch={self._pitch_text(pitch)}'
+            )
             return False
 
         result_future = goal_handle.get_result_async()
@@ -744,15 +803,81 @@ class VisionGraspNode(Node):
 
         result = wrapped.result
         if not result.success:
-            self.get_logger().warning('Arm target failed')
+            self.get_logger().warning(
+                f'Arm target failed at pitch={self._pitch_text(pitch)}'
+            )
             return False
 
         self.get_logger().info(
-            'Arm target reached: '
+            f'Arm target reached at pitch={self._pitch_text(pitch)}: '
             + ', '.join(f'{angle:.1f}' for angle in result.final_angles)
-            + ' deg'
+            + f' deg, tool_yaw={goal.tool_yaw:.1f} deg'
         )
         return True
+
+    @staticmethod
+    def _pitch_text(pitch):
+        return 'auto' if pitch < -0.5 else f'{pitch:.1f} deg'
+
+    def _send_home_via_moveit(self):
+        """Return to HOME through /arm_target so MoveIt plans the motion."""
+        if not self._arm_action.wait_for_server(timeout_sec=5.0):
+            self.get_logger().error(
+                f'Action server not ready: {self._arm_action_name}'
+            )
+            return False
+
+        if len(self._home_joint_positions) < 4:
+            self.get_logger().warning(
+                'Cannot send MoveIt HOME target; '
+                'expected at least 4 joint values, '
+                f'got {len(self._home_joint_positions)}'
+            )
+            return False
+
+        target_cm, pitch_deg = self._home_target_from_joints(
+            self._home_joint_positions
+        )
+        self.get_logger().info(
+            f'Sending MoveIt HOME target: '
+            f'x={target_cm[0]:.1f}, y={target_cm[1]:.1f}, '
+            f'z={target_cm[2]:.1f} cm, pitch={pitch_deg:.1f} deg'
+        )
+
+        home_target = {
+            'target_cm': target_cm,
+            'pitch_deg': pitch_deg,
+            'yaw_deg': 0.0,
+        }
+        return self._send_single_arm_target(home_target, pitch_deg)
+
+    def _home_target_from_joints(self, joint_positions):
+        theta1, theta2, theta3, theta4 = joint_positions[:4]
+        l1, l2, l3, l4 = self._arm_link_lengths_cm
+
+        pitch2 = math.pi / 2.0 - theta2
+        pitch3 = math.pi / 2.0 - (theta2 + theta3)
+        pitch4 = math.pi / 2.0 - (theta2 + theta3 + theta4)
+        c1, s1 = math.cos(theta1), math.sin(theta1)
+
+        x = (
+            l2 * math.cos(pitch2)
+            + l3 * math.cos(pitch3)
+            + l4 * math.cos(pitch4)
+        ) * c1
+        y = (
+            l2 * math.cos(pitch2)
+            + l3 * math.cos(pitch3)
+            + l4 * math.cos(pitch4)
+        ) * s1
+        z = (
+            l1
+            + l2 * math.sin(pitch2)
+            + l3 * math.sin(pitch3)
+            + l4 * math.sin(pitch4)
+        )
+        pitch_deg = math.degrees(theta2 + theta3 + theta4) - 90.0
+        return np.array([x, y, z], dtype=float), pitch_deg
 
     def _call_gripper(self, open_ratio, duration_ms):
         if not self._gripper_client.wait_for_service(timeout_sec=2.0):
@@ -775,89 +900,6 @@ class VisionGraspNode(Node):
             )
             return False
         return True
-
-    def _send_tool_yaw(self, yaw_rad):
-        with self._state_lock:
-            positions = dict(self._joint_positions)
-
-        missing = [
-            name for name in REAL_ARM_JOINTS[:4]
-            if name not in positions
-        ]
-        if missing:
-            self.get_logger().warning(
-                'Cannot send tool yaw; missing joint states: '
-                + ', '.join(missing)
-            )
-            return False
-
-        joint_positions = [
-            positions.get(joint_name, 0.0)
-            for joint_name in MOVEIT_JOINTS
-        ]
-        joint_positions[MOVEIT_JOINTS.index('arm_tool_rotate_joint')] = yaw_rad
-        return self._send_joint_trajectory(
-            joint_positions,
-            self._tool_yaw_duration,
-            'tool yaw',
-        )
-
-    def _send_joint_trajectory(self, joint_positions, duration_sec, label):
-        if len(joint_positions) != len(MOVEIT_JOINTS):
-            self.get_logger().warning(
-                f'Cannot send {label}; expected {len(MOVEIT_JOINTS)} joints, '
-                f'got {len(joint_positions)}'
-            )
-            return False
-        if not self._trajectory_action.wait_for_server(timeout_sec=2.0):
-            self.get_logger().warning(
-                f'Trajectory action not ready: {self._trajectory_action_name}'
-            )
-            return False
-
-        trajectory = JointTrajectory()
-        trajectory.joint_names = list(MOVEIT_JOINTS)
-        trajectory.header.stamp = self.get_clock().now().to_msg()
-
-        point = JointTrajectoryPoint()
-        point.positions = [float(value) for value in joint_positions]
-        point.time_from_start = self._duration_msg(duration_sec)
-        trajectory.points = [point]
-
-        goal = FollowJointTrajectory.Goal()
-        goal.trajectory = trajectory
-
-        send_future = self._trajectory_action.send_goal_async(goal)
-        goal_handle = self._wait_for_future(send_future, 5.0)
-        if goal_handle is None or not goal_handle.accepted:
-            self.get_logger().warning(f'{label} trajectory rejected')
-            return False
-
-        result_future = goal_handle.get_result_async()
-        wrapped = self._wait_for_future(
-            result_future,
-            max(duration_sec + 5.0, 5.0),
-        )
-        if wrapped is None:
-            self.get_logger().warning(f'{label} trajectory timed out')
-            return False
-
-        result = wrapped.result
-        if result.error_code != FollowJointTrajectory.Result.SUCCESSFUL:
-            self.get_logger().warning(
-                f'{label} trajectory failed: error_code={result.error_code}'
-            )
-            return False
-        return True
-
-    @staticmethod
-    def _duration_msg(seconds):
-        if seconds < 0.0:
-            seconds = 0.0
-        return DurationMsg(
-            sec=int(seconds),
-            nanosec=int((seconds - int(seconds)) * 1e9),
-        )
 
     def _wait_for_future(self, future, timeout_sec):
         done = threading.Event()

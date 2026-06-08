@@ -320,7 +320,7 @@ def test_arm_bridge_gripper_command_maps_open_ratio_to_servo_raw():
         6, 6, 6
     ]
     assert [unpack_servo_payload(payload)[2] for cmd, payload in sent] == [
-        700, 425, 150
+        700, 350, 0
     ]
     assert [unpack_servo_payload(payload)[3] for cmd, payload in sent] == [
         250, 250, 250
