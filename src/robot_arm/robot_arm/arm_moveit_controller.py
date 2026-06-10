@@ -36,7 +36,7 @@ class ArmMoveItController:
     NUM_PLANNING_ATTEMPTS = 10
     TARGET_FRAME = 'base_link'
     TARGET_LINK = 'tool0'
-    TARGET_ORIGIN = (0.10, 0.0, 0.025)
+    DEFAULT_TARGET_ORIGIN_CM = (10.0, 0.0, 2.5)
     VELOCITY_SCALING = 0.2
     ACCELERATION_SCALING = 0.1
     WAIT_FOR_IK_TIMEOUT = 10.0
@@ -65,6 +65,7 @@ class ArmMoveItController:
         self._node = node
         self._group_name = group_name
         self._move_action_name = move_action_name
+        self._arm_origin_cm = self.DEFAULT_TARGET_ORIGIN_CM
         self._arm_link_lengths_cm = None
         self._last_ik_error = None
 
@@ -80,11 +81,13 @@ class ArmMoveItController:
             callback_group=callback_group,
         )
 
-    def set_link_lengths(self, lengths):
-        """更新从 URDF 解析出的机械臂连杆长度。"""
+    def set_link_lengths(self, origin, lengths):
+        """更新从 URDF 解析出的机械臂安装原点和连杆长度。"""
+        self._arm_origin_cm = origin
         self._arm_link_lengths_cm = lengths
         self._node.get_logger().info(
-            'Loaded arm link lengths from /robot_description: '
+            'Loaded arm geometry from /robot_description: '
+            f'origin=[{origin[0]:.2f}, {origin[1]:.2f}, {origin[2]:.2f}] cm, '
             f'l1={lengths[0]:.2f}, l2={lengths[1]:.2f}, '
             f'l3={lengths[2]:.2f}, l4={lengths[3]:.2f} cm'
         )
@@ -413,7 +416,9 @@ class ArmMoveItController:
 
     def _target_pose(self, x_cm, y_cm, z_cm, pitch_deg):
         pose = PoseStamped()
-        origin_x, origin_y, origin_z = self.TARGET_ORIGIN
+        origin_x, origin_y, origin_z = (
+            value / 100.0 for value in self._arm_origin_cm
+        )
         pose.header.frame_id = self.TARGET_FRAME
         pose.pose.position.x = origin_x + x_cm / 100.0
         pose.pose.position.y = origin_y + y_cm / 100.0
