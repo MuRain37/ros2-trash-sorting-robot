@@ -43,6 +43,13 @@ class ArmMoveItController:
     WAIT_FOR_MOVE_GROUP_TIMEOUT = 10.0
     WORKSPACE_MIN = (-1.0, -1.0, -1.0)
     WORKSPACE_MAX = (1.0, 1.0, 1.0)
+    HARDWARE_JOINT_LIMITS_DEG = {
+        'arm_base_joint': 180.0,
+        'arm_shoulder_joint': 120.0,
+        'arm_elbow_joint': 120.0,
+        'arm_wrist_joint': 120.0,
+        'arm_tool_rotate_joint': 120.0,
+    }
 
     MOVEIT_JOINTS = [
         'arm_base_joint',
@@ -261,6 +268,13 @@ class ArmMoveItController:
                 )
                 continue
 
+            if not self._hardware_joints_within_limits(positions):
+                self._last_ik_error = (
+                    'IK exceeds hardware joint limits: '
+                    f'{self._format_hardware_limit_errors(positions)}'
+                )
+                continue
+
             joint_positions = [
                 positions.get(joint_name, 0.0)
                 for joint_name in self.MOVEIT_JOINTS
@@ -272,6 +286,36 @@ class ArmMoveItController:
             return joint_positions, target_angles_deg
 
         return None
+
+    def _hardware_joints_within_limits(self, positions):
+        for joint_name, max_degrees in self.HARDWARE_JOINT_LIMITS_DEG.items():
+            position = positions.get(joint_name)
+            if position is None:
+                return False
+            if not self._joint_within_hardware_limit(joint_name, position):
+                return False
+        return True
+
+    def _joint_within_hardware_limit(self, joint_name, position):
+        max_degrees = self.HARDWARE_JOINT_LIMITS_DEG.get(joint_name)
+        if max_degrees is None:
+            return True
+        return abs(position / DEG_TO_RAD) <= max_degrees
+
+    def _format_hardware_limit_errors(self, positions):
+        errors = []
+        for joint_name, max_degrees in self.HARDWARE_JOINT_LIMITS_DEG.items():
+            position = positions.get(joint_name)
+            if position is None:
+                errors.append(f'{joint_name}=missing')
+                continue
+            degrees = position / DEG_TO_RAD
+            if abs(degrees) > max_degrees:
+                errors.append(
+                    f'{joint_name}={degrees:.2f} deg '
+                    f'not in [{-max_degrees:.1f}, {max_degrees:.1f}]'
+                )
+        return ', '.join(errors) if errors else 'none'
 
     def _fixed_end_joints_match(self, positions):
         for joint_name in self.FIXED_END_JOINTS:

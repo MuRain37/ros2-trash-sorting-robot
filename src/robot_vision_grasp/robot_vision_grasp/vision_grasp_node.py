@@ -172,7 +172,7 @@ class VisionGraspNode(Node):
 
         return model
 
-    def _set_link_lengths(self, lengths):
+    def _set_link_lengths(self, origin, lengths):
         with self._state_lock:
             self._arm_link_lengths_cm = tuple(float(v) for v in lengths)
 
