@@ -78,26 +78,30 @@ def get_ik_pitch(class_name, points_cam=None, cam_pitch=0.0,
     pitch_table = {
         'pen': 90.0,
         'paper': 65.0,
+        'charger': 90.0,
+        'usb': 90.0,
+        'yan': 90.0,
+
     }
 
-    if class_name == 'pen':
-        angle_3d = _get_axis_angle(points_cam, cam_pitch)
-        return pitch_table[class_name], angle_3d, False
-
     if class_name == 'paper':
-        return pitch_table[class_name], 0.0, True
+        return pitch_table[class_name], 0.0, False
 
-    if class_name in ('bottle', 'can', 'cup'):
+    if class_name == 'bottle':
         is_up = _is_upright(points_cam, cam_pitch, seg_mask, depth_img)
         angle_3d = 0.0 if is_up else _get_axis_angle(points_cam, cam_pitch)
         return (0.0 if is_up else 90.0), angle_3d, is_up
 
-    return 90.0, 0.0, True
+    else:
+        angle_3d = _get_axis_angle(points_cam, cam_pitch)
+        return pitch_table[class_name], angle_3d, False
+
+    return 90.0, 0.0, False
 
 
 def get_gripper_yaw(class_name, angle_3d=None, is_upright=True):
     """Return tool-rotate joint yaw in degrees."""
-    if class_name not in ('pen', 'bottle', 'can', 'cup'):
+    if class_name  == 'paper':
         return 0.0
     if angle_3d is None or is_upright:
         return 0.0
@@ -106,9 +110,8 @@ def get_gripper_yaw(class_name, angle_3d=None, is_upright=True):
 
 def gripper_close_open_ratio(class_name, open_raw=0.0, close_raw=1000.0):
     width_cm_by_class = {
-        'bottle': 3.5,
-        'can': 3.0,
-        'cup': 3.0,
+        'bottle': 3.0,
+        'charger': 1.0,
     }
     width_cm = width_cm_by_class.get(class_name, 0.0)
     old_raw = int(1000 - 500.0 / 3.0 * width_cm)

@@ -84,9 +84,10 @@ class YOLOSegOpenVINO:
         self._names = names or {
             0: 'bottle',
             1: 'pen',
-            2: 'cup',
-            3: 'can',
-            4: 'paper',
+            2: 'paper',
+            3: 'charger',
+            4: 'usb',
+            5: 'yan'
         }
 
     def __call__(self, img, verbose=False):

@@ -26,8 +26,9 @@ def generate_launch_description():
             'camera_frame',
             default_value='camera_optical_link',
         ),
-        DeclareLaunchArgument('use_tf_camera_pose', default_value='false'),
+        DeclareLaunchArgument('use_tf_camera_pose', default_value='true'),
         DeclareLaunchArgument('fallback_manual_fk', default_value='true'),
+        DeclareLaunchArgument('prefer_manual_fk', default_value='true'),
         DeclareLaunchArgument('return_home', default_value='true'),
         DeclareLaunchArgument('invert_target_lateral', default_value='true'),
         DeclareLaunchArgument('target_forward_offset_cm', default_value='0.0'),
@@ -50,6 +51,10 @@ def generate_launch_description():
                 ),
                 'fallback_manual_fk': ParameterValue(
                     LaunchConfiguration('fallback_manual_fk'),
+                    value_type=bool,
+                ),
+                'prefer_manual_fk': ParameterValue(
+                    LaunchConfiguration('prefer_manual_fk'),
                     value_type=bool,
                 ),
                 'return_home': ParameterValue(

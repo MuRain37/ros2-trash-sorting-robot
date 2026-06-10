@@ -41,6 +41,8 @@ MOVEIT_JOINTS = [
     'virtual_tool_yaw_joint',
 ]
 FALLBACK_LINK_LENGTHS_CM = (3.38648, 12.9416, 12.9444, 11.38648)
+CAMERA_POSE_SOURCE_MANUAL_FK = 'manual_fk'
+CAMERA_POSE_SOURCE_TF = 'tf'
 
 
 class VisionGraspNode(Node):
@@ -126,29 +128,24 @@ class VisionGraspNode(Node):
         self.declare_parameter('model_device', 'CPU')
         self.declare_parameter(
             'class_names',
-            ['bottle', 'pen', 'cup', 'can', 'paper'],
+            ['bottle', 'pen', 'paper', 'charger', 'usb', 'yan'],
         )
         self.declare_parameter('confidence_threshold', 0.55)
         self.declare_parameter('iou_threshold', 0.65)
         self.declare_parameter('mask_threshold', 0.5)
         self.declare_parameter('color_topic', '/camera/camera/color/image_raw')
-        self.declare_parameter(
-            'depth_topic',
-            '/camera/camera/aligned_depth_to_color/image_raw',
-        )
-        self.declare_parameter(
-            'depth_info_topic',
-            '/camera/camera/aligned_depth_to_color/camera_info',
-        )
+        self.declare_parameter('depth_topic','/camera/camera/aligned_depth_to_color/image_raw',)
+        self.declare_parameter('depth_info_topic','/camera/camera/aligned_depth_to_color/camera_info',)
         self.declare_parameter('joint_states_topic', '/joint_states')
         self.declare_parameter('base_frame', 'base_link')
         self.declare_parameter('camera_frame', 'camera_optical_link')
-        self.declare_parameter('use_tf_camera_pose', False)
+        self.declare_parameter('use_tf_camera_pose', True)
         self.declare_parameter('fallback_manual_fk', True)
+        self.declare_parameter('prefer_manual_fk', True)
         self.declare_parameter('arm_origin_m', [0.10, 0.0, 0.025])
         self.declare_parameter(
             'manual_camera_offset_m',
-            [-0.033, 0.089, 0.020],
+            [-0.032, 0.065, 0.050],
         )
         self.declare_parameter('depth_scale', 0.001)
         self.declare_parameter('min_depth_m', 0.05)
@@ -158,17 +155,17 @@ class VisionGraspNode(Node):
         self.declare_parameter('target_timeout', 2.0)
         self.declare_parameter('target_forward_offset_cm', 0.0)
         self.declare_parameter('target_right_offset_cm', 0.0)
-        self.declare_parameter('target_up_offset_cm', 2.0)
+        self.declare_parameter('target_up_offset_cm', 0.0)
         self.declare_parameter('invert_target_lateral', True)
         self.declare_parameter('erode_iterations', 2)
         self.declare_parameter('arm_action_name', '/arm_target')
         self.declare_parameter('gripper_service_name', '/set_gripper')
-        self.declare_parameter('arm_goal_duration', 3.0)
+        self.declare_parameter('arm_goal_duration', 2.0)
         self.declare_parameter('action_timeout', 30.0)
         self.declare_parameter('retry_auto_pitch_on_failure', True)
         self.declare_parameter('gripper_duration_ms', 1000.0)
-        self.declare_parameter('gripper_open_wait_sec', 1.0)
-        self.declare_parameter('gripper_close_wait_sec', 1.0)
+        self.declare_parameter('gripper_open_wait_sec', 1.2)
+        self.declare_parameter('gripper_close_wait_sec', 1.2)
         self.declare_parameter('open_gripper_before_move', True)
         self.declare_parameter('enable_tool_yaw', True)
         self.declare_parameter('return_home', True)
@@ -176,7 +173,7 @@ class VisionGraspNode(Node):
             'home_joint_positions',
             [
                 0.0,
-                -1.2566370614359172,
+                -1.0471975511965976,
                 2.0943951023931953,
                 1.4660765716752369,
                 0.0,
@@ -213,6 +210,9 @@ class VisionGraspNode(Node):
         )
         self._fallback_manual_fk = bool(
             self.get_parameter('fallback_manual_fk').value
+        )
+        self._prefer_manual_fk = bool(
+            self.get_parameter('prefer_manual_fk').value
         )
         self._arm_origin_m = np.array(
             self.get_parameter('arm_origin_m').value,
@@ -451,8 +451,7 @@ class VisionGraspNode(Node):
             f"base=({target['object_base_m'][0] * 100.0:.1f}, "
             f"{target['object_base_m'][1] * 100.0:.1f}, "
             f"{target['object_base_m'][2] * 100.0:.1f})cm "
-            f"target=({target['target_cm'][0]:.1f}, "
-            f"{target['target_cm'][1]:.1f}, {target['target_cm'][2]:.1f})cm "
+            f"pose={target['pose_source']} "
             f"pitch={target['pitch_deg']:.1f} yaw={target['yaw_deg']:.1f}"
         )
         return target
@@ -489,6 +488,7 @@ class VisionGraspNode(Node):
         object_base_m = centroid['object_base_m']
         camera_pitch = centroid['camera_pitch_deg']
         points_cam = centroid['points_cam']
+        pose_source = centroid['pose_source']
         pitch_deg, axis_angle, is_upright = get_ik_pitch(
             class_name,
             points_cam,
@@ -501,6 +501,8 @@ class VisionGraspNode(Node):
             object_base_m,
             class_name,
             pitch_deg,
+            axis_angle,
+            pose_source,
             is_upright,
         )
 
@@ -511,6 +513,7 @@ class VisionGraspNode(Node):
             'target_cm': target_cm,
             'pitch_deg': pitch_deg,
             'yaw_deg': yaw_deg,
+            'pose_source': pose_source,
             'is_upright': is_upright,
         }
 
@@ -565,7 +568,7 @@ class VisionGraspNode(Node):
         transform = self._camera_transform()
         if transform is None:
             return None
-        rotation, translation, camera_pitch_deg = transform
+        rotation, translation, camera_pitch_deg, pose_source = transform
 
         point_cam = np.array([
             (u - cx) * depth_m / fx,
@@ -583,17 +586,51 @@ class VisionGraspNode(Node):
             'object_base_m': object_base_m,
             'camera_pitch_deg': camera_pitch_deg,
             'points_cam': points_cam,
+            'pose_source': pose_source,
         }
 
     def _camera_transform(self):
-        if self._use_tf_camera_pose:
-            transform = self._lookup_tf_camera_transform()
+        if self._prefer_manual_fk:
+            source_order = [
+                (
+                    CAMERA_POSE_SOURCE_MANUAL_FK,
+                    'manual FK',
+                    self._manual_fk_camera_transform,
+                    self._fallback_manual_fk,
+                ),
+                (
+                    CAMERA_POSE_SOURCE_TF,
+                    'TF',
+                    self._lookup_tf_camera_transform,
+                    self._use_tf_camera_pose,
+                ),
+            ]
+        else:
+            source_order = [
+                (
+                    CAMERA_POSE_SOURCE_TF,
+                    'TF',
+                    self._lookup_tf_camera_transform,
+                    self._use_tf_camera_pose,
+                ),
+                (
+                    CAMERA_POSE_SOURCE_MANUAL_FK,
+                    'manual FK',
+                    self._manual_fk_camera_transform,
+                    self._fallback_manual_fk,
+                ),
+            ]
+
+        for source, label, transform_fn, enabled in source_order:
+            if not enabled:
+                continue
+            transform = transform_fn()
             if transform is not None:
-                self.get_logger().info('Using TF camera pose', once=True)
-                return transform
-        if self._fallback_manual_fk:
-            self.get_logger().info('Using manual FK camera pose', once=True)
-            return self._manual_fk_camera_transform()
+                self.get_logger().info(
+                    f'Using {label} camera pose',
+                    once=True,
+                )
+                return (*transform, source)
         return None
 
     def _lookup_tf_camera_transform(self):
@@ -625,7 +662,7 @@ class VisionGraspNode(Node):
         self._last_tf_warning = now
         self.get_logger().warning(
             f'Camera TF unavailable ({self._base_frame} <- '
-            f'{self._camera_frame}): {exc}. Trying manual FK fallback.'
+            f'{self._camera_frame}): {exc}'
         )
 
     def _manual_fk_camera_transform(self):
@@ -699,25 +736,28 @@ class VisionGraspNode(Node):
         object_base_m,
         class_name,
         pitch_deg,
+        axis_angle,
+        pose_source,
         is_upright,
     ):
         arm_relative_cm = (object_base_m - self._arm_origin_m) * 100.0
         target_cm = arm_relative_cm + self._target_offsets_cm
-        target_cm[2] -= 2.0
-
+        abs_angle = abs(axis_angle)
+        target_cm[0] += (1.4+(abs_angle-45)**(abs_angle-45)/2025)
+        target_cm[2] -= 5.0
         if class_name == 'paper':
-            target_cm[0] -= (1.0 - pitch_deg / 90.0)
-            target_cm[2] += 0.8 * pitch_deg / 90.0
-        elif class_name in ('bottle', 'can', 'cup'):
-            target_cm[2] -= 4.0
+            target_cm[0] -= (2.0 - pitch_deg / 90.0)
+        elif class_name == 'bottle':
             if is_upright:
-                target_cm[0] -= 5.0 * pitch_deg / 90.0
+                target_cm[0] -= 1.0
                 target_cm[1] -= 3.0
-                target_cm[2] -= 2.0
-        elif class_name == 'pen':
-            target_cm[2] += 2.0
-
-        if self._invert_target_lateral:
+            else:
+                target_cm[2] -= 5.0
+        if (
+            self._invert_target_lateral
+            and pose_source == CAMERA_POSE_SOURCE_MANUAL_FK
+        ):
+            # Legacy FK calibration used the opposite lateral sign.
             target_cm[1] = -target_cm[1]
 
         return target_cm

@@ -15,7 +15,7 @@ def test_wide_objects_close_less_than_pen():
 def test_known_pitch_rules():
     pitch, _axis, is_up = get_ik_pitch('paper')
     assert pitch == 65.0
-    assert is_up is True
+    assert is_up is False
 
     pitch, _axis, is_up = get_ik_pitch('pen')
     assert pitch == 90.0

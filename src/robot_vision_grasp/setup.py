@@ -32,6 +32,7 @@ setup(
     entry_points={
         'console_scripts': [
             'vision_grasp_node = robot_vision_grasp.vision_grasp_node:main',
+            'demo = robot_vision_grasp.demo:main',
         ],
     },
 )
