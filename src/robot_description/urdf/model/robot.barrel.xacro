@@ -2,12 +2,13 @@
 <robot xmlns:xacro="http://www.ros.org/wiki/xacro">
 
   <!-- ========== 属性 ========== -->
-  <xacro:property name="barrel_radius" value="0.05"/>
-  <xacro:property name="barrel_height" value="0.12"/>
+  <xacro:property name="barrel_radius" value="0.06"/>
+  <xacro:property name="barrel_height" value="0.15"/>
+  <xacro:property name="barrel_bottom_clearance" value="0.006"/>
   <xacro:property name="barrel_mass" value="0.3"/>
 
   <!-- y 方向偏移（左右两侧） -->
-  <xacro:property name="barrel_y_offset" value="${chassis_width / 2.0 - 0.02}"/>
+  <xacro:property name="barrel_y_offset" value="0.110"/>
 
   <xacro:macro name="barrel" params="name y_sign">
     <link name="${name}">
@@ -41,7 +42,7 @@
     <joint name="${name}_joint" type="fixed">
       <parent link="base_link"/>
       <child link="${name}"/>
-      <origin xyz="0 ${y_sign * barrel_y_offset} ${chassis_height / 2.0 + barrel_height / 2.0}"
+      <origin xyz="0 ${y_sign * barrel_y_offset} ${-chassis_height / 2.0 + barrel_bottom_clearance + barrel_height / 2.0}"
               rpy="0 0 0"/>
     </joint>
   </xacro:macro>

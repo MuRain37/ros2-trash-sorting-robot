@@ -33,7 +33,7 @@
     <joint name="${name}_joint" type="continuous">
       <parent link="base_link"/>
       <child link="${name}"/>
-      <origin xyz="${x_sign * wheel_x_offset} ${y_sign * (chassis_width/2 + wheel_thickness/2)} ${-wheel_z_offset}" rpy="0 0 0"/>
+      <origin xyz="${x_sign * wheel_x_offset} ${y_sign * wheel_y_offset} ${-wheel_z_offset}" rpy="0 0 0"/>
       <axis xyz="0 1 0"/>
     </joint>
   </xacro:macro>

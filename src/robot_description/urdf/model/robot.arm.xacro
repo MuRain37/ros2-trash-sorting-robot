@@ -5,14 +5,14 @@
   <xacro:property name="arm_l1" value="0.0338648"/>
   <xacro:property name="arm_l2" value="0.129416"/>
   <xacro:property name="arm_l3" value="0.129444"/>
-  <xacro:property name="arm_l4" value="0.0569324"/>
-  <xacro:property name="arm_l5" value="0.0569324"/>
+  <xacro:property name="arm_l4" value="0.05448"/>
+  <xacro:property name="arm_l5" value="0.1183848"/>
 
   <xacro:property name="arm_w" value="0.030"/>
 
   <xacro:property name="gripper_base_length" value="${arm_w}"/>
   <xacro:property name="gripper_base_width" value="0.070"/>
-  <xacro:property name="gripper_base_height" value="0.018"/>
+  <xacro:property name="gripper_base_height" value="0.0593848"/>
   <xacro:property name="gripper_finger_length" value="${arm_l5 - gripper_base_height}"/>
   <xacro:property name="gripper_finger_width" value="${arm_w}"/>
   <xacro:property name="gripper_finger_thickness" value="0.010"/>
@@ -29,7 +29,7 @@
   <xacro:property name="tool_virtual_joint_damping" value="5.0"/>
   <xacro:property name="tool_virtual_joint_friction" value="0.1"/>
 
-  <xacro:property name="arm_origin_x" value="${chassis_length/2 - 0.05}"/>
+  <xacro:property name="arm_origin_x" value="${chassis_length/2 - 0.055}"/>
   <xacro:property name="arm_origin_y" value="0.0"/>
   <xacro:property name="arm_origin_z" value="${chassis_height/2}"/>
 

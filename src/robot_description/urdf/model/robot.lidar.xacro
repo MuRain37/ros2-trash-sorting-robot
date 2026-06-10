@@ -9,7 +9,7 @@
 
   <!-- ========== 支架属性 ========== -->
   <xacro:property name="bracket_radius" value="0.015"/>
-  <xacro:property name="bracket_height" value="0.35"/>
+  <xacro:property name="bracket_height" value="0.318"/>
   <xacro:property name="bracket_mass" value="0.02"/>
 
   <!-- ========== 支架链接 ========== -->
@@ -44,7 +44,7 @@
   <joint name="lidar_bracket_joint" type="fixed">
     <parent link="base_link"/>
     <child link="lidar_bracket"/>
-    <origin xyz="${-(chassis_length/2 - 0.05)} 0 ${chassis_height/2 + bracket_height/2}" rpy="0 0 0"/>
+    <origin xyz="${-(chassis_length/2 - 0.055)} 0 ${chassis_height/2 + bracket_height/2}" rpy="0 0 0"/>
   </joint>
 
   <!-- ========== 激光雷达传感器链接 ========== -->
