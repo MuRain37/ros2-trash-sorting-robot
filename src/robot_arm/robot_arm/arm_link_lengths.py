@@ -1,4 +1,4 @@
-"""从 /robot_description 发布的 URDF 中提取机械臂连杆长度。"""
+"""从 /robot_description 发布的 URDF 中提取机械臂几何参数。"""
 
 import xml.etree.ElementTree as ET
 
@@ -9,6 +9,7 @@ from std_msgs.msg import String
 
 
 _TARGET_JOINTS = [
+    'arm_base_joint',
     'arm_shoulder_joint',
     'arm_elbow_joint',
     'arm_wrist_joint',
@@ -17,11 +18,11 @@ _TARGET_JOINTS = [
 ]
 
 
-def extract_link_lengths(urdf_text):
-    """返回厘米单位的 (l1, l2, l3, l4)，解析失败返回 None。"""
+def extract_arm_geometry(urdf_text):
+    """返回厘米单位的机械臂几何参数，解析失败返回 None。"""
     root = ET.fromstring(urdf_text)
 
-    joint_z = {}
+    joint_origins = {}
     for joint in root.iter('joint'):
         name = joint.get('name', '')
         if name not in _TARGET_JOINTS:
@@ -32,41 +33,54 @@ def extract_link_lengths(urdf_text):
             continue
 
         xyz = origin.get('xyz', '0 0 0')
-        joint_z[name] = float(xyz.split()[2])
+        values = tuple(float(value) for value in xyz.split())
+        if len(values) != 3:
+            return None
+        joint_origins[name] = values
 
-    if len(joint_z) != len(_TARGET_JOINTS):
+    if len(joint_origins) != len(_TARGET_JOINTS):
         return None
 
-    return (
-        joint_z['arm_shoulder_joint'] * 100.0,
-        joint_z['arm_elbow_joint'] * 100.0,
-        joint_z['arm_wrist_joint'] * 100.0,
+    origin = tuple(value * 100.0 for value in joint_origins['arm_base_joint'])
+    lengths = (
+        joint_origins['arm_shoulder_joint'][2] * 100.0,
+        joint_origins['arm_elbow_joint'][2] * 100.0,
+        joint_origins['arm_wrist_joint'][2] * 100.0,
         (
-            joint_z['arm_tool_rotate_joint']
-            + joint_z['virtual_tool_roll_joint']
+            joint_origins['arm_tool_rotate_joint'][2]
+            + joint_origins['virtual_tool_roll_joint'][2]
         ) * 100.0,
     )
+    return origin, lengths
 
 
-def install_urdf_link_length_loader(node, on_lengths):
-    """订阅 /robot_description 并在解析成功后回调 on_lengths。"""
+def extract_link_lengths(urdf_text):
+    """返回厘米单位的 (l1, l2, l3, l4)，解析失败返回 None。"""
+    geometry = extract_arm_geometry(urdf_text)
+    if geometry is None:
+        return None
+    return geometry[1]
+
+
+def install_urdf_link_length_loader(node, on_geometry):
+    """订阅 /robot_description 并在解析成功后回调 on_geometry。"""
 
     def callback(msg):
         try:
-            lengths = extract_link_lengths(msg.data)
+            geometry = extract_arm_geometry(msg.data)
         except (ET.ParseError, ValueError, IndexError) as exc:
             node.get_logger().warning(
-                f'Failed to parse arm link lengths from /robot_description: {exc}'
+                f'Failed to parse arm geometry from /robot_description: {exc}'
             )
             return
 
-        if lengths is None:
+        if geometry is None:
             node.get_logger().warning(
-                'Failed to extract all arm link lengths from /robot_description'
+                'Failed to extract all arm geometry from /robot_description'
             )
             return
 
-        on_lengths(lengths)
+        on_geometry(*geometry)
 
     qos = QoSProfile(
         depth=1,

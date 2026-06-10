@@ -28,7 +28,7 @@ class ArmMoveItController:
     """封装 MoveIt IK、规划和执行流程。"""
 
     ALLOWED_PLANNING_TIME = 5.0
-    AUTO_PITCH_VALUES = list(range(90, -21, -1))
+    AUTO_PITCH_VALUES = [45, 60, 30, 75, 15, 90, 0, -15, -30, -45, -60, -75, -90]
     FIXED_END_JOINT_POSITION = 0.0
     GOAL_JOINT_TOLERANCE = 0.001
     IK_CALL_TIMEOUT = 1.0
@@ -36,7 +36,7 @@ class ArmMoveItController:
     NUM_PLANNING_ATTEMPTS = 10
     TARGET_FRAME = 'base_link'
     TARGET_LINK = 'tool0'
-    TARGET_ORIGIN = (0.10, 0.0, 0.025)
+    DEFAULT_TARGET_ORIGIN_CM = (10.0, 0.0, 2.5)
     VELOCITY_SCALING = 0.2
     ACCELERATION_SCALING = 0.1
     WAIT_FOR_IK_TIMEOUT = 10.0
@@ -54,21 +54,18 @@ class ArmMoveItController:
         'virtual_tool_pitch_joint',
         'virtual_tool_yaw_joint',
     ]
-    TOOL_ROTATE_JOINT = 'arm_tool_rotate_joint'
     FIXED_END_JOINTS = [
+        'arm_tool_rotate_joint',
         'virtual_tool_roll_joint',
         'virtual_tool_pitch_joint',
         'virtual_tool_yaw_joint',
-    ]
-    IK_FIXED_JOINTS = [
-        TOOL_ROTATE_JOINT,
-        *FIXED_END_JOINTS,
     ]
 
     def __init__(self, node, group_name, move_action_name, callback_group):
         self._node = node
         self._group_name = group_name
         self._move_action_name = move_action_name
+        self._arm_origin_cm = self.DEFAULT_TARGET_ORIGIN_CM
         self._arm_link_lengths_cm = None
         self._last_ik_error = None
 
@@ -84,32 +81,25 @@ class ArmMoveItController:
             callback_group=callback_group,
         )
 
-    def set_link_lengths(self, lengths):
-        """更新从 URDF 解析出的机械臂连杆长度。"""
+    def set_link_lengths(self, origin, lengths):
+        """更新从 URDF 解析出的机械臂安装原点和连杆长度。"""
+        self._arm_origin_cm = origin
         self._arm_link_lengths_cm = lengths
         self._node.get_logger().info(
-            'Loaded arm link lengths from /robot_description: '
+            'Loaded arm geometry from /robot_description: '
+            f'origin=[{origin[0]:.2f}, {origin[1]:.2f}, {origin[2]:.2f}] cm, '
             f'l1={lengths[0]:.2f}, l2={lengths[1]:.2f}, '
             f'l3={lengths[2]:.2f}, l4={lengths[3]:.2f} cm'
         )
 
-    def move_to_target(
-        self,
-        x,
-        y,
-        z,
-        pitch,
-        tool_yaw=0.0,
-        feedback_callback=None,
-    ):
+    def move_to_target(self, x, y, z, pitch, feedback_callback=None):
         """按厘米坐标和末端俯仰角移动机械臂。"""
         pitch_text = 'auto' if pitch is None else f'{pitch:.2f} deg'
-        tool_yaw_rad = self._normalize_angle(float(tool_yaw) * DEG_TO_RAD)
         self._node.get_logger().info(
             f'MoveIt pose target: link={self.TARGET_LINK}, '
             f'frame={self.TARGET_FRAME}, '
             f'position=[{x:.2f}, {y:.2f}, {z:.2f}] cm, '
-            f'pitch={pitch_text}, tool_yaw={tool_yaw:.2f} deg'
+            f'pitch={pitch_text}'
         )
 
         last_failure = None
@@ -125,24 +115,15 @@ class ArmMoveItController:
             if ik_result is None:
                 last_failure = (
                     f'IK failed at pitch={candidate_pitch:.2f} deg'
-                    + (
-                        f': {self._last_ik_error}'
-                        if self._last_ik_error
-                        else ''
-                    )
+                    + (f': {self._last_ik_error}' if self._last_ik_error else '')
                 )
                 continue
 
             joint_positions, target_angles_deg = ik_result
-            joint_positions[
-                self.MOVEIT_JOINTS.index(self.TOOL_ROTATE_JOINT)
-            ] = tool_yaw_rad
             self._node.get_logger().info(
                 f'MoveIt IK solution: pitch={candidate_pitch:.2f} deg, '
                 f'joints={self._format_angles(target_angles_deg)} deg, '
-                f'tool_yaw={tool_yaw:.2f} deg, '
-                f'virtual joints fixed at '
-                f'{self.FIXED_END_JOINT_POSITION:.3f} rad'
+                f'end joints fixed at {self.FIXED_END_JOINT_POSITION:.3f} rad'
             )
 
             success, final_angles, failure = self._execute_moveit_joint_goal(
@@ -221,21 +202,12 @@ class ArmMoveItController:
         final_angles = self._extract_final_angles(result, target_angles_deg)
         return True, final_angles, None
 
-    def _compute_moveit_ik(
-        self,
-        x_cm,
-        y_cm,
-        z_cm,
-        pitch_deg,
-        feedback_callback,
-    ):
+    def _compute_moveit_ik(self, x_cm, y_cm, z_cm, pitch_deg, feedback_callback):
         """使用多个初始种子求解 MoveIt IK。"""
         if not self._compute_ik.wait_for_service(
             timeout_sec=self.WAIT_FOR_IK_TIMEOUT
         ):
-            self._node.get_logger().error(
-                'MoveIt /compute_ik service is not ready'
-            )
+            self._node.get_logger().error('MoveIt /compute_ik service is not ready')
             return None
 
         self._last_ik_error = None
@@ -276,21 +248,16 @@ class ArmMoveItController:
                 self._last_ik_error = self._moveit_error_text(error_code)
                 continue
 
-            positions = self._extract_ik_positions(
-                response.solution.joint_state
-            )
+            positions = self._extract_ik_positions(response.solution.joint_state)
             if positions is None:
                 self._last_ik_error = 'IK response has no complete joint state'
                 continue
 
             if not self._fixed_end_joints_match(positions):
-                # 第5轴和虚拟关节在 IK 阶段固定，避免夹爪旋转影响可达性。
-                changed_joints = self._format_joint_positions(
-                    positions,
-                    self.IK_FIXED_JOINTS,
-                )
+                # 末端虚拟关节只用于约束姿态，不允许 IK 改动它们。
                 self._last_ik_error = (
-                    f'IK changed fixed IK joints: {changed_joints}'
+                    'IK changed fixed end joints: '
+                    f'{self._format_joint_positions(positions, self.FIXED_END_JOINTS)}'
                 )
                 continue
 
@@ -307,7 +274,7 @@ class ArmMoveItController:
         return None
 
     def _fixed_end_joints_match(self, positions):
-        for joint_name in self.IK_FIXED_JOINTS:
+        for joint_name in self.FIXED_END_JOINTS:
             position = positions.get(joint_name)
             if position is None:
                 continue
@@ -317,33 +284,21 @@ class ArmMoveItController:
                 return False
         return True
 
-    def _build_ik_request(
-        self,
-        x_cm,
-        y_cm,
-        z_cm,
-        pitch_deg,
-        seed_positions,
-    ):
+    def _build_ik_request(self, x_cm, y_cm, z_cm, pitch_deg, seed_positions):
         request = GetPositionIK.Request()
         ik_request = request.ik_request
         ik_request.group_name = self._group_name
         ik_request.robot_state.joint_state = self._seed_joint_state(
-            seed_positions,
+            seed_positions
         )
         ik_request.robot_state.is_diff = False
         ik_request.constraints.joint_constraints = [
             self._joint_constraint(joint_name, self.FIXED_END_JOINT_POSITION)
-            for joint_name in self.IK_FIXED_JOINTS
+            for joint_name in self.FIXED_END_JOINTS
         ]
         ik_request.avoid_collisions = False
         ik_request.ik_link_name = self.TARGET_LINK
-        ik_request.pose_stamped = self._target_pose(
-            x_cm,
-            y_cm,
-            z_cm,
-            pitch_deg,
-        )
+        ik_request.pose_stamped = self._target_pose(x_cm, y_cm, z_cm, pitch_deg)
         ik_request.timeout.sec = int(self.IK_TIMEOUT)
         ik_request.timeout.nanosec = int(
             (self.IK_TIMEOUT - int(self.IK_TIMEOUT)) * 1e9
@@ -358,7 +313,7 @@ class ArmMoveItController:
             for joint_name in self.MOVEIT_JOINTS
         ]
 
-        for joint_name in self.IK_FIXED_JOINTS:
+        for joint_name in self.FIXED_END_JOINTS:
             if joint_name in msg.name:
                 index = msg.name.index(joint_name)
                 msg.position[index] = self.FIXED_END_JOINT_POSITION
@@ -369,9 +324,7 @@ class ArmMoveItController:
         yaw = math.atan2(y_cm, x_cm) if x_cm != 0.0 or y_cm != 0.0 else 0.0
         seeds = []
 
-        seeds.extend(
-            self._geometric_seed_positions(x_cm, y_cm, z_cm, pitch_deg)
-        )
+        seeds.extend(self._geometric_seed_positions(x_cm, y_cm, z_cm, pitch_deg))
         # 几何解失败时仍保留零位和朝向目标的 base yaw 作为兜底种子。
         seeds.extend([
             {},
@@ -463,7 +416,9 @@ class ArmMoveItController:
 
     def _target_pose(self, x_cm, y_cm, z_cm, pitch_deg):
         pose = PoseStamped()
-        origin_x, origin_y, origin_z = self.TARGET_ORIGIN
+        origin_x, origin_y, origin_z = (
+            value / 100.0 for value in self._arm_origin_cm
+        )
         pose.header.frame_id = self.TARGET_FRAME
         pose.pose.position.x = origin_x + x_cm / 100.0
         pose.pose.position.y = origin_y + y_cm / 100.0
@@ -483,10 +438,7 @@ class ArmMoveItController:
         return list(self.AUTO_PITCH_VALUES)
 
     def _extract_ik_positions(self, joint_state):
-        if (
-            not joint_state.name
-            or len(joint_state.name) != len(joint_state.position)
-        ):
+        if not joint_state.name or len(joint_state.name) != len(joint_state.position):
             return None
         return dict(zip(joint_state.name, joint_state.position))
 
@@ -591,10 +543,7 @@ class ArmMoveItController:
             return self._fixed_angle_array(fallback_angles)
 
         final_positions = joint_trajectory.points[-1].positions
-        positions_by_name = dict(zip(
-            joint_trajectory.joint_names,
-            final_positions,
-        ))
+        positions_by_name = dict(zip(joint_trajectory.joint_names, final_positions))
         angles = []
         for joint_name in self.MOVEIT_JOINTS[:4]:
             position = positions_by_name.get(joint_name)
@@ -626,10 +575,7 @@ class ArmMoveItController:
                 and time.monotonic() >= feedback_time
             )
             if should_publish:
-                feedback_callback(
-                    progress,
-                    self._fixed_angle_array(current_angles),
-                )
+                feedback_callback(progress, self._fixed_angle_array(current_angles))
                 feedback_time = time.monotonic() + 0.5
             time.sleep(0.02)
         return future.done()

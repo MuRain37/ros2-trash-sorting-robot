@@ -4,6 +4,12 @@ import cv2
 import numpy as np
 
 
+DEPTH_SCALE = 0.001
+ERODE_ITERATIONS = 2
+MAX_DEPTH_M = 2.0
+MIN_DEPTH_M = 0.05
+
+
 class _TensorLike:
     """Compatibility shim for the subset of the ultralytics API we use."""
 
@@ -114,6 +120,48 @@ class YOLOSegOpenVINO:
             new_h,
             new_w,
         )
+
+    def detect_targets(
+        self,
+        img,
+        depth,
+        intrinsics,
+        encoding='passthrough',
+        conf_thres=None,
+        mask_thres=0.5,
+    ):
+        results = self(img, verbose=False)
+        if not results:
+            return []
+
+        fx, fy, cx, cy = intrinsics
+        targets = []
+        conf_thres = self._conf_thres if conf_thres is None else float(conf_thres)
+        depth_m = self._depth_to_meters(depth, encoding)
+        if depth_m.shape[0] >= 5 and depth_m.shape[1] >= 5:
+            depth_m = cv2.medianBlur(depth_m, 5)
+
+        for result in results:
+            if result.masks is None:
+                continue
+            for index, box in enumerate(result.boxes):
+                target = self._target_from_box(
+                    result,
+                    index,
+                    box,
+                    depth_m,
+                    fx,
+                    fy,
+                    cx,
+                    cy,
+                    conf_thres,
+                    mask_thres,
+                )
+                if target is not None:
+                    targets.append(target)
+
+        targets.sort(key=lambda item: item['confidence'], reverse=True)
+        return targets
 
     def _preprocess(self, img):
         h, w = img.shape[:2]
@@ -254,3 +302,131 @@ class YOLOSegOpenVINO:
         return [
             _Result(result_boxes, result_masks, self._names, result_soft_masks)
         ]
+
+    @staticmethod
+    def _depth_to_meters(depth, encoding):
+        depth = np.asarray(depth)
+        if depth.ndim == 3:
+            depth = depth[:, :, 0]
+
+        is_uint16 = depth.dtype == np.uint16
+        depth = depth.astype(np.float32)
+        if encoding in ('16UC1', 'mono16') or is_uint16:
+            return depth * DEPTH_SCALE
+        return depth
+
+    def _target_from_box(
+        self,
+        result,
+        index,
+        box,
+        depth_m,
+        fx,
+        fy,
+        cx,
+        cy,
+        conf_thres,
+        mask_thres,
+    ):
+        try:
+            cls_id = int(box.cls[0])
+            confidence = float(box.conf[0])
+            class_name = result.names.get(cls_id, str(cls_id))
+        except (IndexError, TypeError, ValueError, AttributeError):
+            return None
+
+        if confidence < conf_thres:
+            return None
+
+        mask = self._mask_for_result(result, index, depth_m.shape, mask_thres)
+        if mask is None or not np.any(mask):
+            return None
+
+        centroid_mask = cv2.erode(
+            mask.astype(np.uint8),
+            cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5)),
+            iterations=ERODE_ITERATIONS,
+        ).astype(bool)
+        if not np.any(centroid_mask):
+            centroid_mask = mask.astype(bool)
+
+        centroid = self._mask_centroid(
+            centroid_mask,
+            depth_m,
+            fx,
+            fy,
+            cx,
+            cy,
+        )
+        if centroid is None:
+            return None
+
+        point_cam_m, points_cam = centroid
+        return {
+            'class_name': class_name,
+            'confidence': confidence,
+            'point_cam_m': point_cam_m,
+            'points_cam': points_cam,
+            'mask': mask.astype(bool),
+            'depth_m': depth_m,
+        }
+
+    def _mask_for_result(self, result, index, depth_shape, mask_thres):
+        masks = result.masks
+        try:
+            if getattr(masks, 'soft_data', None) is not None:
+                mask = np.asarray(masks.soft_data[index], dtype=np.float32)
+            else:
+                mask = np.asarray(masks.data[index], dtype=np.float32)
+        except (IndexError, TypeError, ValueError):
+            return None
+
+        height, width = depth_shape[:2]
+        if mask.shape[:2] != (height, width):
+            mask = cv2.resize(
+                mask,
+                (width, height),
+                interpolation=cv2.INTER_LINEAR,
+            )
+        mask = cv2.GaussianBlur(mask, (5, 5), 0)
+        mask_bin = (mask > mask_thres).astype(np.uint8)
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+        mask_bin = cv2.morphologyEx(mask_bin, cv2.MORPH_OPEN, kernel)
+        return mask_bin.astype(bool)
+
+    @staticmethod
+    def _mask_centroid(mask, depth_m, fx, fy, cx, cy):
+        ys, xs = np.where(mask)
+        if len(ys) == 0:
+            return None
+
+        height, width = depth_m.shape[:2]
+        xs_depth = np.clip(xs, 0, width - 1)
+        ys_depth = np.clip(ys, 0, height - 1)
+        depths = depth_m[ys_depth, xs_depth]
+        valid = (
+            np.isfinite(depths)
+            & (depths >= MIN_DEPTH_M)
+            & (depths <= MAX_DEPTH_M)
+        )
+        if not np.any(valid):
+            return None
+
+        xs_valid = xs_depth[valid].astype(float)
+        ys_valid = ys_depth[valid].astype(float)
+        depths_valid = depths[valid].astype(float)
+        u = float(xs_valid.mean())
+        v = float(ys_valid.mean())
+        depth = float(depths_valid.mean())
+
+        point_cam_m = np.array([
+            (u - cx) * depth / fx,
+            (v - cy) * depth / fy,
+            depth,
+        ])
+        points_cam = np.column_stack([
+            (xs_valid - cx) * depths_valid / fx,
+            (ys_valid - cy) * depths_valid / fy,
+            depths_valid,
+        ])
+        return point_cam_m, points_cam

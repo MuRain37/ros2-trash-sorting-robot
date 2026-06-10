@@ -26,14 +26,8 @@ def generate_launch_description():
             'camera_frame',
             default_value='camera_optical_link',
         ),
-        DeclareLaunchArgument('use_tf_camera_pose', default_value='true'),
-        DeclareLaunchArgument('fallback_manual_fk', default_value='true'),
-        DeclareLaunchArgument('prefer_manual_fk', default_value='true'),
+        DeclareLaunchArgument('base_frame', default_value='arm_link0'),
         DeclareLaunchArgument('return_home', default_value='true'),
-        DeclareLaunchArgument('invert_target_lateral', default_value='true'),
-        DeclareLaunchArgument('target_forward_offset_cm', default_value='0.0'),
-        DeclareLaunchArgument('target_right_offset_cm', default_value='0.0'),
-        DeclareLaunchArgument('target_up_offset_cm', default_value='8.0'),
         Node(
             package='robot_vision_grasp',
             executable='vision_grasp_node',
@@ -44,38 +38,11 @@ def generate_launch_description():
                 'color_topic': LaunchConfiguration('color_topic'),
                 'depth_topic': LaunchConfiguration('depth_topic'),
                 'depth_info_topic': LaunchConfiguration('depth_info_topic'),
+                'base_frame': LaunchConfiguration('base_frame'),
                 'camera_frame': LaunchConfiguration('camera_frame'),
-                'use_tf_camera_pose': ParameterValue(
-                    LaunchConfiguration('use_tf_camera_pose'),
-                    value_type=bool,
-                ),
-                'fallback_manual_fk': ParameterValue(
-                    LaunchConfiguration('fallback_manual_fk'),
-                    value_type=bool,
-                ),
-                'prefer_manual_fk': ParameterValue(
-                    LaunchConfiguration('prefer_manual_fk'),
-                    value_type=bool,
-                ),
                 'return_home': ParameterValue(
                     LaunchConfiguration('return_home'),
                     value_type=bool,
-                ),
-                'invert_target_lateral': ParameterValue(
-                    LaunchConfiguration('invert_target_lateral'),
-                    value_type=bool,
-                ),
-                'target_forward_offset_cm': ParameterValue(
-                    LaunchConfiguration('target_forward_offset_cm'),
-                    value_type=float,
-                ),
-                'target_right_offset_cm': ParameterValue(
-                    LaunchConfiguration('target_right_offset_cm'),
-                    value_type=float,
-                ),
-                'target_up_offset_cm': ParameterValue(
-                    LaunchConfiguration('target_up_offset_cm'),
-                    value_type=float,
                 ),
             }],
         ),
