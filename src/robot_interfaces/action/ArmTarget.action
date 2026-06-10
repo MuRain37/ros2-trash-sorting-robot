@@ -6,13 +6,15 @@ float64 z
 float64 duration 1.0
 # 末端俯仰角 (度, -1 自动选择)
 float64 end_angle -1.0
+# 夹爪旋转角 (度)
+float64 gripper_rotation 0.0
 ---
 # 是否成功
 bool success
 # 最终关节角 (度)
-float64[4] final_angles
+float64[5] final_angles
 ---
 # 进度 0.0~1.0
 float64 progress
 # 当前关节角 (度)
-float64[4] current_angles
+float64[5] current_angles

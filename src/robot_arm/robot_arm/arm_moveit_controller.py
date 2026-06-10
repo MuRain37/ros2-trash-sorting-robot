@@ -16,7 +16,7 @@ from sensor_msgs.msg import JointState
 
 
 DEG_TO_RAD = math.pi / 180.0
-ZERO_ANGLES = [0.0, 0.0, 0.0, 0.0]
+ZERO_ANGLES = [0.0, 0.0, 0.0, 0.0, 0.0]
 MOVEIT_ERROR_NAMES = {
     getattr(MoveItErrorCodes, name): name
     for name in dir(MoveItErrorCodes)
@@ -36,6 +36,7 @@ class ArmMoveItController:
     NUM_PLANNING_ATTEMPTS = 10
     TARGET_FRAME = 'base_link'
     TARGET_LINK = 'tool0'
+    TARGET_JOINT_COUNT = 5
     DEFAULT_TARGET_ORIGIN_CM = (10.0, 0.0, 2.5)
     VELOCITY_SCALING = 0.2
     ACCELERATION_SCALING = 0.1
@@ -62,7 +63,6 @@ class ArmMoveItController:
         'virtual_tool_yaw_joint',
     ]
     FIXED_END_JOINTS = [
-        'arm_tool_rotate_joint',
         'virtual_tool_roll_joint',
         'virtual_tool_pitch_joint',
         'virtual_tool_yaw_joint',
@@ -99,15 +99,37 @@ class ArmMoveItController:
             f'l3={lengths[2]:.2f}, l4={lengths[3]:.2f} cm'
         )
 
-    def move_to_target(self, x, y, z, pitch, feedback_callback=None):
-        """按厘米坐标和末端俯仰角移动机械臂。"""
+    def move_to_target(
+        self,
+        x,
+        y,
+        z,
+        pitch,
+        gripper_rotation_deg,
+        feedback_callback=None,
+    ):
+        """按厘米坐标、末端俯仰角和夹爪旋转角移动机械臂。"""
         pitch_text = 'auto' if pitch is None else f'{pitch:.2f} deg'
         self._node.get_logger().info(
             f'MoveIt pose target: link={self.TARGET_LINK}, '
             f'frame={self.TARGET_FRAME}, '
             f'position=[{x:.2f}, {y:.2f}, {z:.2f}] cm, '
-            f'pitch={pitch_text}'
+            f'pitch={pitch_text}, '
+            f'gripper_rotation={gripper_rotation_deg:.2f} deg'
         )
+
+        gripper_rotation = gripper_rotation_deg * DEG_TO_RAD
+        if not self._joint_within_hardware_limit(
+            'arm_tool_rotate_joint',
+            gripper_rotation,
+        ):
+            self._node.get_logger().error(
+                'MoveIt target failed: gripper_rotation='
+                f'{gripper_rotation_deg:.2f} deg not in '
+                f'[-{self.HARDWARE_JOINT_LIMITS_DEG["arm_tool_rotate_joint"]:.1f}, '
+                f'{self.HARDWARE_JOINT_LIMITS_DEG["arm_tool_rotate_joint"]:.1f}]'
+            )
+            return False, list(ZERO_ANGLES)
 
         last_failure = None
         for candidate_pitch in self._pitch_candidates(pitch):
@@ -117,6 +139,7 @@ class ArmMoveItController:
                 y,
                 z,
                 candidate_pitch,
+                gripper_rotation_deg,
                 feedback_callback,
             )
             if ik_result is None:
@@ -129,6 +152,7 @@ class ArmMoveItController:
             joint_positions, target_angles_deg = ik_result
             self._node.get_logger().info(
                 f'MoveIt IK solution: pitch={candidate_pitch:.2f} deg, '
+                f'gripper_rotation={gripper_rotation_deg:.2f} deg, '
                 f'joints={self._format_angles(target_angles_deg)} deg, '
                 f'end joints fixed at {self.FIXED_END_JOINT_POSITION:.3f} rad'
             )
@@ -209,7 +233,15 @@ class ArmMoveItController:
         final_angles = self._extract_final_angles(result, target_angles_deg)
         return True, final_angles, None
 
-    def _compute_moveit_ik(self, x_cm, y_cm, z_cm, pitch_deg, feedback_callback):
+    def _compute_moveit_ik(
+        self,
+        x_cm,
+        y_cm,
+        z_cm,
+        pitch_deg,
+        gripper_rotation_deg,
+        feedback_callback,
+    ):
         """使用多个初始种子求解 MoveIt IK。"""
         if not self._compute_ik.wait_for_service(
             timeout_sec=self.WAIT_FOR_IK_TIMEOUT
@@ -223,6 +255,7 @@ class ArmMoveItController:
             y_cm,
             z_cm,
             pitch_deg,
+            gripper_rotation_deg,
         ):
             # 不同 seed 可帮助 MoveIt 跳出局部无解或碰到关节边界的情况。
             request = self._build_ik_request(
@@ -230,6 +263,7 @@ class ArmMoveItController:
                 y_cm,
                 z_cm,
                 pitch_deg,
+                gripper_rotation_deg,
                 seed_positions,
             )
             future = self._compute_ik.call_async(request)
@@ -281,7 +315,7 @@ class ArmMoveItController:
             ]
             target_angles_deg = [
                 joint_positions[i] / DEG_TO_RAD
-                for i in range(4)
+                for i in range(self.TARGET_JOINT_COUNT)
             ]
             return joint_positions, target_angles_deg
 
@@ -328,7 +362,15 @@ class ArmMoveItController:
                 return False
         return True
 
-    def _build_ik_request(self, x_cm, y_cm, z_cm, pitch_deg, seed_positions):
+    def _build_ik_request(
+        self,
+        x_cm,
+        y_cm,
+        z_cm,
+        pitch_deg,
+        gripper_rotation_deg,
+        seed_positions,
+    ):
         request = GetPositionIK.Request()
         ik_request = request.ik_request
         ik_request.group_name = self._group_name
@@ -340,9 +382,21 @@ class ArmMoveItController:
             self._joint_constraint(joint_name, self.FIXED_END_JOINT_POSITION)
             for joint_name in self.FIXED_END_JOINTS
         ]
+        ik_request.constraints.joint_constraints.append(
+            self._joint_constraint(
+                'arm_tool_rotate_joint',
+                gripper_rotation_deg * DEG_TO_RAD,
+            )
+        )
         ik_request.avoid_collisions = False
         ik_request.ik_link_name = self.TARGET_LINK
-        ik_request.pose_stamped = self._target_pose(x_cm, y_cm, z_cm, pitch_deg)
+        ik_request.pose_stamped = self._target_pose(
+            x_cm,
+            y_cm,
+            z_cm,
+            pitch_deg,
+            gripper_rotation_deg,
+        )
         ik_request.timeout.sec = int(self.IK_TIMEOUT)
         ik_request.timeout.nanosec = int(
             (self.IK_TIMEOUT - int(self.IK_TIMEOUT)) * 1e9
@@ -364,8 +418,9 @@ class ArmMoveItController:
 
         return msg
 
-    def _ik_seed_positions(self, x_cm, y_cm, z_cm, pitch_deg):
+    def _ik_seed_positions(self, x_cm, y_cm, z_cm, pitch_deg, gripper_rotation_deg):
         yaw = math.atan2(y_cm, x_cm) if x_cm != 0.0 or y_cm != 0.0 else 0.0
+        gripper_rotation = gripper_rotation_deg * DEG_TO_RAD
         seeds = []
 
         seeds.extend(self._geometric_seed_positions(x_cm, y_cm, z_cm, pitch_deg))
@@ -385,6 +440,7 @@ class ArmMoveItController:
                 joint_name: seed.get(joint_name, 0.0)
                 for joint_name in self.MOVEIT_JOINTS
             }
+            fixed_seed['arm_tool_rotate_joint'] = gripper_rotation
             for joint_name in self.FIXED_END_JOINTS:
                 fixed_seed[joint_name] = self.FIXED_END_JOINT_POSITION
             key = tuple(
@@ -458,7 +514,7 @@ class ArmMoveItController:
     def _normalize_angle(self, angle):
         return math.atan2(math.sin(angle), math.cos(angle))
 
-    def _target_pose(self, x_cm, y_cm, z_cm, pitch_deg):
+    def _target_pose(self, x_cm, y_cm, z_cm, pitch_deg, gripper_rotation_deg):
         pose = PoseStamped()
         origin_x, origin_y, origin_z = (
             value / 100.0 for value in self._arm_origin_cm
@@ -467,13 +523,28 @@ class ArmMoveItController:
         pose.pose.position.x = origin_x + x_cm / 100.0
         pose.pose.position.y = origin_y + y_cm / 100.0
         pose.pose.position.z = origin_z + z_cm / 100.0
-        pose.pose.orientation = self._target_orientation(x_cm, y_cm, pitch_deg)
+        pose.pose.orientation = self._target_orientation(
+            x_cm,
+            y_cm,
+            pitch_deg,
+            gripper_rotation_deg,
+        )
         return pose
 
-    def _target_orientation(self, x_cm, y_cm, pitch_deg):
+    def _target_orientation(self, x_cm, y_cm, pitch_deg, gripper_rotation_deg):
         yaw = math.atan2(y_cm, x_cm) if x_cm != 0.0 or y_cm != 0.0 else 0.0
         pitch_from_vertical = math.pi / 2.0 + pitch_deg * DEG_TO_RAD
-        return self._quaternion_from_rpy(0.0, pitch_from_vertical, yaw)
+        base_orientation = self._quaternion_from_rpy(
+            0.0,
+            pitch_from_vertical,
+            yaw,
+        )
+        tool_rotation = self._quaternion_from_rpy(
+            0.0,
+            0.0,
+            gripper_rotation_deg * DEG_TO_RAD,
+        )
+        return self._multiply_quaternions(base_orientation, tool_rotation)
 
     def _pitch_candidates(self, pitch_deg):
         if pitch_deg is not None:
@@ -555,6 +626,34 @@ class ArmMoveItController:
         orientation.z = cr * cp * sy - sr * sp * cy
         return orientation
 
+    def _multiply_quaternions(self, first, second):
+        orientation = Pose().orientation
+        orientation.w = (
+            first.w * second.w
+            - first.x * second.x
+            - first.y * second.y
+            - first.z * second.z
+        )
+        orientation.x = (
+            first.w * second.x
+            + first.x * second.w
+            + first.y * second.z
+            - first.z * second.y
+        )
+        orientation.y = (
+            first.w * second.y
+            - first.x * second.z
+            + first.y * second.w
+            + first.z * second.x
+        )
+        orientation.z = (
+            first.w * second.z
+            + first.x * second.y
+            - first.y * second.x
+            + first.z * second.w
+        )
+        return orientation
+
     def _joint_constraint(self, joint_name, position):
         constraint = JointConstraint()
         constraint.joint_name = joint_name
@@ -589,7 +688,7 @@ class ArmMoveItController:
         final_positions = joint_trajectory.points[-1].positions
         positions_by_name = dict(zip(joint_trajectory.joint_names, final_positions))
         angles = []
-        for joint_name in self.MOVEIT_JOINTS[:4]:
+        for joint_name in self.MOVEIT_JOINTS[:self.TARGET_JOINT_COUNT]:
             position = positions_by_name.get(joint_name)
             if position is None:
                 return list(ZERO_ANGLES)
@@ -625,7 +724,7 @@ class ArmMoveItController:
         return future.done()
 
     def _fixed_angle_array(self, angles):
-        if angles is None or len(angles) != 4:
+        if angles is None or len(angles) != self.TARGET_JOINT_COUNT:
             return list(ZERO_ANGLES)
         return [float(angle) for angle in angles]
 
