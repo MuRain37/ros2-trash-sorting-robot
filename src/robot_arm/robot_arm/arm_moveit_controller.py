@@ -28,7 +28,6 @@ class ArmMoveItController:
     """封装 MoveIt IK、规划和执行流程。"""
 
     ALLOWED_PLANNING_TIME = 5.0
-    AUTO_PITCH_VALUES = [45, 60, 30, 75, 15, 90, 0, -15, -30, -45, -60, -75, -90]
     FIXED_END_JOINT_POSITION = 0.0
     GOAL_JOINT_TOLERANCE = 0.001
     IK_CALL_TIMEOUT = 1.0
@@ -99,9 +98,13 @@ class ArmMoveItController:
             f'l3={lengths[2]:.2f}, l4={lengths[3]:.2f} cm'
         )
 
-    def move_to_target(self, x, y, z, pitch, feedback_callback=None):
-        """按厘米坐标和末端俯仰角移动机械臂。"""
-        pitch_text = 'auto' if pitch is None else f'{pitch:.2f} deg'
+    def move_to_target(self, x, y, z, ideal_pitch=None, feedback_callback=None):
+        """在 90°~-20° 逐度搜索 IK，选出最接近 ideal_pitch 的解并执行。
+
+        ideal_pitch：get_ik_pitch 返回的理想俯仰角（度）。
+                    None 表示自动模式，取最高可行俯仰角。
+        """
+        pitch_text = 'auto' if ideal_pitch is None else f'{ideal_pitch:.2f} deg'
         self._node.get_logger().info(
             f'MoveIt pose target: link={self.TARGET_LINK}, '
             f'frame={self.TARGET_FRAME}, '
@@ -110,51 +113,71 @@ class ArmMoveItController:
         )
 
         last_failure = None
-        for candidate_pitch in self._pitch_candidates(pitch):
-            # pitch 为 auto 时按候选角逐个试 IK，成功后立即执行。
+        best_ik = None       # (joint_positions, target_angles_deg, candidate_pitch)
+        best_error = float('inf')
+
+        # 从 90° 到 -20° 逐度搜索=
+        for candidate_pitch in range(90, -21, -1):
             ik_result = self._compute_moveit_ik(
                 x,
                 y,
                 z,
                 candidate_pitch,
-                feedback_callback,
+                None,  # IK 搜索阶段不发 feedback
             )
             if ik_result is None:
                 last_failure = (
-                    f'IK failed at pitch={candidate_pitch:.2f} deg'
+                    f'IK failed at pitch={candidate_pitch} deg'
                     + (f': {self._last_ik_error}' if self._last_ik_error else '')
                 )
                 continue
 
             joint_positions, target_angles_deg = ik_result
-            self._node.get_logger().info(
-                f'MoveIt IK solution: pitch={candidate_pitch:.2f} deg, '
-                f'joints={self._format_angles(target_angles_deg)} deg, '
-                f'end joints fixed at {self.FIXED_END_JOINT_POSITION:.3f} rad'
-            )
 
-            success, final_angles, failure = self._execute_moveit_joint_goal(
-                joint_positions,
-                target_angles_deg,
-                feedback_callback,
-            )
-            if success:
-                if pitch is None:
-                    self._node.get_logger().info(
-                        f'MoveIt selected pitch={candidate_pitch:.2f} deg'
-                    )
-                self._node.get_logger().info('MoveIt execution complete')
-                return True, final_angles
-
-            last_failure = (
-                f'MoveIt failed at pitch={candidate_pitch:.2f} deg: {failure}'
-            )
-            if pitch is not None:
+            if ideal_pitch is not None:
+                error = abs(candidate_pitch - ideal_pitch)
+                if error < best_error:
+                    best_error = error
+                    best_ik = (joint_positions, target_angles_deg, candidate_pitch)
+                    if error == 0:
+                        break  # 完美匹配
+            else:
+                # 自动模式：取最高可行俯仰角
+                best_ik = (joint_positions, target_angles_deg, candidate_pitch)
                 break
 
+        if best_ik is None:
+            self._node.get_logger().error(
+                'MoveIt target failed'
+                + (f': {last_failure}' if last_failure else '')
+            )
+            return False, list(ZERO_ANGLES)
+
+        joint_positions, target_angles_deg, selected_pitch = best_ik
+
+        if ideal_pitch is not None:
+            self._node.get_logger().info(
+                f'MoveIt IK solution: pitch={selected_pitch} deg '
+                f'(ideal={ideal_pitch:.0f} deg, error={best_error:.0f} deg), '
+                f'joints={self._format_angles(target_angles_deg)} deg'
+            )
+        else:
+            self._node.get_logger().info(
+                f'MoveIt IK solution: pitch={selected_pitch} deg, '
+                f'joints={self._format_angles(target_angles_deg)} deg'
+            )
+
+        success, final_angles, failure = self._execute_moveit_joint_goal(
+            joint_positions,
+            target_angles_deg,
+            feedback_callback,
+        )
+        if success:
+            self._node.get_logger().info('MoveIt execution complete')
+            return True, final_angles
+
         self._node.get_logger().error(
-            'MoveIt target failed'
-            + (f': {last_failure}' if last_failure else '')
+            f'MoveIt execution failed at pitch={selected_pitch} deg: {failure}'
         )
         return False, list(ZERO_ANGLES)
 
@@ -474,12 +497,6 @@ class ArmMoveItController:
         yaw = math.atan2(y_cm, x_cm) if x_cm != 0.0 or y_cm != 0.0 else 0.0
         pitch_from_vertical = math.pi / 2.0 + pitch_deg * DEG_TO_RAD
         return self._quaternion_from_rpy(0.0, pitch_from_vertical, yaw)
-
-    def _pitch_candidates(self, pitch_deg):
-        if pitch_deg is not None:
-            return [pitch_deg]
-
-        return list(self.AUTO_PITCH_VALUES)
 
     def _extract_ik_positions(self, joint_state):
         if not joint_state.name or len(joint_state.name) != len(joint_state.position):

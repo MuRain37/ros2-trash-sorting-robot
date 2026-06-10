@@ -395,15 +395,20 @@ class VisionGraspNode(Node):
         pitch_deg,
         is_upright,
     ):
-        arm_relative_cm = object_arm_m * 100.0
-        target_cm = arm_relative_cm.copy()
-        # target_cm[0] += (1.4+(abs_angle-45)**(abs_angle-45)/2025)
+        target_cm = object_arm_m * 100.0
+
+        target_cm[2] -= 3.5
+        target_cm[0] += 1.5
         if class_name == 'paper':
-            target_cm[0] -= (2.0 - pitch_deg / 90.0)
+            pass
+            # target_cm[0] -= (1.0 - pitch_deg / 90.0)
         elif class_name == 'bottle':
             if is_upright:
                 target_cm[0] -= 1.0
                 target_cm[1] -= 3.0
+            else:
+                target_cm[2] -= 4.5
+            
 
         return target_cm
 

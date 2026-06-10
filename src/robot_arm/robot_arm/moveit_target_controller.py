@@ -80,7 +80,6 @@ class ArmMoveItTargetController(Node):
             goal.y,
             goal.z,
             pitch,
-            goal.tool_yaw,
             lambda progress, angles: self._publish_feedback(
                 goal_handle,
                 progress,
