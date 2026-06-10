@@ -6,19 +6,20 @@
   <xacro:property name="PI" value="3.1415926535897931"/>
 
   <!-- 底盘属性 -->
-  <xacro:property name="chassis_length" value="0.300"/>
-  <xacro:property name="chassis_width" value="0.200"/>
-  <xacro:property name="chassis_height" value="0.050"/>
+  <xacro:property name="chassis_length" value="0.370"/>
+  <xacro:property name="chassis_width" value="0.270"/>
+  <xacro:property name="chassis_height" value="0.071"/>
   <xacro:property name="chassis_mass" value="5.0"/>
 
   <!-- 轮子属性 -->
-  <xacro:property name="wheel_radius" value="0.030"/>
-  <xacro:property name="wheel_thickness" value="0.025"/>
+  <xacro:property name="wheel_radius" value="0.04175"/>
+  <xacro:property name="wheel_thickness" value="0.033"/>
   <xacro:property name="wheel_mass" value="0.5"/>
 
   <!-- 安装位置偏移 -->
-  <xacro:property name="wheel_z_offset" value="0.030"/>
-  <xacro:property name="wheel_x_offset" value="0.100"/>
+  <xacro:property name="wheel_z_offset" value="0.06975"/>
+  <xacro:property name="wheel_x_offset" value="0.138"/>
+  <xacro:property name="wheel_y_offset" value="0.162"/>
 
   <!-- ========== 底盘 ========== -->
   <xacro:include filename="robot.chassis.xacro"/>
