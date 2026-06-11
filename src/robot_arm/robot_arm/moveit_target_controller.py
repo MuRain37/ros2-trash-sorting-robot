@@ -65,7 +65,7 @@ class ArmMoveItTargetController(Node):
             f'MoveIt target: [{goal_request.x:.2f}, '
             f'{goal_request.y:.2f}, {goal_request.z:.2f}] cm, '
             f'pitch={pitch_text}, '
-            f'tool_yaw={goal_request.tool_yaw:.2f} deg'
+            f'gripper_rotation={goal_request.gripper_rotation:.2f} deg'
         )
         return GoalResponse.ACCEPT
 
@@ -80,6 +80,7 @@ class ArmMoveItTargetController(Node):
             goal.y,
             goal.z,
             pitch,
+            goal.gripper_rotation,
             lambda progress, angles: self._publish_feedback(
                 goal_handle,
                 progress,
@@ -106,7 +107,7 @@ class ArmMoveItTargetController(Node):
         goal_handle.publish_feedback(feedback)
 
     def _fixed_angle_array(self, angles):
-        if angles is None or len(angles) != 4:
+        if angles is None or len(angles) != 5:
             return list(ZERO_ANGLES)
         return [float(angle) for angle in angles]
 

@@ -7,7 +7,7 @@ float64 duration 1.0
 # 末端俯仰角 (度, -1 自动选择)
 float64 end_angle -1.0
 # 第5轴夹爪旋转角 (度)
-float64 tool_yaw 0.0
+float64 gripper_rotation 0.0
 ---
 # 是否成功
 bool success

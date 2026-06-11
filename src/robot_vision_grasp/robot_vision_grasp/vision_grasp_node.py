@@ -465,7 +465,7 @@ class VisionGraspNode(Node):
         goal.z = float(target['target_cm'][2])
         goal.duration = self._arm_goal_duration
         goal.end_angle = float(pitch)
-        goal.tool_yaw = float(target.get('yaw_deg', 0.0))
+        goal.gripper_rotation = float(target.get('yaw_deg', 0.0))
 
         send_future = self._arm_action.send_goal_async(goal)
         goal_handle = self._wait_for_future(send_future, 5.0)
