@@ -4,7 +4,6 @@ from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
-from launch_ros.parameter_descriptions import ParameterValue
 
 
 def generate_launch_description():
@@ -27,7 +26,10 @@ def generate_launch_description():
             default_value='camera_optical_link',
         ),
         DeclareLaunchArgument('base_frame', default_value='arm_link0'),
-        DeclareLaunchArgument('return_home', default_value='true'),
+        DeclareLaunchArgument(
+            'gripper_service',
+            default_value='set_gripper',
+        ),
         Node(
             package='robot_vision_grasp',
             executable='vision_grasp_node',
@@ -40,10 +42,7 @@ def generate_launch_description():
                 'depth_info_topic': LaunchConfiguration('depth_info_topic'),
                 'base_frame': LaunchConfiguration('base_frame'),
                 'camera_frame': LaunchConfiguration('camera_frame'),
-                'return_home': ParameterValue(
-                    LaunchConfiguration('return_home'),
-                    value_type=bool,
-                ),
+                'gripper_service': LaunchConfiguration('gripper_service'),
             }],
         ),
     ])

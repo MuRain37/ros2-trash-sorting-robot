@@ -34,6 +34,7 @@ class ArmMoveItController:
     IK_TIMEOUT = 0.5
     NUM_PLANNING_ATTEMPTS = 10
     TARGET_FRAME = 'base_link'
+    TARGET_JOINT_COUNT = 5
     TARGET_LINK = 'tool0'
     DEFAULT_TARGET_ORIGIN_CM = (10.0, 0.0, 2.5)
     VELOCITY_SCALING = 0.2
@@ -44,10 +45,10 @@ class ArmMoveItController:
     WORKSPACE_MAX = (1.0, 1.0, 1.0)
     HARDWARE_JOINT_LIMITS_DEG = {
         'arm_base_joint': 180.0,
-        'arm_shoulder_joint': 120.0,
-        'arm_elbow_joint': 120.0,
-        'arm_wrist_joint': 120.0,
-        'arm_tool_rotate_joint': 120.0,
+        'arm_shoulder_joint': 121.0,
+        'arm_elbow_joint': 121.0,
+        'arm_wrist_joint': 121.0,
+        'arm_tool_rotate_joint': 121.0,
     }
 
     MOVEIT_JOINTS = [
@@ -60,7 +61,10 @@ class ArmMoveItController:
         'virtual_tool_pitch_joint',
         'virtual_tool_yaw_joint',
     ]
-    FIXED_END_JOINTS = ['virtual_tool_roll_joint', 'virtual_tool_pitch_joint', 'virtual_tool_yaw_joint',
+    FIXED_END_JOINTS = [
+        'virtual_tool_roll_joint',
+        'virtual_tool_pitch_joint',
+        'virtual_tool_yaw_joint',
     ]
 
     def __init__(self, node, group_name, move_action_name, callback_group):
@@ -105,13 +109,13 @@ class ArmMoveItController:
             f'gripper_rotation={gripper_rotation_deg:.2f} deg'
         )
 
-        # tool_limit = self.HARDWARE_JOINT_LIMITS_DEG['arm_tool_rotate_joint']
-        # if abs(gripper_rotation_deg) > tool_limit:
-        #     self._node.get_logger().error(
-        #         'MoveIt target failed: gripper_rotation='
-        #         f'{gripper_rotation_deg:.2f} deg not in +-120'
-        #     )
-        #     return False, list(ZERO_ANGLES)
+        tool_limit = self.HARDWARE_JOINT_LIMITS_DEG['arm_tool_rotate_joint']
+        if abs(gripper_rotation_deg) > tool_limit:
+            self._node.get_logger().error(
+                'MoveIt target failed: gripper_rotation='
+                f'{gripper_rotation_deg:.2f} deg not in +-120'
+            )
+            return False, list(ZERO_ANGLES)
 
         last_failure = None
         best_ik = None       # (joint_positions, target_angles_deg, candidate_pitch)
@@ -178,6 +182,68 @@ class ArmMoveItController:
             f'MoveIt execution failed at pitch={selected_pitch} deg: {failure}'
         )
         return False, list(ZERO_ANGLES)
+
+    def move_to_joint_positions(self, joint_positions, feedback_callback=None):
+        """直接执行五个真实机械臂关节的 MoveIt joint goal。"""
+        if len(joint_positions) != self.TARGET_JOINT_COUNT:
+            message = (
+                f'expected {self.TARGET_JOINT_COUNT} joints, '
+                f'got {len(joint_positions)}'
+            )
+            self._node.get_logger().error(
+                'MoveIt joint target failed: ' + message
+            )
+            return False, list(ZERO_ANGLES), message
+
+        joint_positions = [float(position) for position in joint_positions]
+        target_angles_deg = [
+            position / DEG_TO_RAD
+            for position in joint_positions
+        ]
+
+        limit_errors = []
+        for joint_name, position in zip(
+            self.MOVEIT_JOINTS[:self.TARGET_JOINT_COUNT],
+            joint_positions,
+        ):
+            max_degrees = self.HARDWARE_JOINT_LIMITS_DEG[joint_name]
+            degrees = position / DEG_TO_RAD
+            if abs(degrees) > max_degrees:
+                limit_errors.append(
+                    f'{joint_name}={degrees:.2f} deg not in '
+                    f'[-{max_degrees:.1f}, {max_degrees:.1f}]'
+                )
+
+        if limit_errors:
+            message = 'joint target exceeds hardware limits: ' + ', '.join(
+                limit_errors
+            )
+            self._node.get_logger().error(
+                'MoveIt joint target failed: ' + message
+            )
+            return False, list(ZERO_ANGLES), message
+
+        moveit_positions = list(joint_positions) + [
+            self.FIXED_END_JOINT_POSITION
+        ] * len(self.FIXED_END_JOINTS)
+        self._node.get_logger().info(
+            'MoveIt joint target: '
+            f'joints={self._format_angles(target_angles_deg)} deg, '
+            f'end joints fixed at {self.FIXED_END_JOINT_POSITION:.3f} rad'
+        )
+
+        success, final_angles, failure = self._execute_moveit_joint_goal(
+            moveit_positions,
+            target_angles_deg,
+            feedback_callback,
+        )
+        if success:
+            self._node.get_logger().info('MoveIt joint execution complete')
+            return True, final_angles, 'joint target accepted'
+
+        message = f'MoveIt joint target failed: {failure}'
+        self._node.get_logger().error(message)
+        return False, final_angles, message
 
     def _execute_moveit_joint_goal(
         self,
@@ -269,6 +335,11 @@ class ArmMoveItController:
                 self._last_ik_error = 'IK response has no complete joint state'
                 continue
             positions = dict(zip(joint_state.name, joint_state.position))
+            # 第5轴只影响夹爪绕自身轴旋转，不影响 TCP 位置；IK 仍按旧的
+            # arm_tool_rotate_joint=0 求前4轴，成功后再把第5轴写入 joint goal。
+            positions['arm_tool_rotate_joint'] = (
+                gripper_rotation_deg * DEG_TO_RAD
+            )
 
             fixed_errors = [
                 f'{joint}={positions[joint]:.4f}'
@@ -323,12 +394,13 @@ class ArmMoveItController:
             self._joint_constraint(joint, 0.0) for joint in self.FIXED_END_JOINTS]
         ik_request.constraints.joint_constraints.append(
             self._joint_constraint(
-                'arm_tool_rotate_joint', gripper_rotation_deg * DEG_TO_RAD
+                'arm_tool_rotate_joint',
+                self.FIXED_END_JOINT_POSITION,
             )
         )
         ik_request.avoid_collisions = False
         ik_request.ik_link_name = self.TARGET_LINK
-        ik_request.pose_stamped = self._target_pose(x_cm, y_cm, z_cm, pitch_deg, gripper_rotation_deg)
+        ik_request.pose_stamped = self._target_pose(x_cm, y_cm, z_cm, pitch_deg)
         ik_request.timeout.sec = int(self.IK_TIMEOUT)
         ik_request.timeout.nanosec = int((self.IK_TIMEOUT - int(self.IK_TIMEOUT)) * 1e9)
         return request
@@ -347,7 +419,7 @@ class ArmMoveItController:
             }
             for joint_name in self.FIXED_END_JOINTS:
                 fixed_seed[joint_name] = self.FIXED_END_JOINT_POSITION
-            fixed_seed['arm_tool_rotate_joint'] = gripper_rotation_deg * DEG_TO_RAD
+            fixed_seed['arm_tool_rotate_joint'] = self.FIXED_END_JOINT_POSITION
             key = tuple(
                 round(fixed_seed[joint_name], 4)
                 for joint_name in self.MOVEIT_JOINTS
@@ -425,7 +497,7 @@ class ArmMoveItController:
     def _normalize_angle(self, angle):
         return math.atan2(math.sin(angle), math.cos(angle))
 
-    def _target_pose(self, x_cm, y_cm, z_cm, pitch_deg, gripper_rotation_deg):
+    def _target_pose(self, x_cm, y_cm, z_cm, pitch_deg):
         pose = PoseStamped()
         origin_x, origin_y, origin_z = (v / 100.0 for v in self._arm_origin_cm)
         pose.header.frame_id = self.TARGET_FRAME
@@ -433,9 +505,10 @@ class ArmMoveItController:
         pose.pose.position.y = origin_y + y_cm / 100.0
         pose.pose.position.z = origin_z + z_cm / 100.0
         yaw = math.atan2(y_cm, x_cm) if x_cm != 0.0 or y_cm != 0.0 else 0.0
-        pose.pose.orientation = self._multiply_quaternions(
-            self._quaternion_from_rpy(0.0, math.pi / 2.0 + pitch_deg * DEG_TO_RAD, yaw),
-            self._quaternion_from_rpy(0.0, 0.0, gripper_rotation_deg * DEG_TO_RAD),
+        pose.pose.orientation = self._quaternion_from_rpy(
+            0.0,
+            math.pi / 2.0 + pitch_deg * DEG_TO_RAD,
+            yaw,
         )
         return pose
 
@@ -501,34 +574,6 @@ class ArmMoveItController:
         orientation.x = sr * cp * cy - cr * sp * sy
         orientation.y = cr * sp * cy + sr * cp * sy
         orientation.z = cr * cp * sy - sr * sp * cy
-        return orientation
-
-    def _multiply_quaternions(self, first, second):
-        orientation = Pose().orientation
-        orientation.w = (
-            first.w * second.w
-            - first.x * second.x
-            - first.y * second.y
-            - first.z * second.z
-        )
-        orientation.x = (
-            first.w * second.x
-            + first.x * second.w
-            + first.y * second.z
-            - first.z * second.y
-        )
-        orientation.y = (
-            first.w * second.y
-            - first.x * second.z
-            + first.y * second.w
-            + first.z * second.x
-        )
-        orientation.z = (
-            first.w * second.z
-            + first.x * second.y
-            - first.y * second.x
-            + first.z * second.w
-        )
         return orientation
 
     def _joint_constraint(self, joint_name, position):

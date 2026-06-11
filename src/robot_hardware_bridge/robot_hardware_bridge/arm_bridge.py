@@ -17,6 +17,7 @@ DEFAULT_ARM_JOINT_COUNT = 5
 
 # 夹爪舵机配置
 DEFAULT_GRIPPER_SERVO_ID = 6
+DEFAULT_GRIPPER_SERVICE = 'set_gripper'
 GRIPPER_OPEN_RAW = 0.0
 GRIPPER_CLOSE_RAW = 1000.0
 
@@ -90,7 +91,7 @@ class ArmBridge:
                  open_loop_control=False,
                  send_rate=DEFAULT_SERVO_SEND_RATE,
                  duration_ms=DEFAULT_SERVO_DURATION_MS,
-                 gripper_service='set_gripper'):
+                 gripper_service=DEFAULT_GRIPPER_SERVICE):
         self._node = node
         self._cmd_callback = cmd_callback  # 发送回调，签名为 (cmd, payload)
         self._open_loop_control = open_loop_control

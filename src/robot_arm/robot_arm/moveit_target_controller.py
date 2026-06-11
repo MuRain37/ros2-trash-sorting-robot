@@ -12,6 +12,9 @@ from robot_arm.arm_moveit_controller import ZERO_ANGLES
 from robot_interfaces.action import ArmTarget
 
 
+ACTION_ANGLE_COUNT = 4
+
+
 class ArmMoveItTargetController(Node):
     """提供 /arm_moveit_target Action 服务。"""
 
@@ -107,9 +110,9 @@ class ArmMoveItTargetController(Node):
         goal_handle.publish_feedback(feedback)
 
     def _fixed_angle_array(self, angles):
-        if angles is None or len(angles) != 5:
-            return list(ZERO_ANGLES)
-        return [float(angle) for angle in angles]
+        if angles is None or len(angles) < ACTION_ANGLE_COUNT:
+            return list(ZERO_ANGLES[:ACTION_ANGLE_COUNT])
+        return [float(angle) for angle in angles[:ACTION_ANGLE_COUNT]]
 
 
 def main(args=None):
