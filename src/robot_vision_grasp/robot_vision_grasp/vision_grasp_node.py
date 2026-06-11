@@ -12,6 +12,7 @@ from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.duration import Duration
 from rclpy.node import Node
 from rclpy.time import Time
+from robot_interfaces.action import ArmPreset
 from robot_interfaces.action import ArmTarget
 from robot_interfaces.srv import SetGripper
 from sensor_msgs.msg import CameraInfo
@@ -31,7 +32,9 @@ DEFAULT_CLASS_NAMES = ['bottle', 'pen', 'paper', 'charger', 'usb', 'yan']
 
 ACTION_TIMEOUT_SEC = 30.0
 ARM_ACTION_NAME = '/arm_target'
-GRIPPER_WAIT_SEC = 1.2
+ARM_PRESET_ACTION_NAME = '/arm_preset'
+ARM_CENTER_PRESET = 0
+GRIPPER_WAIT_SEC = 1.4
 GRIPPER_DURATION_MS = 1000.0
 TARGET_TIMEOUT_SEC = 2.0
 
@@ -63,6 +66,12 @@ class VisionGraspNode(Node):
             self,
             ArmTarget,
             ARM_ACTION_NAME,
+            callback_group=callback_group,
+        )
+        self._arm_preset_action = ActionClient(
+            self,
+            ArmPreset,
+            ARM_PRESET_ACTION_NAME,
             callback_group=callback_group,
         )
         self._gripper_client = self.create_client(
@@ -380,6 +389,7 @@ class VisionGraspNode(Node):
             close_ratio = gripper_close_open_ratio(class_name)
             if self._call_gripper(close_ratio, GRIPPER_DURATION_MS):
                 time.sleep(GRIPPER_WAIT_SEC)
+                self._send_arm_preset(ARM_CENTER_PRESET)
         except Exception as exc:
             self.get_logger().error(f'Grasp sequence failed: {exc}')
         finally:
@@ -419,6 +429,44 @@ class VisionGraspNode(Node):
             self.get_logger().warning('Arm target failed')
             return False
 
+        return True
+
+    def _send_arm_preset(self, action_type):
+        if not self._arm_preset_action.wait_for_server(timeout_sec=5.0):
+            self.get_logger().warning(
+                f'Arm preset action server not ready: {ARM_PRESET_ACTION_NAME}'
+            )
+            return False
+
+        goal = ArmPreset.Goal()
+        goal.action_type = int(action_type)
+        send_future = self._arm_preset_action.send_goal_async(goal)
+        goal_handle = self._wait_for_future(send_future, 5.0)
+        if goal_handle is None or not goal_handle.accepted:
+            self.get_logger().warning(
+                f'Arm preset rejected: action_type={action_type}'
+            )
+            return False
+
+        result_future = goal_handle.get_result_async()
+        wrapped = self._wait_for_future(result_future, ACTION_TIMEOUT_SEC)
+        if wrapped is None:
+            self.get_logger().warning(
+                f'Arm preset timed out: action_type={action_type}'
+            )
+            return False
+
+        result = wrapped.result
+        if not result.success:
+            self.get_logger().warning(
+                f'Arm preset failed: action_type={action_type}, '
+                f'message={result.message}'
+            )
+            return False
+
+        self.get_logger().info(
+            f'Arm preset complete: action_type={action_type}'
+        )
         return True
 
     def _call_gripper(self, open_ratio, duration_ms):

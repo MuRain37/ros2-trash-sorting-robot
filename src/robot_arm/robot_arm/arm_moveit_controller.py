@@ -579,7 +579,7 @@ class ArmMoveItController:
     def _joint_constraint(self, joint_name, position):
         constraint = JointConstraint()
         constraint.joint_name = joint_name
-        constraint.position = position
+        constraint.position = float(position)
         constraint.tolerance_above = self.GOAL_JOINT_TOLERANCE
         constraint.tolerance_below = self.GOAL_JOINT_TOLERANCE
         constraint.weight = 1.0
