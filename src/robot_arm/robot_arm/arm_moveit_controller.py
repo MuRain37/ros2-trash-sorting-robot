@@ -187,10 +187,9 @@ class ArmMoveItController:
         target_angles_deg,
         feedback_callback,
     ):
-        server_ready = self._move_group.wait_for_server(
+        if not self._move_group.wait_for_server(
             timeout_sec=self.WAIT_FOR_MOVE_GROUP_TIMEOUT
-        )
-        if not server_ready:
+        ):
             return (
                 False,
                 list(ZERO_ANGLES),
@@ -223,10 +222,11 @@ class ArmMoveItController:
         result = result_future.result().result
         error_code = result.error_code.val
         if error_code != MoveItErrorCodes.SUCCESS:
+            error_name = MOVEIT_ERROR_NAMES.get(error_code, 'UNKNOWN')
             return (
                 False,
                 list(ZERO_ANGLES),
-                self._moveit_error_text(error_code),
+                f'error_code={error_code} ({error_name})',
             )
 
         final_angles = self._extract_final_angles(result, target_angles_deg)
@@ -247,7 +247,6 @@ class ArmMoveItController:
             z_cm,
             pitch_deg,
         ):
-            # 不同 seed 可帮助 MoveIt 跳出局部无解或碰到关节边界的情况。
             request = self._build_ik_request(
                 x_cm,
                 y_cm,
@@ -275,26 +274,48 @@ class ArmMoveItController:
 
             error_code = response.error_code.val
             if error_code != MoveItErrorCodes.SUCCESS:
-                self._last_ik_error = self._moveit_error_text(error_code)
+                error_name = MOVEIT_ERROR_NAMES.get(error_code, 'UNKNOWN')
+                self._last_ik_error = f'error_code={error_code} ({error_name})'
                 continue
 
-            positions = self._extract_ik_positions(response.solution.joint_state)
-            if positions is None:
+            joint_state = response.solution.joint_state
+            if (
+                not joint_state.name
+                or len(joint_state.name) != len(joint_state.position)
+            ):
                 self._last_ik_error = 'IK response has no complete joint state'
                 continue
+            positions = dict(zip(joint_state.name, joint_state.position))
 
-            if not self._fixed_end_joints_match(positions):
-                # 末端虚拟关节只用于约束姿态，不允许 IK 改动它们。
+            fixed_errors = [
+                f'{joint}={positions[joint]:.4f}'
+                for joint in self.FIXED_END_JOINTS
+                if (
+                    joint in positions
+                    and abs(positions[joint] - self.FIXED_END_JOINT_POSITION)
+                    > self.GOAL_JOINT_TOLERANCE
+                )
+            ]
+            if fixed_errors:
                 self._last_ik_error = (
-                    'IK changed fixed end joints: '
-                    f'{self._format_joint_positions(positions, self.FIXED_END_JOINTS)}'
+                    'IK changed fixed end joints: ' + ', '.join(fixed_errors)
                 )
                 continue
 
-            if not self._hardware_joints_within_limits(positions):
+            limit_errors = []
+            for joint, max_degrees in self.HARDWARE_JOINT_LIMITS_DEG.items():
+                if joint not in positions:
+                    limit_errors.append(f'{joint}=missing')
+                    continue
+                degrees = positions[joint] / DEG_TO_RAD
+                if abs(degrees) > max_degrees:
+                    limit_errors.append(
+                        f'{joint}={degrees:.2f} deg '
+                        f'not in [{-max_degrees:.1f}, {max_degrees:.1f}]'
+                    )
+            if limit_errors:
                 self._last_ik_error = (
-                    'IK exceeds hardware joint limits: '
-                    f'{self._format_hardware_limit_errors(positions)}'
+                    'IK exceeds hardware joint limits: ' + ', '.join(limit_errors)
                 )
                 continue
 
@@ -310,53 +331,18 @@ class ArmMoveItController:
 
         return None
 
-    def _hardware_joints_within_limits(self, positions):
-        for joint_name, max_degrees in self.HARDWARE_JOINT_LIMITS_DEG.items():
-            position = positions.get(joint_name)
-            if position is None:
-                return False
-            if not self._joint_within_hardware_limit(joint_name, position):
-                return False
-        return True
-
-    def _joint_within_hardware_limit(self, joint_name, position):
-        max_degrees = self.HARDWARE_JOINT_LIMITS_DEG.get(joint_name)
-        if max_degrees is None:
-            return True
-        return abs(position / DEG_TO_RAD) <= max_degrees
-
-    def _format_hardware_limit_errors(self, positions):
-        errors = []
-        for joint_name, max_degrees in self.HARDWARE_JOINT_LIMITS_DEG.items():
-            position = positions.get(joint_name)
-            if position is None:
-                errors.append(f'{joint_name}=missing')
-                continue
-            degrees = position / DEG_TO_RAD
-            if abs(degrees) > max_degrees:
-                errors.append(
-                    f'{joint_name}={degrees:.2f} deg '
-                    f'not in [{-max_degrees:.1f}, {max_degrees:.1f}]'
-                )
-        return ', '.join(errors) if errors else 'none'
-
-    def _fixed_end_joints_match(self, positions):
-        for joint_name in self.FIXED_END_JOINTS:
-            position = positions.get(joint_name)
-            if position is None:
-                continue
-            if abs(position - self.FIXED_END_JOINT_POSITION) > (
-                self.GOAL_JOINT_TOLERANCE
-            ):
-                return False
-        return True
-
     def _build_ik_request(self, x_cm, y_cm, z_cm, pitch_deg, seed_positions):
         request = GetPositionIK.Request()
         ik_request = request.ik_request
         ik_request.group_name = self._group_name
-        ik_request.robot_state.joint_state = self._seed_joint_state(
-            seed_positions
+        ik_request.robot_state.joint_state = JointState(
+            name=list(self.MOVEIT_JOINTS),
+            position=[
+                self.FIXED_END_JOINT_POSITION
+                if joint in self.FIXED_END_JOINTS
+                else seed_positions.get(joint, 0.0)
+                for joint in self.MOVEIT_JOINTS
+            ],
         )
         ik_request.robot_state.is_diff = False
         ik_request.constraints.joint_constraints = [
@@ -372,38 +358,14 @@ class ArmMoveItController:
         )
         return request
 
-    def _seed_joint_state(self, positions):
-        msg = JointState()
-        msg.name = list(self.MOVEIT_JOINTS)
-        msg.position = [
-            positions.get(joint_name, 0.0)
-            for joint_name in self.MOVEIT_JOINTS
-        ]
-
-        for joint_name in self.FIXED_END_JOINTS:
-            if joint_name in msg.name:
-                index = msg.name.index(joint_name)
-                msg.position[index] = self.FIXED_END_JOINT_POSITION
-
-        return msg
-
     def _ik_seed_positions(self, x_cm, y_cm, z_cm, pitch_deg):
         yaw = math.atan2(y_cm, x_cm) if x_cm != 0.0 or y_cm != 0.0 else 0.0
-        seeds = []
-
-        seeds.extend(self._geometric_seed_positions(x_cm, y_cm, z_cm, pitch_deg))
-        # 几何解失败时仍保留零位和朝向目标的 base yaw 作为兜底种子。
-        seeds.extend([
-            {},
-            {
-                'arm_base_joint': yaw,
-            },
-        ])
+        seeds = self._geometric_seed_positions(x_cm, y_cm, z_cm, pitch_deg)
+        seeds.extend([{}, {'arm_base_joint': yaw}])
 
         unique_seeds = []
         seen = set()
         for seed in seeds:
-            # 固定末端关节后去重，避免重复请求 /compute_ik。
             fixed_seed = {
                 joint_name: seed.get(joint_name, 0.0)
                 for joint_name in self.MOVEIT_JOINTS
@@ -435,7 +397,6 @@ class ArmMoveItController:
         wrist_x = x_cm - l4 * end_dir_x
         wrist_y = y_cm - l4 * end_dir_y
         wrist_z = z_cm - l4 * end_dir_z
-        # 先从目标点扣掉末端连杆，得到腕关节目标点。
         r = wrist_x * math.cos(theta1) + wrist_y * math.sin(theta1)
         z_from_shoulder = wrist_z - l1
         distance = math.hypot(r, z_from_shoulder)
@@ -443,28 +404,35 @@ class ArmMoveItController:
         if distance > l2 + l3 or distance < abs(l2 - l3) or distance < 1e-9:
             return []
 
-        cos_elbow_inner = (l2 * l2 + l3 * l3 - distance * distance) / (
-            2.0 * l2 * l3
+        cos_elbow_inner = max(
+            -1.0,
+            min(
+                1.0,
+                (l2 * l2 + l3 * l3 - distance * distance) / (2.0 * l2 * l3),
+            ),
         )
-        cos_elbow_inner = max(-1.0, min(1.0, cos_elbow_inner))
-        elbow_inner = math.acos(cos_elbow_inner)
-
         alpha = math.atan2(z_from_shoulder, r)
-        cos_beta = (l2 * l2 + distance * distance - l3 * l3) / (
-            2.0 * l2 * distance
+        cos_beta = max(
+            -1.0,
+            min(
+                1.0,
+                (l2 * l2 + distance * distance - l3 * l3)
+                / (2.0 * l2 * distance),
+            ),
         )
-        cos_beta = max(-1.0, min(1.0, cos_beta))
+        elbow_inner = math.acos(cos_elbow_inner)
         beta = math.acos(cos_beta)
 
         candidates = []
-        theta2 = math.pi / 2.0 - (alpha + beta)
-        theta3 = math.pi - elbow_inner
-        theta4 = math.pi / 2.0 + pitch_deg * DEG_TO_RAD - theta2 - theta3
-        candidates.append((theta1, theta2, theta3, theta4))
-
-        if beta > 1e-9:
-            theta2 = math.pi / 2.0 - (alpha - beta)
-            theta3 = elbow_inner - math.pi
+        for shoulder_sign in (1.0, -1.0):
+            if shoulder_sign < 0.0 and beta <= 1e-9:
+                continue
+            theta2 = math.pi / 2.0 - (alpha + shoulder_sign * beta)
+            theta3 = (
+                math.pi - elbow_inner
+                if shoulder_sign > 0.0
+                else elbow_inner - math.pi
+            )
             theta4 = math.pi / 2.0 + pitch_deg * DEG_TO_RAD - theta2 - theta3
             candidates.append((theta1, theta2, theta3, theta4))
 
@@ -498,11 +466,6 @@ class ArmMoveItController:
         pitch_from_vertical = math.pi / 2.0 + pitch_deg * DEG_TO_RAD
         return self._quaternion_from_rpy(0.0, pitch_from_vertical, yaw)
 
-    def _extract_ik_positions(self, joint_state):
-        if not joint_state.name or len(joint_state.name) != len(joint_state.position):
-            return None
-        return dict(zip(joint_state.name, joint_state.position))
-
     def _build_move_group_goal(self, joint_positions):
         goal_msg = MoveGroup.Goal()
 
@@ -514,15 +477,13 @@ class ArmMoveItController:
         request.max_acceleration_scaling_factor = self.ACCELERATION_SCALING
         request.start_state.is_diff = True
 
-        min_x, min_y, min_z = self.WORKSPACE_MIN
-        max_x, max_y, max_z = self.WORKSPACE_MAX
         request.workspace_parameters.header.frame_id = self.TARGET_FRAME
-        request.workspace_parameters.min_corner.x = min_x
-        request.workspace_parameters.min_corner.y = min_y
-        request.workspace_parameters.min_corner.z = min_z
-        request.workspace_parameters.max_corner.x = max_x
-        request.workspace_parameters.max_corner.y = max_y
-        request.workspace_parameters.max_corner.z = max_z
+        request.workspace_parameters.min_corner.x = self.WORKSPACE_MIN[0]
+        request.workspace_parameters.min_corner.y = self.WORKSPACE_MIN[1]
+        request.workspace_parameters.min_corner.z = self.WORKSPACE_MIN[2]
+        request.workspace_parameters.max_corner.x = self.WORKSPACE_MAX[0]
+        request.workspace_parameters.max_corner.y = self.WORKSPACE_MAX[1]
+        request.workspace_parameters.max_corner.z = self.WORKSPACE_MAX[2]
 
         constraints = Constraints()
         constraints.name = 'moveit_ik_joint_goal'
@@ -531,27 +492,24 @@ class ArmMoveItController:
             for joint_name, position
             in zip(self.MOVEIT_JOINTS, joint_positions)
         ]
-        request.goal_constraints = [constraints]
-        request.path_constraints = self._fixed_end_path_constraints()
-
-        goal_msg.planning_options.plan_only = False
-        goal_msg.planning_options.replan = True
-        goal_msg.planning_options.replan_attempts = 2
-        goal_msg.planning_options.replan_delay = 0.1
-        goal_msg.planning_options.planning_scene_diff.is_diff = True
-        planning_scene = goal_msg.planning_options.planning_scene_diff
-        planning_scene.robot_state.is_diff = True
-
-        return goal_msg
-
-    def _fixed_end_path_constraints(self):
-        constraints = Constraints()
-        constraints.name = 'fixed_end_joints_path'
-        constraints.joint_constraints = [
+        path_constraints = Constraints()
+        path_constraints.name = 'fixed_end_joints_path'
+        path_constraints.joint_constraints = [
             self._joint_constraint(joint_name, self.FIXED_END_JOINT_POSITION)
             for joint_name in self.FIXED_END_JOINTS
         ]
-        return constraints
+        request.goal_constraints = [constraints]
+        request.path_constraints = path_constraints
+
+        options = goal_msg.planning_options
+        options.plan_only = False
+        options.replan = True
+        options.replan_attempts = 2
+        options.replan_delay = 0.1
+        options.planning_scene_diff.is_diff = True
+        options.planning_scene_diff.robot_state.is_diff = True
+
+        return goal_msg
 
     def _quaternion_from_rpy(self, roll, pitch, yaw):
         half_roll = roll * 0.5
@@ -581,20 +539,6 @@ class ArmMoveItController:
         constraint.weight = 1.0
         return constraint
 
-    def _moveit_error_text(self, error_code):
-        error_name = MOVEIT_ERROR_NAMES.get(error_code, 'UNKNOWN')
-        return f'error_code={error_code} ({error_name})'
-
-    def _format_joint_positions(self, positions, joint_names):
-        values = []
-        for joint_name in joint_names:
-            position = positions.get(joint_name)
-            if position is None:
-                values.append(f'{joint_name}=missing')
-            else:
-                values.append(f'{joint_name}={position:.4f}')
-        return ', '.join(values)
-
     def _extract_final_angles(self, result, fallback_angles):
         trajectory = result.executed_trajectory
         joint_trajectory = trajectory.joint_trajectory
@@ -603,15 +547,16 @@ class ArmMoveItController:
         if not joint_trajectory.points:
             return self._fixed_angle_array(fallback_angles)
 
-        final_positions = joint_trajectory.points[-1].positions
-        positions_by_name = dict(zip(joint_trajectory.joint_names, final_positions))
-        angles = []
-        for joint_name in self.MOVEIT_JOINTS[:4]:
-            position = positions_by_name.get(joint_name)
-            if position is None:
-                return list(ZERO_ANGLES)
-            angles.append(position / DEG_TO_RAD)
-        return angles
+        positions = dict(
+            zip(joint_trajectory.joint_names, joint_trajectory.points[-1].positions)
+        )
+        try:
+            return [
+                positions[joint] / DEG_TO_RAD
+                for joint in self.MOVEIT_JOINTS[:4]
+            ]
+        except KeyError:
+            return list(ZERO_ANGLES)
 
     def _wait_for_future(
         self,
@@ -631,12 +576,13 @@ class ArmMoveItController:
                 future.cancel()
                 return False
 
-            should_publish = (
+            if (
                 feedback_callback is not None
                 and time.monotonic() >= feedback_time
-            )
-            if should_publish:
-                feedback_callback(progress, self._fixed_angle_array(current_angles))
+            ):
+                feedback_callback(
+                    progress, self._fixed_angle_array(current_angles)
+                )
                 feedback_time = time.monotonic() + 0.5
             time.sleep(0.02)
         return future.done()
