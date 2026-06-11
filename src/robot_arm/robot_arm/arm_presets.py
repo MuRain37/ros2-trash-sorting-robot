@@ -16,10 +16,10 @@ ACTION_NAMES = {
 # Edit these three rows after physical calibration. Values are raw servo
 # positions for servo1 through servo5.
 PRESET_SERVO_RAW = {
-    ACTION_ARM_CENTER: [500.0, 750.0, 0.0, 150.0, 500.0],
-    ACTION_LEFT_BUCKET: [500.0, 500.0, 500.0, 500.0, 500.0],
-    ACTION_RIGHT_BUCKET: [500.0, 500.0, 500.0, 500.0, 500.0],
-}
+    ACTION_ARM_CENTER: [500.0, 688.0, 63.0, 164.0, 500.0],
+    ACTION_LEFT_BUCKET: [900.0, 600.0, 290.0, 100.0, 500.0],
+    ACTION_RIGHT_BUCKET: [100.0, 600.0, 290.0, 100.0, 500.0],
+}   
 
 SERVO_CENTER = 500.0
 SERVO_RAW_MIN = 0.0

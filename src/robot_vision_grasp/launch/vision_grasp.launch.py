@@ -28,7 +28,7 @@ def generate_launch_description():
         DeclareLaunchArgument('base_frame', default_value='arm_link0'),
         DeclareLaunchArgument(
             'gripper_service',
-            default_value='set_gripper',
+            default_value='arm_gripper',
         ),
         Node(
             package='robot_vision_grasp',

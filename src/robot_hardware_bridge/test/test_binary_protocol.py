@@ -303,6 +303,7 @@ def test_arm_bridge_gripper_command_maps_open_ratio_to_servo_raw():
     bridge = ArmBridge(node, cmd_callback=lambda cmd, payload: sent.append(
         (cmd, payload)
     ))
+    assert node.services['arm_gripper'] == bridge._on_gripper_command
 
     for open_ratio in [0.0, 0.5, 1.0]:
         request = SetGripper.Request()
