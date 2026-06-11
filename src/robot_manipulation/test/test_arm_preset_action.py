@@ -1,9 +1,9 @@
 from rclpy.action import GoalResponse
 
 from robot_arm.arm_moveit_controller import ZERO_ANGLES
-from robot_arm.arm_preset_action import ArmPresetActionServer
-from robot_arm.arm_presets import preset_to_joint_positions
 from robot_interfaces.action import ArmPreset
+from robot_manipulation.arm_preset_action import ArmPresetActionServer
+from robot_manipulation.arm_presets import preset_to_joint_positions
 
 
 class FakeLogger:
@@ -103,7 +103,11 @@ def test_arm_preset_action_executes_valid_action():
 
 
 def test_arm_preset_action_returns_moveit_failure_message():
-    fake_moveit = FakeMoveIt(success=False, final_angles=list(ZERO_ANGLES), message='failed')
+    fake_moveit = FakeMoveIt(
+        success=False,
+        final_angles=list(ZERO_ANGLES),
+        message='failed',
+    )
     server = make_server(fake_moveit)
     goal_handle = FakeGoalHandle(ArmPreset.Goal.LEFT_BUCKET)
 

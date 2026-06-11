@@ -137,7 +137,7 @@ class ArmMoveItController:
         return False, list(ZERO_ANGLES)
 
     def move_to_joint_positions(self, joint_positions, feedback_callback=None):
-        """Execute a direct MoveIt joint goal for the five real arm joints."""
+        """执行 5 个真实机械臂关节的 MoveIt joint goal，不走 IK."""
         if len(joint_positions) != self.TARGET_JOINT_COUNT:
             self._node.get_logger().error(
                 'MoveIt joint target failed: expected '
@@ -145,11 +145,13 @@ class ArmMoveItController:
             )
             return False, list(ZERO_ANGLES), 'invalid joint target length'
 
+        # 预设姿态已经是关节角；这里只负责校验并补齐 MoveIt 需要的虚拟末端关节
         joint_positions = [float(position) for position in joint_positions]
         target_angles_deg = [
             position / DEG_TO_RAD for position in joint_positions
         ]
         limit_errors = []
+        # 先做硬件极限校验，避免把超范围目标交给 MoveIt 规划
         for joint, position in zip(self.MOVEIT_JOINTS, joint_positions):
             max_degrees = self.HARDWARE_JOINT_LIMITS_DEG[joint]
             degrees = position / DEG_TO_RAD
@@ -165,6 +167,7 @@ class ArmMoveItController:
             self._node.get_logger().error('MoveIt joint target failed: ' + message)
             return False, list(ZERO_ANGLES), message
 
+        # MoveIt 规划组包含 5 个真实关节 + 3 个虚拟末端关节
         moveit_positions = list(joint_positions) + [0.0] * len(
             self.FIXED_END_JOINTS
         )
@@ -539,6 +542,7 @@ class ArmMoveItController:
                 future.cancel()
                 return False
             if feedback_callback is not None and time.monotonic() >= feedback_time:
+                # 反馈回调返回 False 表示上层 action 已取消，停止等待 MoveIt 结果
                 keep_waiting = feedback_callback(
                     progress,
                     self._fixed_angle_array(current_angles),

@@ -13,6 +13,7 @@
   <exec_depend>robot_hardware</exec_depend>
   <exec_depend>robot_hardware_bridge</exec_depend>
   <exec_depend>robot_description</exec_depend>
+  <exec_depend>robot_manipulation</exec_depend>
   <exec_depend>robot_moveit_config</exec_depend>
   <exec_depend>moveit_configs_utils</exec_depend>
   <exec_depend>robot_nav2</exec_depend>
