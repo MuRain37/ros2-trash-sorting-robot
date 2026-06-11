@@ -136,6 +136,57 @@ class ArmMoveItController:
         )
         return False, list(ZERO_ANGLES)
 
+    def move_to_joint_positions(self, joint_positions, feedback_callback=None):
+        """Execute a direct MoveIt joint goal for the five real arm joints."""
+        if len(joint_positions) != self.TARGET_JOINT_COUNT:
+            self._node.get_logger().error(
+                'MoveIt joint target failed: expected '
+                f'{self.TARGET_JOINT_COUNT} joints, got {len(joint_positions)}'
+            )
+            return False, list(ZERO_ANGLES), 'invalid joint target length'
+
+        joint_positions = [float(position) for position in joint_positions]
+        target_angles_deg = [
+            position / DEG_TO_RAD for position in joint_positions
+        ]
+        limit_errors = []
+        for joint, position in zip(self.MOVEIT_JOINTS, joint_positions):
+            max_degrees = self.HARDWARE_JOINT_LIMITS_DEG[joint]
+            degrees = position / DEG_TO_RAD
+            if abs(degrees) > max_degrees:
+                limit_errors.append(
+                    f'{joint}={degrees:.2f} deg not in '
+                    f'[-{max_degrees:.1f}, {max_degrees:.1f}]'
+                )
+        if limit_errors:
+            message = 'joint target exceeds hardware limits: ' + ', '.join(
+                limit_errors
+            )
+            self._node.get_logger().error('MoveIt joint target failed: ' + message)
+            return False, list(ZERO_ANGLES), message
+
+        moveit_positions = list(joint_positions) + [0.0] * len(
+            self.FIXED_END_JOINTS
+        )
+        angle_text = '[' + ', '.join(f'{a:.2f}' for a in target_angles_deg) + ']'
+        self._node.get_logger().info(
+            f'MoveIt joint target: joints={angle_text} deg, '
+            'end joints fixed at 0.000 rad'
+        )
+
+        success, final_angles, failure = self._execute_moveit_joint_goal(
+            moveit_positions,
+            target_angles_deg,
+            feedback_callback,
+        )
+        if success:
+            self._node.get_logger().info('MoveIt joint execution complete')
+            return True, final_angles, 'joint target accepted'
+
+        message = f'MoveIt joint target failed: {failure}'
+        self._node.get_logger().error(message)
+        return False, final_angles, message
+
     def _execute_moveit_joint_goal(
         self, joint_positions, target_angles_deg, feedback_callback
     ):
@@ -455,7 +506,7 @@ class ArmMoveItController:
     def _joint_constraint(self, joint_name, position):
         constraint = JointConstraint()
         constraint.joint_name = joint_name
-        constraint.position = position
+        constraint.position = float(position)
         constraint.tolerance_above = self.GOAL_JOINT_TOLERANCE
         constraint.tolerance_below = self.GOAL_JOINT_TOLERANCE
         constraint.weight = 1.0
@@ -488,7 +539,13 @@ class ArmMoveItController:
                 future.cancel()
                 return False
             if feedback_callback is not None and time.monotonic() >= feedback_time:
-                feedback_callback(progress, self._fixed_angle_array(current_angles))
+                keep_waiting = feedback_callback(
+                    progress,
+                    self._fixed_angle_array(current_angles),
+                )
+                if keep_waiting is False:
+                    future.cancel()
+                    return False
                 feedback_time = time.monotonic() + 0.5
             time.sleep(0.02)
         return future.done()

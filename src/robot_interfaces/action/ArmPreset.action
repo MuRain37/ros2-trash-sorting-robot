@@ -1,0 +1,12 @@
+uint8 ARM_CENTER=0
+uint8 LEFT_BUCKET=1
+uint8 RIGHT_BUCKET=2
+
+uint8 action_type
+---
+bool success
+string message
+float64[5] final_angles
+---
+float64 progress
+float64[5] current_angles

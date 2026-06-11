@@ -39,8 +39,22 @@ def generate_launch_description():
         }],
     )
 
+    arm_preset = Node(
+        package='robot_arm',
+        executable='arm_preset_action',
+        name='arm_preset_action_server',
+        output='screen',
+        parameters=[{
+            'use_sim_time': LaunchConfiguration('use_sim_time'),
+            'action_name': '/arm_preset',
+            'group_name': 'plan',
+            'move_action_name': '/move_action',
+        }],
+    )
+
     return LaunchDescription([
         declare_use_sim_time,
         move_group,
         arm_target,
+        arm_preset,
     ])
