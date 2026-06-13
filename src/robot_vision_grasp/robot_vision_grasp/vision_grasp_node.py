@@ -13,27 +13,20 @@ from rclpy.duration import Duration
 from rclpy.node import Node
 from rclpy.time import Time
 from robot_hardware_bridge.arm_bridge import DEFAULT_GRIPPER_SERVICE
-from robot_interfaces.action import ArmPreset
-from robot_interfaces.action import ArmTarget
+from robot_interfaces.action import ArmPreset, ArmTarget
 from robot_interfaces.srv import SetGripper
-from sensor_msgs.msg import CameraInfo
-from sensor_msgs.msg import Image
+from sensor_msgs.msg import CameraInfo, Image
 from tf2_ros import Buffer
 from tf2_ros import TransformException
 from tf2_ros import TransformListener
 
-from robot_vision_grasp.grasp_geometry import _get_axis_angle
-from robot_vision_grasp.grasp_geometry import get_ik_pitch
-from robot_vision_grasp.grasp_geometry import gripper_close_open_ratio
+from robot_vision_grasp.grasp_geometry import _get_axis_angle, get_ik_pitch, gripper_close_open_ratio
 from robot_vision_grasp.yolo_seg_openvino import YOLOSegOpenVINO
 
 
 DEFAULT_CLASS_NAMES = ['bottle', 'pen', 'paper', 'charger', 'usb', 'yan']
 
 ACTION_TIMEOUT_SEC = 30.0
-ARM_PRESET_TIMEOUT_SEC = 30.0
-ARM_ACTION_NAME = '/arm_target'
-ARM_PRESET_ACTION_NAME = '/arm_preset'
 ARM_CENTER_PRESET = ArmPreset.Goal.ARM_CENTER
 LEFT_BUCKET_CLASSES = {'paper', 'yan', 'bottle'}
 RIGHT_BUCKET_CLASSES = {'usb', 'charger', 'pen'}
@@ -69,13 +62,13 @@ class VisionGraspNode(Node):
         self._arm_action = ActionClient(
             self,
             ArmTarget,
-            ARM_ACTION_NAME,
+            '/arm_target',
             callback_group=callback_group,
         )
         self._arm_preset_action = ActionClient(
             self,
             ArmPreset,
-            ARM_PRESET_ACTION_NAME,
+            '/arm_preset',
             callback_group=callback_group,
         )
         self._gripper_client = self.create_client(
@@ -126,13 +119,8 @@ class VisionGraspNode(Node):
         self._base_frame = self._param('base_frame', 'arm_link0')
         self._camera_frame = self._param('camera_frame', 'camera_optical_link',)
         self._arm_goal_duration = float(self._param('arm_goal_duration', 2.0))
-        self._arm_preset_timeout = float(
-            self._param('arm_preset_timeout', ARM_PRESET_TIMEOUT_SEC)
-        )
-        self._gripper_service = self._param(
-            'gripper_service',
-            DEFAULT_GRIPPER_SERVICE,
-        )
+        self._arm_preset_timeout = float(self._param('arm_preset_timeout', ACTION_TIMEOUT_SEC))
+        self._gripper_service = self._param('gripper_service', DEFAULT_GRIPPER_SERVICE,)
 
     def _load_model(self):
         model_path = Path(self._model_path) if self._model_path else (
@@ -376,7 +364,7 @@ class VisionGraspNode(Node):
     ):
         target_cm = object_arm_m * 100.0
         offsets_cm = {
-            'bottle': np.array([0.5, 0.0, -9.0], dtype=float),
+            'bottle': np.array([0.0, 0.0, -9.0], dtype=float),
             'charger': np.array([1.5, 0.0, -4.0], dtype=float),
             'paper': np.array([1.5, 0.0, -4.0], dtype=float),
             'pen': np.array([0.0, 0.0, -3.5], dtype=float),
@@ -401,28 +389,14 @@ class VisionGraspNode(Node):
                 return
 
             time.sleep(GRIPPER_WAIT_SEC)
-            if not self._send_arm_preset(ARM_CENTER_PRESET):
-                return
 
             bucket_preset = self._bucket_preset_for_class(class_name)
-            if bucket_preset is None:
-                self.get_logger().warning(f'No bucket preset for class: {class_name}')
-                return
-
             if not self._send_arm_preset(bucket_preset):
                 return
 
-            time.sleep(POS_WAIT_SEC)
-            self.get_logger().info(
-                f'Opening gripper at bucket for class: {class_name}'
-            )
-            gripper_opened = self._call_gripper(1.0, GRIPPER_DURATION_MS)
-            if gripper_opened:
-                time.sleep(GRIPPER_WAIT_SEC)
-            else:
-                self.get_logger().warning(
-                    'Bucket gripper open failed; returning arm to center'
-                )
+            self._call_gripper(1.0, GRIPPER_DURATION_MS)
+
+            time.sleep(GRIPPER_WAIT_SEC)
 
             self._send_arm_preset(ARM_CENTER_PRESET)
         except Exception as exc:
@@ -442,7 +416,7 @@ class VisionGraspNode(Node):
 
     def _send_arm_target(self, target):
         if not self._arm_action.wait_for_server(timeout_sec=5.0):
-            self.get_logger().error(f'Action server not ready: {ARM_ACTION_NAME}')
+            self.get_logger().error(f'Action server not ready')
             return False
 
         goal = ArmTarget.Goal()
@@ -476,9 +450,7 @@ class VisionGraspNode(Node):
 
     def _send_arm_preset(self, action_type):
         if not self._arm_preset_action.wait_for_server(timeout_sec=5.0):
-            self.get_logger().warning(
-                f'Arm preset action server not ready: {ARM_PRESET_ACTION_NAME}'
-            )
+            self.get_logger().warning(f'Arm preset action server not ready')
             return False
 
         goal = ArmPreset.Goal()
@@ -531,7 +503,7 @@ class VisionGraspNode(Node):
             f'duration_ms={request.duration_ms:.0f}'
         )
         future = self._gripper_client.call_async(request)
-        response = self._wait_for_future(future, 5.0)
+        response = self._wait_for_future(future, 2.0)
         if response is None:
             self.get_logger().warning('Gripper command timed out')
             return False
