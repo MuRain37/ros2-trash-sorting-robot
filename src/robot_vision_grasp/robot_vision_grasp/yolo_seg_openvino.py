@@ -32,22 +32,9 @@ class _Box:
     __slots__ = ('xyxy', 'cls', 'conf')
 
     def __init__(self, x1, y1, x2, y2, cls_id, conf):
-        self.xyxy = _TensorLike(
-            np.array([[x1, y1, x2, y2]], dtype=np.float32)
-        )
+        self.xyxy = _TensorLike(np.array([[x1, y1, x2, y2]], dtype=np.float32))
         self.cls = _TensorLike(np.array([cls_id], dtype=np.float32))
         self.conf = _TensorLike(np.array([conf], dtype=np.float32))
-
-
-class _Boxes:
-    def __init__(self, boxes):
-        self._boxes = boxes
-
-    def __iter__(self):
-        return iter(self._boxes)
-
-    def __len__(self):
-        return len(self._boxes)
 
 
 class _Masks:
@@ -58,7 +45,7 @@ class _Masks:
 
 class _Result:
     def __init__(self, boxes, masks, names, soft_masks=None):
-        self.boxes = _Boxes(boxes)
+        self.boxes = boxes
         self.masks = _Masks(masks, soft_masks) if masks is not None else None
         self.names = names
 
@@ -87,20 +74,12 @@ class YOLOSegOpenVINO:
         self._conf_thres = float(conf_thres)
         self._iou_thres = float(iou_thres)
         self._mask_coeff_count = int(mask_coeff_count)
-        self._names = names or {
-            0: 'bottle',
-            1: 'pen',
-            2: 'paper',
-            3: 'charger',
-            4: 'usb',
-            5: 'yan'
-        }
+        self._names = names or {0: 'bottle', 1: 'pen', 2: 'paper', 3: 'charger', 4: 'usb', 5: 'yan'}
 
     def __call__(self, img, verbose=False):
         del verbose
         orig_h, orig_w = img.shape[:2]
         blob, scale, pad_w, pad_h, new_h, new_w = self._preprocess(img)
-
         infer_request = self._compiled.create_infer_request()
         raw = infer_request.infer({self._input_name: blob})
         outputs = [raw[name] for name in self._output_names]
@@ -109,17 +88,7 @@ class YOLOSegOpenVINO:
         if det_out is None or proto is None:
             return []
 
-        return self._postprocess(
-            det_out,
-            proto,
-            orig_w,
-            orig_h,
-            scale,
-            pad_w,
-            pad_h,
-            new_h,
-            new_w,
-        )
+        return self._postprocess(det_out, proto, orig_w, orig_h, scale, pad_w, pad_h, new_h, new_w)
 
     def detect_targets(
         self,
@@ -145,18 +114,7 @@ class YOLOSegOpenVINO:
             if result.masks is None:
                 continue
             for index, box in enumerate(result.boxes):
-                target = self._target_from_box(
-                    result,
-                    index,
-                    box,
-                    depth_m,
-                    fx,
-                    fy,
-                    cx,
-                    cy,
-                    conf_thres,
-                    mask_thres,
-                )
+                target = self._target_from_box(result, index, box, depth_m, fx, fy, cx, cy, conf_thres, mask_thres)
                 if target is not None:
                     targets.append(target)
 
@@ -170,17 +128,10 @@ class YOLOSegOpenVINO:
         pad_h = (self._height - new_h) // 2
         pad_w = (self._width - new_w) // 2
 
-        resized = cv2.resize(
-            img,
-            (new_w, new_h),
-            interpolation=cv2.INTER_LINEAR,
-        )
+        resized = cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
         canvas = np.full((self._height, self._width, 3), 114, dtype=np.uint8)
         canvas[pad_h:pad_h + new_h, pad_w:pad_w + new_w] = resized
-
-        blob = canvas.astype(np.float32) / 255.0
-        blob = np.transpose(blob, (2, 0, 1))[np.newaxis, :, :, :]
-        return blob, scale, pad_w, pad_h, new_h, new_w
+        return np.transpose(canvas.astype(np.float32) / 255.0, (2, 0, 1))[np.newaxis, :, :, :], scale, pad_w, pad_h, new_h, new_w
 
     @staticmethod
     def _nms(boxes, scores, iou_thres):
@@ -202,18 +153,7 @@ class YOLOSegOpenVINO:
             order = order[1:][iou <= iou_thres]
         return np.array(keep)
 
-    def _postprocess(
-        self,
-        det_out,
-        proto,
-        orig_w,
-        orig_h,
-        scale,
-        pad_w,
-        pad_h,
-        new_h,
-        new_w,
-    ):
+    def _postprocess(self, det_out, proto, orig_w, orig_h, scale, pad_w, pad_h, new_h, new_w):
         nc = det_out.shape[1] - 4 - self._mask_coeff_count
         if nc <= 0:
             return []
@@ -228,7 +168,7 @@ class YOLOSegOpenVINO:
             if score < self._conf_thres:
                 continue
 
-            xc, yc, bw, bh = pred[0], pred[1], pred[2], pred[3]
+            xc, yc, bw, bh = pred[:4]
             x1 = (xc - bw / 2 - pad_w) / scale
             y1 = (yc - bh / 2 - pad_h) / scale
             x2 = (xc + bw / 2 - pad_w) / scale
@@ -248,21 +188,14 @@ class YOLOSegOpenVINO:
         scores_arr = np.array(scores, dtype=np.float32)
         indices = self._nms(boxes_arr, scores_arr, self._iou_thres)
 
-        coeffs_list = np.array([
-            det[det_idxs[idx], 4 + nc:4 + nc + self._mask_coeff_count]
-            for idx in indices
-        ])
+        coeffs_list = np.array([det[det_idxs[idx], 4 + nc:4 + nc + self._mask_coeff_count] for idx in indices])
         if len(coeffs_list) == 0:
             return []
 
         proto_arr = proto[0]
         masks_raw = proto_arr.reshape(self._mask_coeff_count, -1).T
         masks_raw = masks_raw @ coeffs_list.T
-        masks_raw = masks_raw.reshape(
-            proto_arr.shape[1],
-            proto_arr.shape[2],
-            -1,
-        )
+        masks_raw = masks_raw.reshape(proto_arr.shape[1], proto_arr.shape[2], -1)
         masks_raw = 1.0 / (1.0 + np.exp(-masks_raw))
 
         result_boxes = []
@@ -270,38 +203,20 @@ class YOLOSegOpenVINO:
         result_soft_masks = []
 
         for i, idx in enumerate(indices):
-            x1, y1, x2, y2 = boxes_arr[idx]
-            x1 = max(0, min(orig_w - 1, x1))
-            y1 = max(0, min(orig_h - 1, y1))
-            x2 = max(0, min(orig_w - 1, x2))
-            y2 = max(0, min(orig_h - 1, y2))
-
-            mask = masks_raw[:, :, i]
-            mask = cv2.resize(
-                mask,
-                (self._width, self._height),
-                interpolation=cv2.INTER_LINEAR,
-            )
+            x1, y1, x2, y2 = np.clip(boxes_arr[idx], [0, 0, 0, 0], [orig_w - 1, orig_h - 1, orig_w - 1, orig_h - 1])
+            mask = cv2.resize(masks_raw[:, :, i], (self._width, self._height), interpolation=cv2.INTER_LINEAR)
             mask = mask[pad_h:pad_h + new_h, pad_w:pad_w + new_w]
-            mask = cv2.resize(
-                mask,
-                (orig_w, orig_h),
-                interpolation=cv2.INTER_LINEAR,
-            )
+            mask = cv2.resize(mask, (orig_w, orig_h), interpolation=cv2.INTER_LINEAR)
 
             roi = np.zeros((orig_h, orig_w), dtype=np.float32)
             roi[int(y1):int(y2), int(x1):int(x2)] = 1.0
             mask *= roi
 
-            result_boxes.append(
-                _Box(x1, y1, x2, y2, cls_ids[idx], scores[idx])
-            )
+            result_boxes.append(_Box(x1, y1, x2, y2, cls_ids[idx], scores[idx]))
             result_masks.append((mask > 0.5).astype(np.uint8))
             result_soft_masks.append(mask.astype(np.float32))
 
-        return [
-            _Result(result_boxes, result_masks, self._names, result_soft_masks)
-        ]
+        return [_Result(result_boxes, result_masks, self._names, result_soft_masks)]
 
     @staticmethod
     def _depth_to_meters(depth, encoding):
@@ -315,19 +230,7 @@ class YOLOSegOpenVINO:
             return depth * DEPTH_SCALE
         return depth
 
-    def _target_from_box(
-        self,
-        result,
-        index,
-        box,
-        depth_m,
-        fx,
-        fy,
-        cx,
-        cy,
-        conf_thres,
-        mask_thres,
-    ):
+    def _target_from_box(self, result, index, box, depth_m, fx, fy, cx, cy, conf_thres, mask_thres):
         try:
             cls_id = int(box.cls[0])
             confidence = float(box.conf[0])
@@ -342,22 +245,11 @@ class YOLOSegOpenVINO:
         if mask is None or not np.any(mask):
             return None
 
-        centroid_mask = cv2.erode(
-            mask.astype(np.uint8),
-            cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5)),
-            iterations=ERODE_ITERATIONS,
-        ).astype(bool)
+        centroid_mask = cv2.erode(mask.astype(np.uint8), cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5)), iterations=ERODE_ITERATIONS).astype(bool)
         if not np.any(centroid_mask):
             centroid_mask = mask.astype(bool)
 
-        centroid = self._mask_centroid(
-            centroid_mask,
-            depth_m,
-            fx,
-            fy,
-            cx,
-            cy,
-        )
+        centroid = self._mask_centroid(centroid_mask, depth_m, fx, fy, cx, cy)
         if centroid is None:
             return None
 
@@ -383,15 +275,10 @@ class YOLOSegOpenVINO:
 
         height, width = depth_shape[:2]
         if mask.shape[:2] != (height, width):
-            mask = cv2.resize(
-                mask,
-                (width, height),
-                interpolation=cv2.INTER_LINEAR,
-            )
+            mask = cv2.resize(mask, (width, height), interpolation=cv2.INTER_LINEAR)
         mask = cv2.GaussianBlur(mask, (5, 5), 0)
         mask_bin = (mask > mask_thres).astype(np.uint8)
-        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
-        mask_bin = cv2.morphologyEx(mask_bin, cv2.MORPH_OPEN, kernel)
+        mask_bin = cv2.morphologyEx(mask_bin, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5)))
         return mask_bin.astype(bool)
 
     @staticmethod
@@ -404,11 +291,7 @@ class YOLOSegOpenVINO:
         xs_depth = np.clip(xs, 0, width - 1)
         ys_depth = np.clip(ys, 0, height - 1)
         depths = depth_m[ys_depth, xs_depth]
-        valid = (
-            np.isfinite(depths)
-            & (depths >= MIN_DEPTH_M)
-            & (depths <= MAX_DEPTH_M)
-        )
+        valid = np.isfinite(depths) & (depths >= MIN_DEPTH_M) & (depths <= MAX_DEPTH_M)
         if not np.any(valid):
             return None
 
@@ -419,14 +302,6 @@ class YOLOSegOpenVINO:
         v = float(ys_valid.mean())
         depth = float(depths_valid.mean())
 
-        point_cam_m = np.array([
-            (u - cx) * depth / fx,
-            (v - cy) * depth / fy,
-            depth,
+        return np.array([(u - cx) * depth / fx, (v - cy) * depth / fy, depth]), np.column_stack([
+            (xs_valid - cx) * depths_valid / fx, (ys_valid - cy) * depths_valid / fy, depths_valid,
         ])
-        points_cam = np.column_stack([
-            (xs_valid - cx) * depths_valid / fx,
-            (ys_valid - cy) * depths_valid / fy,
-            depths_valid,
-        ])
-        return point_cam_m, points_cam

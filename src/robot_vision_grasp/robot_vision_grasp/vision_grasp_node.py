@@ -16,9 +16,7 @@ from robot_hardware_bridge.arm_bridge import DEFAULT_GRIPPER_SERVICE
 from robot_interfaces.action import ArmPreset, ArmTarget
 from robot_interfaces.srv import SetGripper
 from sensor_msgs.msg import CameraInfo, Image
-from tf2_ros import Buffer
-from tf2_ros import TransformException
-from tf2_ros import TransformListener
+from tf2_ros import Buffer, TransformException, TransformListener
 
 from robot_vision_grasp.grasp_geometry import _get_axis_angle, get_ik_pitch, gripper_close_open_ratio
 from robot_vision_grasp.yolo_seg_openvino import YOLOSegOpenVINO
@@ -31,9 +29,13 @@ ARM_CENTER_PRESET = ArmPreset.Goal.ARM_CENTER
 LEFT_BUCKET_CLASSES = {'paper', 'yan', 'bottle'}
 RIGHT_BUCKET_CLASSES = {'usb', 'charger', 'pen'}
 GRIPPER_WAIT_SEC = 1.4
-POS_WAIT_SEC = 3.5
 GRIPPER_DURATION_MS = 1000.0
 TARGET_TIMEOUT_SEC = 5.0
+TARGET_OFFSETS_CM = {
+    'bottle': (0.0, 0.0, -9.0),
+    'charger': (1.5, 0.0, -4.0),
+    'paper': (1.5, 0.0, -4.0),
+}
 
 
 class VisionGraspNode(Node):
@@ -59,44 +61,15 @@ class VisionGraspNode(Node):
 
         self._tf_buffer = Buffer(cache_time=Duration(seconds=5.0))
         self._tf_listener = TransformListener(self._tf_buffer, self)
-        self._arm_action = ActionClient(
-            self,
-            ArmTarget,
-            '/arm_target',
-            callback_group=callback_group,
-        )
-        self._arm_preset_action = ActionClient(
-            self,
-            ArmPreset,
-            '/arm_preset',
-            callback_group=callback_group,
-        )
-        self._gripper_client = self.create_client(
-            SetGripper,
-            self._gripper_service,
-            callback_group=callback_group,
-        )
-        self.create_subscription(
-            Image,
-            self._color_topic,
-            self._color_cb,
-            10,
-            callback_group=callback_group,
-        )
-        self.create_subscription(
-            Image,
-            self._depth_topic,
-            self._depth_cb,
-            10,
-            callback_group=callback_group,
-        )
-        self.create_subscription(
-            CameraInfo,
-            self._depth_info_topic,
-            self._info_cb,
-            10,
-            callback_group=callback_group,
-        )
+        self._arm_action = ActionClient(self, ArmTarget, '/arm_target', callback_group=callback_group)
+        self._arm_preset_action = ActionClient(self, ArmPreset, '/arm_preset', callback_group=callback_group)
+        self._gripper_client = self.create_client(SetGripper, self._gripper_service, callback_group=callback_group)
+        for msg_type, topic, callback in (
+            (Image, self._color_topic, self._color_cb),
+            (Image, self._depth_topic, self._depth_cb),
+            (CameraInfo, self._depth_info_topic, self._info_cb),
+        ):
+            self.create_subscription(msg_type, topic, callback, 10, callback_group=callback_group)
 
     def _param(self, name, default):
         self.declare_parameter(name, default)
@@ -105,12 +78,8 @@ class VisionGraspNode(Node):
     def _load_config(self):
         self._model_path = str(self._param('model_path', ''))
         self._model_device = self._param('model_device', 'CPU')
-        self._class_names = list(
-            self._param('class_names', DEFAULT_CLASS_NAMES)
-        )
-        self._confidence_threshold = float(
-            self._param('confidence_threshold', 0.55)
-        )
+        self._class_names = list(self._param('class_names', DEFAULT_CLASS_NAMES))
+        self._confidence_threshold = float(self._param('confidence_threshold', 0.55))
         self._iou_threshold = float(self._param('iou_threshold', 0.65))
         self._mask_threshold = float(self._param('mask_threshold', 0.5))
         self._color_topic = self._param('color_topic', '/camera/camera/color/image_raw',)
@@ -126,12 +95,11 @@ class VisionGraspNode(Node):
         model_path = Path(self._model_path) if self._model_path else (
             Path(__file__).parent / 'models' / 'best.xml'
         )
-        names = {index: name for index, name in enumerate(self._class_names)}
         try:
-            model = YOLOSegOpenVINO(
+            return YOLOSegOpenVINO(
                 model_path,
                 device=self._model_device,
-                names=names,
+                names={index: name for index, name in enumerate(self._class_names)},
                 conf_thres=self._confidence_threshold,
                 iou_thres=self._iou_threshold,
             )
@@ -139,24 +107,13 @@ class VisionGraspNode(Node):
             self.get_logger().error(f'OpenVINO model load failed: {exc}')
             return None
 
-        return model
-
     def _info_cb(self, msg):
-        intrinsics = (
-            float(msg.k[0]),
-            float(msg.k[4]),
-            float(msg.k[2]),
-            float(msg.k[5]),
-        )
         with self._state_lock:
-            self._intrinsics = intrinsics
+            self._intrinsics = (float(msg.k[0]), float(msg.k[4]), float(msg.k[2]), float(msg.k[5]))
 
     def _depth_cb(self, msg):
         try:
-            depth = self._bridge.imgmsg_to_cv2(
-                msg,
-                desired_encoding='passthrough',
-            )
+            depth = self._bridge.imgmsg_to_cv2(msg, desired_encoding='passthrough')
         except Exception as exc:
             self.get_logger().error(f'Depth convert failed: {exc}')
             return
@@ -166,9 +123,7 @@ class VisionGraspNode(Node):
             self._depth_encoding = msg.encoding
 
     def _color_cb(self, msg):
-        if self._model is None:
-            return
-        if not self._target_timeout_elapsed():
+        if self._model is None or not self._target_timeout_elapsed():
             return
         if not self._sequence_lock.acquire(blocking=False):
             return
@@ -189,21 +144,13 @@ class VisionGraspNode(Node):
                 return
 
             try:
-                cv_img = self._bridge.imgmsg_to_cv2(
-                    msg,
-                    desired_encoding='bgr8',
-                )
+                cv_img = self._bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8')
             except Exception as exc:
                 self.get_logger().error(f'Color convert failed: {exc}')
                 return
 
             try:
-                target = self._select_target(
-                    cv_img,
-                    depth,
-                    depth_encoding,
-                    intrinsics,
-                )
+                target = self._select_target(cv_img, depth, depth_encoding, intrinsics)
             except Exception as exc:
                 self.get_logger().warning(f'Vision frame skipped: {exc}')
                 return
@@ -213,12 +160,11 @@ class VisionGraspNode(Node):
 
             with self._state_lock:
                 self._last_target_time = self.get_clock().now()
-            thread = threading.Thread(
+            threading.Thread(
                 target=self._run_grasp_sequence,
                 args=(target,),
                 daemon=True,
-            )
-            thread.start()
+            ).start()
             sequence_locked = False
         finally:
             if vision_locked:
@@ -231,37 +177,25 @@ class VisionGraspNode(Node):
             last_target_time = self._last_target_time
         if last_target_time is None:
             return True
-        now = self.get_clock().now()
-        elapsed_ns = (now - last_target_time).nanoseconds
-        return elapsed_ns >= TARGET_TIMEOUT_SEC * 1e9
+        return (self.get_clock().now() - last_target_time).nanoseconds >= TARGET_TIMEOUT_SEC * 1e9
 
     def _select_target(self, cv_img, depth, depth_encoding, intrinsics):
         targets = self._model.detect_targets(
-            cv_img,
-            depth,
-            intrinsics,
-            encoding=depth_encoding,
-            conf_thres=self._confidence_threshold,
-            mask_thres=self._mask_threshold,
+            cv_img, depth, intrinsics, encoding=depth_encoding,
+            conf_thres=self._confidence_threshold, mask_thres=self._mask_threshold,
         )
         if not targets:
             return None
 
-        raw_target = targets[0]
-        tf_target = self._camera_target_to_arm_target(raw_target)
+        tf_target = self._camera_target_to_arm_target(targets[0])
         if tf_target is None:
             return None
         self.get_logger().info(
             f"{tf_target['class_name']}: "
-            f"camera_distance={tf_target['camera_distance_cm']:.1f}cm "
-            f"arm=({tf_target['object_arm_cm'][0]:.1f}, "
-            f"{tf_target['object_arm_cm'][1]:.1f}, "
-            f"{tf_target['object_arm_cm'][2]:.1f})cm "
             f"target=({tf_target['target_cm'][0]:.1f}, "
             f"{tf_target['target_cm'][1]:.1f}, "
             f"{tf_target['target_cm'][2]:.1f})cm "
             f"best_angle={tf_target['best_angle_deg']:.1f} deg "
-            f"gripper_rotation={tf_target['gripper_rotation_deg']:.1f} deg"
         )
         return tf_target
 
@@ -270,45 +204,22 @@ class VisionGraspNode(Node):
         if transform is None:
             return None
         rotation, translation, camera_pitch_deg = transform
+        class_name = target['class_name']
+        points_cam = target.get('points_cam')
         object_arm_m = translation + rotation @ target['point_cam_m']
-        best_angle_deg, _axis_angle, _is_upright = get_ik_pitch(
-            target['class_name'],
-            target.get('points_cam'),
-            camera_pitch_deg,
-            target.get('mask'),
-            target.get('depth_m'),
-        )
-        if target['class_name'] == 'paper':
-            gripper_rotation_deg = 0.0
-        else:
-            gripper_rotation_deg = _get_axis_angle(
-                target.get('points_cam'),
-                camera_pitch_deg,
-            )
-        target_cm = self._target_cm_for_object(
-            object_arm_m,
-            target['class_name'],
-        )
+        best_angle_deg = get_ik_pitch(
+            class_name, points_cam, camera_pitch_deg, target.get('mask'), target.get('depth_m'),
+        )[0]
         return {
-            'class_name': target['class_name'],
-            'object_arm_cm': object_arm_m * 100.0,
-            'target_cm': target_cm,
-            'camera_distance_cm': float(
-                np.linalg.norm(target['point_cam_m']) * 100.0
-            ),
+            'class_name': class_name,
+            'target_cm': self._target_cm_for_object(object_arm_m, class_name),
             'best_angle_deg': best_angle_deg,
-            'gripper_rotation_deg': gripper_rotation_deg,
-            'point_cam_m': target['point_cam_m'],
+            'gripper_rotation_deg': 0.0 if class_name == 'paper' else _get_axis_angle(points_cam, camera_pitch_deg),
         }
 
     def _lookup_tf_camera_transform(self):
         try:
-            transform = self._tf_buffer.lookup_transform(
-                self._base_frame,
-                self._camera_frame,
-                Time(),
-                timeout=Duration(seconds=0.05),
-            )
+            transform = self._tf_buffer.lookup_transform(self._base_frame, self._camera_frame, Time(), timeout=Duration(seconds=0.05))
         except TransformException as exc:
             self._warn_tf_failure(exc)
             return None
@@ -318,9 +229,7 @@ class VisionGraspNode(Node):
         t = transform.transform.translation
         translation = np.array([t.x, t.y, t.z], dtype=float)
         forward = rotation[:, 2]
-        camera_pitch_deg = math.degrees(
-            math.atan2(forward[2], math.hypot(forward[0], forward[1]))
-        )
+        camera_pitch_deg = math.degrees(math.atan2(forward[2], math.hypot(forward[0], forward[1])))
         return rotation, translation, camera_pitch_deg
 
     def _warn_tf_failure(self, exc):
@@ -328,10 +237,7 @@ class VisionGraspNode(Node):
         if now - self._last_tf_warning < 5.0:
             return
         self._last_tf_warning = now
-        self.get_logger().warning(
-            f'Camera TF unavailable ({self._base_frame} <- '
-            f'{self._camera_frame}): {exc}'
-        )
+        self.get_logger().warning(f'Camera TF unavailable ({self._base_frame} <- {self._camera_frame}): {exc}')
 
     @staticmethod
     def _rotation_from_quaternion(x, y, z, w):
@@ -340,64 +246,28 @@ class VisionGraspNode(Node):
             return np.identity(3)
         x, y, z, w = x / norm, y / norm, z / norm, w / norm
         return np.array([
-            [
-                1.0 - 2.0 * (y * y + z * z),
-                2.0 * (x * y - z * w),
-                2.0 * (x * z + y * w),
-            ],
-            [
-                2.0 * (x * y + z * w),
-                1.0 - 2.0 * (x * x + z * z),
-                2.0 * (y * z - x * w),
-            ],
-            [
-                2.0 * (x * z - y * w),
-                2.0 * (y * z + x * w),
-                1.0 - 2.0 * (x * x + y * y),
-            ],
+            [1.0 - 2.0 * (y * y + z * z), 2.0 * (x * y - z * w), 2.0 * (x * z + y * w)],
+            [2.0 * (x * y + z * w), 1.0 - 2.0 * (x * x + z * z), 2.0 * (y * z - x * w)],
+            [2.0 * (x * z - y * w), 2.0 * (y * z + x * w), 1.0 - 2.0 * (x * x + y * y)],
         ])
 
-    def _target_cm_for_object(
-        self,
-        object_arm_m,
-        class_name,
-    ):
-        target_cm = object_arm_m * 100.0
-        offsets_cm = {
-            'bottle': np.array([0.0, 0.0, -9.0], dtype=float),
-            'charger': np.array([1.5, 0.0, -4.0], dtype=float),
-            'paper': np.array([1.5, 0.0, -4.0], dtype=float),
-            'pen': np.array([0.0, 0.0, -3.5], dtype=float),
-            'usb': np.array([0.0, 0.0, -3.5], dtype=float),
-            'yan': np.array([0.0, 0.0, -3.5], dtype=float),
-        }
-        target_cm += offsets_cm.get(class_name,np.array([0.0, 0.0, -3.5], dtype=float),)
-        return target_cm
+    def _target_cm_for_object(self, object_arm_m, class_name):
+        return object_arm_m * 100.0 + np.array(TARGET_OFFSETS_CM.get(class_name, (0.0, 0.0, -3.5)), dtype=float)
 
     def _run_grasp_sequence(self, target):
         try:
             class_name = target['class_name']
-
             if self._call_gripper(1.0, GRIPPER_DURATION_MS):
                 time.sleep(GRIPPER_WAIT_SEC)
-
             if not self._send_arm_target(target):
                 return
-
-            close_ratio = gripper_close_open_ratio(class_name)
-            if not self._call_gripper(close_ratio, GRIPPER_DURATION_MS):
+            if not self._call_gripper(gripper_close_open_ratio(class_name), GRIPPER_DURATION_MS):
                 return
-
             time.sleep(GRIPPER_WAIT_SEC)
-
-            bucket_preset = self._bucket_preset_for_class(class_name)
-            if not self._send_arm_preset(bucket_preset):
+            if not self._send_arm_preset(self._bucket_preset_for_class(class_name)):
                 return
-
             self._call_gripper(1.0, GRIPPER_DURATION_MS)
-
             time.sleep(GRIPPER_WAIT_SEC)
-
             self._send_arm_preset(ARM_CENTER_PRESET)
         except Exception as exc:
             self.get_logger().error(f'Grasp sequence failed: {exc}')
@@ -410,109 +280,57 @@ class VisionGraspNode(Node):
     def _bucket_preset_for_class(class_name):
         if class_name in LEFT_BUCKET_CLASSES:
             return ArmPreset.Goal.LEFT_BUCKET
-        if class_name in RIGHT_BUCKET_CLASSES:
-            return ArmPreset.Goal.RIGHT_BUCKET
-        return None
+        return ArmPreset.Goal.RIGHT_BUCKET if class_name in RIGHT_BUCKET_CLASSES else None
 
     def _send_arm_target(self, target):
-        if not self._arm_action.wait_for_server(timeout_sec=5.0):
-            self.get_logger().error(f'Action server not ready')
-            return False
-
         goal = ArmTarget.Goal()
-        goal.x = float(target['target_cm'][0])
-        goal.y = float(target['target_cm'][1])
-        goal.z = float(target['target_cm'][2])
+        goal.x, goal.y, goal.z = map(float, target['target_cm'])
         goal.duration = self._arm_goal_duration
         goal.end_angle = float(target['best_angle_deg'])
         goal.gripper_rotation = float(target['gripper_rotation_deg'])
-        return self._send_arm_goal(goal)
-
-    def _send_arm_goal(self, goal):
-        send_future = self._arm_action.send_goal_async(goal)
-        goal_handle = self._wait_for_future(send_future, 5.0)
-        if goal_handle is None or not goal_handle.accepted:
-            self.get_logger().warning('Arm target rejected')
-            return False
-
-        result_future = goal_handle.get_result_async()
-        wrapped = self._wait_for_future(result_future, ACTION_TIMEOUT_SEC)
-        if wrapped is None:
-            self.get_logger().error('Arm target timed out')
-            return False
-
-        result = wrapped.result
-        if not result.success:
-            self.get_logger().warning('Arm target failed')
-            return False
-
-        return True
+        return self._send_goal(self._arm_action, goal, ACTION_TIMEOUT_SEC, 'Arm target')
 
     def _send_arm_preset(self, action_type):
-        if not self._arm_preset_action.wait_for_server(timeout_sec=5.0):
-            self.get_logger().warning(f'Arm preset action server not ready')
-            return False
-
         goal = ArmPreset.Goal()
         goal.action_type = int(action_type)
-        send_future = self._arm_preset_action.send_goal_async(goal)
-        goal_handle = self._wait_for_future(send_future, 5.0)
-        if goal_handle is None or not goal_handle.accepted:
-            self.get_logger().warning(
-                f'Arm preset rejected: action_type={action_type}'
-            )
+        return self._send_goal(self._arm_preset_action, goal, self._arm_preset_timeout, 'Arm preset')
+
+    def _send_goal(self, client, goal, timeout_sec, label):
+        if not client.wait_for_server(timeout_sec=5.0):
+            self.get_logger().warning(f'{label} server not ready')
             return False
 
-        result_future = goal_handle.get_result_async()
-        wrapped = self._wait_for_future(
-            result_future,
-            self._arm_preset_timeout,
-        )
+        goal_handle = self._wait_for_future(client.send_goal_async(goal), 5.0)
+        if goal_handle is None or not goal_handle.accepted:
+            self.get_logger().warning(f'{label} rejected')
+            return False
+
+        wrapped = self._wait_for_future(goal_handle.get_result_async(), timeout_sec)
         if wrapped is None:
-            self.get_logger().warning(
-                f'Arm preset timed out: action_type={action_type}'
-            )
+            self.get_logger().warning(f'{label} timed out')
             return False
 
         result = wrapped.result
         if not result.success:
-            self.get_logger().warning(
-                f'Arm preset failed: action_type={action_type}, '
-                f'message={result.message}'
-            )
+            self.get_logger().warning(f'{label} failed')
             return False
-
-        self.get_logger().info(
-            f'Arm preset complete: action_type={action_type}'
-        )
         return True
 
     def _call_gripper(self, open_ratio, duration_ms):
         if not self._gripper_client.wait_for_service(timeout_sec=2.0):
-            self.get_logger().warning(
-                f'Gripper service not ready: {self._gripper_service}'
-            )
+            self.get_logger().warning(f'Gripper service not ready: {self._gripper_service}')
             return False
 
         request = SetGripper.Request()
         request.open_ratio = float(max(0.0, min(1.0, open_ratio)))
         request.duration_ms = float(duration_ms)
-        self.get_logger().info(
-            f'Calling gripper service {self._gripper_service}: '
-            f'open_ratio={request.open_ratio:.2f}, '
-            f'duration_ms={request.duration_ms:.0f}'
-        )
-        future = self._gripper_client.call_async(request)
-        response = self._wait_for_future(future, 2.0)
+        response = self._wait_for_future(self._gripper_client.call_async(request), 2.0)
         if response is None:
             self.get_logger().warning('Gripper command timed out')
             return False
         if not response.success:
-            self.get_logger().warning(
-                f'Gripper command failed: {response.message}'
-            )
+            self.get_logger().warning(f'Gripper command failed: {response.message}')
             return False
-        self.get_logger().info('Gripper command accepted')
         return True
 
     def _wait_for_future(self, future, timeout_sec):
