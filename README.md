@@ -4,13 +4,31 @@
 
 项目包含四轮移动底盘、前部夹取机械臂、左右分类桶、后部升降倾倒机构、MoveIt、Nav2、Gazebo 仿真、硬件桥接、覆盖路径任务和传感器驱动相关包。软件既支持 Gazebo 仿真模式，也支持连接真实硬件的 custom 模式。
 
-> 项目仍在开发和完善中，硬件结构、控制策略、任务流程和配套仓库会持续更新。
+> 项目仍在参赛和开发阶段，硬件结构、控制策略、任务流程和配套仓库会持续更新。部分下位机固件、机械设计文件和前后端系统将在作品提交后陆续开源。
 
 ## 实机照片
 
 ![机器人整体](docs/images/robot-overview.jpg)
 
 ![后部升降倾倒结构](docs/images/lift-dump-structure.jpg)
+
+## 功能演示
+
+### MoveIt 拖动控制
+
+![MoveIt 拖动控制](docs/gifs/moveit-drag-control.gif)
+
+### MoveIt 命令控制
+
+![MoveIt 命令控制](docs/gifs/moveit-command-control.gif)
+
+### 框选区域导航
+
+![框选区域导航](docs/gifs/coverage-area-navigation.gif)
+
+### 深度摄像头融合避障
+
+![深度摄像头融合避障](docs/gifs/depth-camera-obstacle-avoidance.gif)
 
 ## 真实硬件与任务流程
 
