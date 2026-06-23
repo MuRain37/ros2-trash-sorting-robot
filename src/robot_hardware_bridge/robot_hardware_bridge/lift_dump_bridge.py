@@ -32,13 +32,13 @@ GRIPPER_ROTATE_DIRECTION = 1.0       # 转动方向（1.0 正向, -1.0 反向）
 # 9 号舵机：夹爪开度 (Gripper Open/Close)
 LIFT_GRIPPER_SERVO_ID = 9
 LIFT_GRIPPER_OPEN_RAW = 500.0       # 夹爪全开时的 raw 值
-LIFT_GRIPPER_CLOSE_RAW = 420.0       # 夹爪扣紧时的 raw 值
+LIFT_GRIPPER_CLOSE_RAW = 585.0       # 夹爪扣紧时的 raw 值
 
 # 舵机通用默认值
 SERVO_DURATION_MS = 100.0            # 默认运动时长（毫秒）
 DUMP_SERVO_DURATION_MS = 2000.0       # 倒垃圾流程舵机运动时长
 DUMP_GRIPPER_DURATION_MS = 1000.0     # 倒垃圾流程夹爪运动时长
-DUMP_STEPPER_WAIT_SEC = 2.0          # 步进电机开环动作等待时间
+DUMP_STEPPER_WAIT_SEC = 2.8          # 步进电机开环动作等待时间
 DUMP_SETTLE_SEC = 0.1                # 每步动作后的额外稳定时间
 
 SERVO_CENTER = 500.0                         # 舵机中位 raw 值
@@ -46,8 +46,8 @@ SERVO_RAW_MIN = 0.0                          # 舵机 raw 最小值
 SERVO_RAW_MAX = 1000.0                       # 舵机 raw 最大值
 
 # 倒垃圾流程默认 raw 位置。步进电机是绝对步数，现场需按机构行程标定。
-DUMP_BUCKET_1_RAW = 100.0
-DUMP_BUCKET_2_RAW = 900.0
+DUMP_BUCKET_1_RAW = 883.0
+DUMP_BUCKET_2_RAW = 110.0
 
 
 def clamp_servo_raw(position):
@@ -249,7 +249,22 @@ class LiftDumpBridge:
 
     def _on_dump_trash_command(self, request, response):
         """接收垃圾桶编号，执行完整升降-夹取-倾倒流程."""
-        bucket_id = request.bucket_id
+        try:
+            bucket_id = self._normalize_bucket_id(request.bucket_id)
+        except ValueError as e:
+            response.success = False
+            response.message = str(e)
+            return response
+
+        if not self._cmd_callback:
+            response.success = False
+            response.message = 'command callback unavailable'
+            return response
+
+        if not self._dump_lock.acquire(blocking=False):
+            response.success = False
+            response.message = 'dump trash sequence is already running'
+            return response
 
         try:
             self._execute_dump_trash_sequence(bucket_id)
@@ -268,21 +283,23 @@ class LiftDumpBridge:
         """按固定顺序执行倒垃圾动作."""
         bucket_raw = self._bucket_raw(bucket_id)
 
+        self._move_lift(665.0)
         self._move_horizontal(bucket_raw)
-        self._move_lift(-250.0)
-        self._move_gripper(520.0)
-        self._move_lift(0.0)
+        self._move_lift(75.0)
+        self._move_gripper(LIFT_GRIPPER_CLOSE_RAW)
+        self._move_lift(665.0)
 
         self._move_horizontal(500.0)
         self._move_gripper_rotation(0.0)
         self._move_gripper_rotation(500.0)
 
         self._move_horizontal(bucket_raw)
-        self._move_lift(-250.0)
-        self._move_gripper(0.0)
+        self._move_lift(75.0)
+        self._move_gripper(LIFT_GRIPPER_OPEN_RAW)
 
-        self._move_lift(0.0)
+        self._move_lift(665.0)
         self._move_horizontal(500.0)
+        self._move_lift(75.0)
 
     def _send_stepper_target(self, target_steps):
         """发送步进电机目标到下位机一次."""
@@ -343,6 +360,12 @@ class LiftDumpBridge:
         wait_sec = max(0.0, self._dump_stepper_wait_sec)
         if wait_sec > 0.0:
             self._sleep(wait_sec)
+
+    def _normalize_bucket_id(self, bucket_id):
+        bucket_id = int(bucket_id)
+        if bucket_id not in (1, 2):
+            raise ValueError(f'bucket_id must be 1 or 2: {bucket_id}')
+        return bucket_id
 
     def _bucket_raw(self, bucket_id):
         if bucket_id == 1:

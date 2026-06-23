@@ -2,10 +2,10 @@
 
 initial_positions:
   arm_base_joint: 0.0
-  arm_shoulder_joint: -1.0471975511965976
-  arm_elbow_joint: 2.0943951023931953
+  arm_shoulder_joint: -0.38125
+  arm_elbow_joint: 0.9625
+  arm_wrist_joint: 1.80
   arm_tool_rotate_joint: 0.0
-  arm_wrist_joint: 1.4660765716752369
   virtual_tool_pitch_joint: 0
   virtual_tool_roll_joint: 0
   virtual_tool_yaw_joint: 0

@@ -257,8 +257,7 @@ class VisionGraspNode(Node):
     def _run_grasp_sequence(self, target):
         try:
             class_name = target['class_name']
-            if self._call_gripper(1.0, GRIPPER_DURATION_MS):
-                time.sleep(GRIPPER_WAIT_SEC)
+            self._call_gripper(1.0, GRIPPER_DURATION_MS)
             if not self._send_arm_target(target):
                 return
             if not self._call_gripper(gripper_close_open_ratio(class_name), GRIPPER_DURATION_MS):

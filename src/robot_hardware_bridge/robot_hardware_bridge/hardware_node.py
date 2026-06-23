@@ -12,17 +12,9 @@ from rclpy.parameter import Parameter
 
 from robot_hardware_bridge.arm_bridge import ArmBridge
 from robot_hardware_bridge.lift_dump_bridge import (
-    DEFAULT_DUMP_BUCKET_1_RAW,
-    DEFAULT_DUMP_BUCKET_2_RAW,
-    DEFAULT_DUMP_GRIPPER_DURATION_MS,
-    DEFAULT_DUMP_GRIPPER_ROTATION_DUMP_RAW,
-    DEFAULT_DUMP_GRIPPER_ROTATION_HOME_RAW,
-    DEFAULT_DUMP_HORIZONTAL_HOME_RAW,
-    DEFAULT_DUMP_LIFT_LOWERED_STEPS,
-    DEFAULT_DUMP_LIFT_RAISED_STEPS,
-    DEFAULT_DUMP_SERVO_DURATION_MS,
-    DEFAULT_DUMP_SETTLE_SEC,
-    DEFAULT_DUMP_STEPPER_WAIT_SEC,
+    DUMP_GRIPPER_DURATION_MS,
+    DUMP_SETTLE_SEC,
+    DUMP_STEPPER_WAIT_SEC,
     LiftDumpBridge,
 )
 from robot_hardware_bridge.motor_bridge import MotorBridge
@@ -59,46 +51,16 @@ class HardwareNode(Node):
         self.declare_parameter('arm_servo_send_rate', 10.0)
         # 舵机运动完成时间（ms）
         self.declare_parameter('arm_servo_duration_ms', 100.0)
-        # 倒垃圾流程参数：舵机 raw 位置、步进电机目标步数和开环等待
-        self.declare_parameter(
-            'dump_servo_duration_ms',
-            DEFAULT_DUMP_SERVO_DURATION_MS,
-        )
+        # 倒垃圾流程参数：夹爪时长、步进电机开环等待和稳定等待
         self.declare_parameter(
             'dump_gripper_duration_ms',
-            DEFAULT_DUMP_GRIPPER_DURATION_MS,
+            DUMP_GRIPPER_DURATION_MS,
         )
         self.declare_parameter(
             'dump_stepper_wait_sec',
-            DEFAULT_DUMP_STEPPER_WAIT_SEC,
+            DUMP_STEPPER_WAIT_SEC,
         )
-        self.declare_parameter('dump_settle_sec', DEFAULT_DUMP_SETTLE_SEC)
-        self.declare_parameter(
-            'dump_bucket_1_raw', DEFAULT_DUMP_BUCKET_1_RAW
-        )
-        self.declare_parameter(
-            'dump_bucket_2_raw', DEFAULT_DUMP_BUCKET_2_RAW
-        )
-        self.declare_parameter(
-            'dump_horizontal_home_raw',
-            DEFAULT_DUMP_HORIZONTAL_HOME_RAW,
-        )
-        self.declare_parameter(
-            'dump_gripper_rotation_home_raw',
-            DEFAULT_DUMP_GRIPPER_ROTATION_HOME_RAW,
-        )
-        self.declare_parameter(
-            'dump_gripper_rotation_dump_raw',
-            DEFAULT_DUMP_GRIPPER_ROTATION_DUMP_RAW,
-        )
-        self.declare_parameter(
-            'dump_lift_raised_steps',
-            DEFAULT_DUMP_LIFT_RAISED_STEPS,
-        )
-        self.declare_parameter(
-            'dump_lift_lowered_steps',
-            DEFAULT_DUMP_LIFT_LOWERED_STEPS,
-        )
+        self.declare_parameter('dump_settle_sec', DUMP_SETTLE_SEC)
         # 可选参数（dynamic_typing），未设置时回退到 open_loop_control
         optional_parameter = ParameterDescriptor(dynamic_typing=True)
         # 电机开环反馈：True 时直接回传轮速指令
@@ -123,9 +85,6 @@ class HardwareNode(Node):
         arm_servo_duration_ms = float(
             self.get_parameter('arm_servo_duration_ms').value
         )
-        dump_servo_duration_ms = float(
-            self.get_parameter('dump_servo_duration_ms').value
-        )
         dump_gripper_duration_ms = float(
             self.get_parameter('dump_gripper_duration_ms').value
         )
@@ -134,27 +93,6 @@ class HardwareNode(Node):
         )
         dump_settle_sec = float(
             self.get_parameter('dump_settle_sec').value
-        )
-        dump_bucket_1_raw = float(
-            self.get_parameter('dump_bucket_1_raw').value
-        )
-        dump_bucket_2_raw = float(
-            self.get_parameter('dump_bucket_2_raw').value
-        )
-        dump_horizontal_home_raw = float(
-            self.get_parameter('dump_horizontal_home_raw').value
-        )
-        dump_gripper_rotation_home_raw = float(
-            self.get_parameter('dump_gripper_rotation_home_raw').value
-        )
-        dump_gripper_rotation_dump_raw = float(
-            self.get_parameter('dump_gripper_rotation_dump_raw').value
-        )
-        dump_lift_raised_steps = float(
-            self.get_parameter('dump_lift_raised_steps').value
-        )
-        dump_lift_lowered_steps = float(
-            self.get_parameter('dump_lift_lowered_steps').value
         )
         self._debug = debug
 
@@ -196,17 +134,9 @@ class HardwareNode(Node):
         self._lift_dump = LiftDumpBridge(
             self,
             cmd_callback=self._serial.write_frame,
-            dump_servo_duration_ms=dump_servo_duration_ms,
             dump_gripper_duration_ms=dump_gripper_duration_ms,
             dump_stepper_wait_sec=dump_stepper_wait_sec,
             dump_settle_sec=dump_settle_sec,
-            dump_bucket_1_raw=dump_bucket_1_raw,
-            dump_bucket_2_raw=dump_bucket_2_raw,
-            dump_horizontal_home_raw=dump_horizontal_home_raw,
-            dump_gripper_rotation_home_raw=dump_gripper_rotation_home_raw,
-            dump_gripper_rotation_dump_raw=dump_gripper_rotation_dump_raw,
-            dump_lift_raised_steps=dump_lift_raised_steps,
-            dump_lift_lowered_steps=dump_lift_lowered_steps,
         )
 
         # 串口反馈分发器
@@ -225,8 +155,7 @@ class HardwareNode(Node):
             f'arm_open_loop_control: {self._arm_open_loop_control}, '
             f'arm_servo_send_rate: {arm_servo_send_rate}Hz, '
             f'arm_servo_duration_ms: {arm_servo_duration_ms}, '
-            f'dump_lift_lowered_steps: {dump_lift_lowered_steps}, '
-            f'dump_lift_raised_steps: {dump_lift_raised_steps})'
+            f'dump_stepper_wait_sec: {dump_stepper_wait_sec})'
         )
 
     def _optional_bool_parameter(self, name, default_value):
