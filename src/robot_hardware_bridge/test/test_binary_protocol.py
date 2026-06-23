@@ -4,7 +4,12 @@ import threading
 import math
 from pathlib import Path
 
-from robot_interfaces.srv import SetGripper, SetLiftSteps, SetServoAngle
+from robot_interfaces.srv import (
+    DumpTrash,
+    SetGripper,
+    SetLiftSteps,
+    SetServoAngle,
+)
 from std_msgs.msg import Float64MultiArray
 
 
@@ -367,6 +372,12 @@ def make_gripper_request(open_ratio, duration_ms=100.0):
     return request
 
 
+def make_dump_trash_request(bucket_id):
+    request = DumpTrash.Request()
+    request.bucket_id = bucket_id
+    return request
+
+
 def test_lift_dump_bridge_does_not_send_default_targets_on_startup():
     sent = []
     node = FakeNode()
@@ -376,6 +387,14 @@ def test_lift_dump_bridge_does_not_send_default_targets_on_startup():
     ))
 
     assert sent == []
+
+
+def test_lift_dump_bridge_registers_dump_trash_service():
+    node = FakeNode()
+
+    LiftDumpBridge(node, cmd_callback=lambda cmd, payload: None)
+
+    assert 'dump_trash' in node.services
 
 
 def test_lift_dump_bridge_lift_steps_service_sends_stepper_once():
@@ -483,6 +502,118 @@ def test_lift_dump_bridge_gripper_service_sends_servo_once():
     assert [unpack_servo_payload(payload)[3] for cmd, payload in sent] == [
         370
     ]
+
+
+def test_lift_dump_bridge_dump_trash_service_runs_bucket_1_sequence():
+    sent = []
+    node = FakeNode()
+    bridge = LiftDumpBridge(
+        node,
+        cmd_callback=lambda cmd, payload: sent.append((cmd, payload)),
+        dump_stepper_wait_sec=0.0,
+        dump_settle_sec=0.0,
+        sleep_fn=lambda seconds: None,
+    )
+    request = make_dump_trash_request(1)
+
+    result = bridge._on_dump_trash_command(
+        request,
+        DumpTrash.Response(),
+    )
+
+    assert result.success is True
+    assert result.message == 'dump trash sequence completed for bucket 1'
+    assert [cmd for cmd, payload in sent] == [
+        PACKET_CMD_SERVO,
+        PACKET_CMD_SERVO,
+        PACKET_CMD_SERVO,
+        PACKET_CMD_SERVO,
+        PACKET_CMD_STEPPER,
+        PACKET_CMD_SERVO,
+        PACKET_CMD_STEPPER,
+        PACKET_CMD_SERVO,
+        PACKET_CMD_SERVO,
+        PACKET_CMD_SERVO,
+        PACKET_CMD_SERVO,
+        PACKET_CMD_STEPPER,
+        PACKET_CMD_SERVO,
+        PACKET_CMD_STEPPER,
+        PACKET_CMD_SERVO,
+        PACKET_CMD_SERVO,
+        PACKET_CMD_SERVO,
+    ]
+
+    servo_commands = [
+        unpack_servo_payload(payload)
+        for cmd, payload in sent
+        if cmd == PACKET_CMD_SERVO
+    ]
+    stepper_commands = [
+        unpack_stepper_payload(payload)
+        for cmd, payload in sent
+        if cmd == PACKET_CMD_STEPPER
+    ]
+
+    assert [(command[1], command[2]) for command in servo_commands] == [
+        (9, 1000),
+        (8, 500),
+        (7, 500),
+        (7, 100),
+        (9, 520),
+        (7, 500),
+        (8, 0),
+        (8, 500),
+        (7, 100),
+        (9, 1000),
+        (7, 500),
+        (8, 500),
+        (9, 1000),
+    ]
+    assert stepper_commands == [-250.0, 0.0, -250.0, 0.0]
+
+
+def test_lift_dump_bridge_dump_trash_service_uses_bucket_2_position():
+    sent = []
+    node = FakeNode()
+    bridge = LiftDumpBridge(
+        node,
+        cmd_callback=lambda cmd, payload: sent.append((cmd, payload)),
+        dump_stepper_wait_sec=0.0,
+        dump_settle_sec=0.0,
+        sleep_fn=lambda seconds: None,
+    )
+
+    result = bridge._on_dump_trash_command(
+        make_dump_trash_request(2),
+        DumpTrash.Response(),
+    )
+
+    servo_positions = [
+        (unpack_servo_payload(payload)[1], unpack_servo_payload(payload)[2])
+        for cmd, payload in sent
+        if cmd == PACKET_CMD_SERVO
+    ]
+    assert result.success is True
+    assert (7, 900) in servo_positions
+    assert (7, 100) not in servo_positions
+
+
+def test_lift_dump_bridge_dump_trash_service_rejects_invalid_bucket():
+    sent = []
+    node = FakeNode()
+    bridge = LiftDumpBridge(
+        node,
+        cmd_callback=lambda cmd, payload: sent.append((cmd, payload)),
+    )
+
+    result = bridge._on_dump_trash_command(
+        make_dump_trash_request(3),
+        DumpTrash.Response(),
+    )
+
+    assert result.success is False
+    assert result.message == 'bucket_id must be 1 or 2: 3'
+    assert sent == []
 
 
 def test_lift_dump_bridge_rejects_invalid_stepper_target():

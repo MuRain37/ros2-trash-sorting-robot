@@ -1,0 +1,4 @@
+uint8 bucket_id
+---
+bool success
+string message

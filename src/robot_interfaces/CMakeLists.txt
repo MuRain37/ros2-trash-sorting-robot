@@ -10,6 +10,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "action/ExecuteCoveragePath.action"
   "srv/AddCoverageRectangle.srv"
   "srv/GenerateCoveragePath.srv"
+  "srv/DumpTrash.srv"
   "srv/SetLiftSteps.srv"
   "srv/SetGripper.srv"
   "srv/SetServoAngle.srv"

@@ -1,8 +1,15 @@
 """升降-倾倒结构桥接模块：步进电机与三路舵机的开环控制."""
 
 import math
+import threading
+import time
 
-from robot_interfaces.srv import SetGripper, SetLiftSteps, SetServoAngle
+from robot_interfaces.srv import (
+    DumpTrash,
+    SetGripper,
+    SetLiftSteps,
+    SetServoAngle,
+)
 
 from robot_hardware_bridge.packet_protocol import (
     PACKET_CMD_SERVO,
@@ -13,26 +20,34 @@ from robot_hardware_bridge.packet_protocol import (
 
 
 # 7 号舵机：水平旋转 (Horizontal Rotation)
-DEFAULT_HORIZONTAL_SERVO_ID = 7
-DEFAULT_HORIZONTAL_MAX_DEGREES = 180.0       # 最大转动角度（度）
-DEFAULT_HORIZONTAL_DIRECTION = 1.0           # 转动方向（1.0 正向, -1.0 反向）
+HORIZONTAL_SERVO_ID = 7
+HORIZONTAL_MAX_DEGREES = 180.0       # 最大转动角度（度）
+HORIZONTAL_DIRECTION = 1.0           # 转动方向（1.0 正向, -1.0 反向）
 
 # 8 号舵机：夹爪旋转 (Gripper Rotation)
-DEFAULT_GRIPPER_ROTATE_SERVO_ID = 8
-DEFAULT_GRIPPER_ROTATE_MAX_DEGREES = 180.0   # 最大转动角度（度）
-DEFAULT_GRIPPER_ROTATE_DIRECTION = 1.0       # 转动方向（1.0 正向, -1.0 反向）
+GRIPPER_ROTATE_SERVO_ID = 8
+GRIPPER_ROTATE_MAX_DEGREES = 180.0   # 最大转动角度（度）
+GRIPPER_ROTATE_DIRECTION = 1.0       # 转动方向（1.0 正向, -1.0 反向）
 
 # 9 号舵机：夹爪开度 (Gripper Open/Close)
-DEFAULT_LIFT_GRIPPER_SERVO_ID = 9
-DEFAULT_LIFT_GRIPPER_OPEN_RAW = 400.0        # 夹爪全开时的 raw 值
-DEFAULT_LIFT_GRIPPER_CLOSE_RAW = 640.0       # 夹爪全闭时的 raw 值
+LIFT_GRIPPER_SERVO_ID = 9
+LIFT_GRIPPER_OPEN_RAW = 500.0       # 夹爪全开时的 raw 值
+LIFT_GRIPPER_CLOSE_RAW = 420.0       # 夹爪扣紧时的 raw 值
 
 # 舵机通用默认值
-DEFAULT_SERVO_DURATION_MS = 100.0            # 默认运动时长（毫秒）
+SERVO_DURATION_MS = 100.0            # 默认运动时长（毫秒）
+DUMP_SERVO_DURATION_MS = 2000.0       # 倒垃圾流程舵机运动时长
+DUMP_GRIPPER_DURATION_MS = 1000.0     # 倒垃圾流程夹爪运动时长
+DUMP_STEPPER_WAIT_SEC = 2.0          # 步进电机开环动作等待时间
+DUMP_SETTLE_SEC = 0.1                # 每步动作后的额外稳定时间
 
 SERVO_CENTER = 500.0                         # 舵机中位 raw 值
 SERVO_RAW_MIN = 0.0                          # 舵机 raw 最小值
 SERVO_RAW_MAX = 1000.0                       # 舵机 raw 最大值
+
+# 倒垃圾流程默认 raw 位置。步进电机是绝对步数，现场需按机构行程标定。
+DUMP_BUCKET_1_RAW = 100.0
+DUMP_BUCKET_2_RAW = 900.0
 
 
 def clamp_servo_raw(position):
@@ -41,8 +56,8 @@ def clamp_servo_raw(position):
 
 
 def angle_to_servo_raw(value, max_degrees, direction):
-    """角度（度）→ 舵机原始位置值."""
-    degrees = float(value)
+    """角度（弧度）→ 舵机原始位置值."""
+    degrees = math.degrees(float(value))
     if not -max_degrees <= degrees <= max_degrees:
         raise ValueError(
             f'angle out of range: {degrees} not in '
@@ -61,8 +76,8 @@ def gripper_open_ratio_to_servo_raw(open_ratio):
             f'gripper open ratio out of range: {open_ratio} '
             'not in [0.0, 1.0]'
         )
-    return DEFAULT_LIFT_GRIPPER_CLOSE_RAW + open_ratio * (
-        DEFAULT_LIFT_GRIPPER_OPEN_RAW - DEFAULT_LIFT_GRIPPER_CLOSE_RAW
+    return LIFT_GRIPPER_CLOSE_RAW + open_ratio * (
+        LIFT_GRIPPER_OPEN_RAW - LIFT_GRIPPER_CLOSE_RAW
     )
 
 
@@ -76,17 +91,27 @@ class LiftDumpBridge:
         horizontal_rotation_service='set_lift_horizontal_rotation',
         gripper_rotation_service='set_lift_gripper_rotation',
         gripper_service='set_lift_gripper',
+        dump_trash_service='dump_trash',
         cmd_callback=None,
-        servo_duration_ms=DEFAULT_SERVO_DURATION_MS,
+        servo_duration_ms=SERVO_DURATION_MS,
+        dump_gripper_duration_ms=DUMP_GRIPPER_DURATION_MS,
+        dump_stepper_wait_sec=DUMP_STEPPER_WAIT_SEC,
+        dump_settle_sec=DUMP_SETTLE_SEC,
+        sleep_fn=time.sleep,
     ):
         self._node = node
         self._cmd_callback = cmd_callback
         self._servo_duration_ms = float(servo_duration_ms)
+        self._dump_gripper_duration_ms = float(dump_gripper_duration_ms)
+        self._dump_stepper_wait_sec = float(dump_stepper_wait_sec)
+        self._dump_settle_sec = float(dump_settle_sec)
+        self._sleep = sleep_fn
+        self._dump_lock = threading.Lock()
 
         self._target_steps = 0.0
         self._horizontal_servo_raw = SERVO_CENTER
         self._gripper_rotation_servo_raw = SERVO_CENTER
-        self._gripper_servo_raw = DEFAULT_LIFT_GRIPPER_CLOSE_RAW
+        self._gripper_servo_raw = LIFT_GRIPPER_OPEN_RAW
 
         self._lift_steps_service = node.create_service(
             SetLiftSteps,
@@ -107,6 +132,11 @@ class LiftDumpBridge:
             SetGripper,
             gripper_service,
             self._on_gripper_command,
+        )
+        self._dump_trash_service = node.create_service(
+            DumpTrash,
+            dump_trash_service,
+            self._on_dump_trash_command,
         )
 
     def _on_lift_steps_command(self, request, response):
@@ -133,8 +163,8 @@ class LiftDumpBridge:
         try:
             horizontal_raw = angle_to_servo_raw(
                 request.angle,
-                DEFAULT_HORIZONTAL_MAX_DEGREES,
-                DEFAULT_HORIZONTAL_DIRECTION,
+                HORIZONTAL_MAX_DEGREES,
+                HORIZONTAL_DIRECTION,
             )
             duration_ms = float(request.duration_ms)
             if duration_ms < 0.0:
@@ -145,7 +175,7 @@ class LiftDumpBridge:
             return response
 
         if not self._send_servo_target(
-            DEFAULT_HORIZONTAL_SERVO_ID,
+            HORIZONTAL_SERVO_ID,
             horizontal_raw,
             duration_ms,
         ):
@@ -164,8 +194,8 @@ class LiftDumpBridge:
         try:
             gripper_rotation_raw = angle_to_servo_raw(
                 request.angle,
-                DEFAULT_GRIPPER_ROTATE_MAX_DEGREES,
-                DEFAULT_GRIPPER_ROTATE_DIRECTION,
+                GRIPPER_ROTATE_MAX_DEGREES,
+                GRIPPER_ROTATE_DIRECTION,
             )
             duration_ms = float(request.duration_ms)
             if duration_ms < 0.0:
@@ -176,7 +206,7 @@ class LiftDumpBridge:
             return response
 
         if not self._send_servo_target(
-            DEFAULT_GRIPPER_ROTATE_SERVO_ID,
+            GRIPPER_ROTATE_SERVO_ID,
             gripper_rotation_raw,
             duration_ms,
         ):
@@ -203,7 +233,7 @@ class LiftDumpBridge:
             return response
 
         if not self._send_servo_target(
-            DEFAULT_LIFT_GRIPPER_SERVO_ID,
+            LIFT_GRIPPER_SERVO_ID,
             gripper_raw,
             duration_ms,
         ):
@@ -216,6 +246,43 @@ class LiftDumpBridge:
         response.success = True
         response.message = 'lift gripper command accepted'
         return response
+
+    def _on_dump_trash_command(self, request, response):
+        """接收垃圾桶编号，执行完整升降-夹取-倾倒流程."""
+        bucket_id = request.bucket_id
+
+        try:
+            self._execute_dump_trash_sequence(bucket_id)
+        except Exception as e:  # pragma: no cover - defensive ROS callback log
+            response.success = False
+            response.message = f'dump trash sequence failed: {e}'
+            return response
+        finally:
+            self._dump_lock.release()
+
+        response.success = True
+        response.message = (f'dump trash sequence completed for bucket {bucket_id}')
+        return response
+
+    def _execute_dump_trash_sequence(self, bucket_id):
+        """按固定顺序执行倒垃圾动作."""
+        bucket_raw = self._bucket_raw(bucket_id)
+
+        self._move_horizontal(bucket_raw)
+        self._move_lift(-250.0)
+        self._move_gripper(520.0)
+        self._move_lift(0.0)
+
+        self._move_horizontal(500.0)
+        self._move_gripper_rotation(0.0)
+        self._move_gripper_rotation(500.0)
+
+        self._move_horizontal(bucket_raw)
+        self._move_lift(-250.0)
+        self._move_gripper(0.0)
+
+        self._move_lift(0.0)
+        self._move_horizontal(500.0)
 
     def _send_stepper_target(self, target_steps):
         """发送步进电机目标到下位机一次."""
@@ -242,3 +309,59 @@ class LiftDumpBridge:
             ),
         )
         return True
+
+    def _move_lift(self, target_steps):
+        """发送步进电机目标并按开环等待时间等待."""
+        self._send_stepper_target(target_steps)
+        self._target_steps = target_steps
+        self._sleep_after_stepper()
+
+    def _move_horizontal(self, raw_position):
+        """移动 7 号水平旋转舵机到 raw 位置."""
+        self._send_servo_target(HORIZONTAL_SERVO_ID,raw_position,DUMP_SERVO_DURATION_MS,)
+        self._horizontal_servo_raw = raw_position
+        self._sleep_after_servo(DUMP_SERVO_DURATION_MS)
+
+    def _move_gripper_rotation(self, raw_position):
+        """移动 8 号倾倒旋转舵机到 raw 位置."""
+        self._send_servo_target(GRIPPER_ROTATE_SERVO_ID,raw_position,DUMP_SERVO_DURATION_MS,)
+        self._gripper_rotation_servo_raw = raw_position
+        self._sleep_after_servo(DUMP_SERVO_DURATION_MS)
+
+    def _move_gripper(self, raw_position):
+        """移动 9 号夹爪开合舵机到 raw 位置."""
+        self._send_servo_target(LIFT_GRIPPER_SERVO_ID,raw_position,DUMP_SERVO_DURATION_MS,)
+        self._gripper_servo_raw = raw_position
+        self._sleep_after_servo(DUMP_SERVO_DURATION_MS)
+
+    def _sleep_after_servo(self, duration_ms):
+        wait_sec = max(0.0, duration_ms / 1000.0) + self._dump_settle_sec
+        if wait_sec > 0.0:
+            self._sleep(wait_sec)
+
+    def _sleep_after_stepper(self):
+        wait_sec = max(0.0, self._dump_stepper_wait_sec)
+        if wait_sec > 0.0:
+            self._sleep(wait_sec)
+
+    def _bucket_raw(self, bucket_id):
+        if bucket_id == 1:
+            return DUMP_BUCKET_1_RAW
+        return DUMP_BUCKET_2_RAW
+
+    def _validate_servo_raw(self, name, value):
+        self._validate_finite(name, value)
+        if not SERVO_RAW_MIN <= value <= SERVO_RAW_MAX:
+            raise ValueError(
+                f'{name} must be in [{SERVO_RAW_MIN}, {SERVO_RAW_MAX}]: '
+                f'{value}'
+            )
+
+    def _validate_finite(self, name, value):
+        if not math.isfinite(value):
+            raise ValueError(f'{name} must be finite: {value}')
+
+    def _validate_non_negative(self, name, value):
+        self._validate_finite(name, value)
+        if value < 0.0:
+            raise ValueError(f'{name} must be >= 0: {value}')
