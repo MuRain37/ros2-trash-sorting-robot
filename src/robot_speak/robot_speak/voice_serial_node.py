@@ -9,10 +9,14 @@ import time
 from ament_index_python.packages import PackageNotFoundError
 from ament_index_python.packages import get_package_share_directory
 import rclpy
+from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from std_msgs.msg import String
 from std_msgs.msg import UInt16
+from std_srvs.srv import Trigger
+
+from robot_interfaces.srv import DumpTrash
 
 from robot_speak.command_map import load_command_map
 from robot_speak.protocol import (
@@ -186,6 +190,18 @@ class VoiceSerialNode(Node):
             10,
         )
 
+        # 服务客户端：清扫垃圾 / 倒垃圾
+        cb_group = ReentrantCallbackGroup()
+        self._grasp_start_client = self.create_client(
+            Trigger, 'vision_grasp/start', callback_group=cb_group,
+        )
+        self._grasp_stop_client = self.create_client(
+            Trigger, 'vision_grasp/stop', callback_group=cb_group,
+        )
+        self._dump_trash_client = self.create_client(
+            DumpTrash, 'dump_trash', callback_group=cb_group,
+        )
+
         self._timer = self.create_timer(
             float(self.get_parameter('read_period_sec').value),
             self._poll_serial,
@@ -284,6 +300,39 @@ class VoiceSerialNode(Node):
         )
         if self._speak_on_recognition:
             self._speaker.speak(command.response, command.name)
+
+        self._on_voice_command(command)
+
+    def _on_voice_command(self, command):
+        """根据语音指令调用对应 ROS 服务."""
+        name = command.name
+        if name == 'clean_trash':
+            self._call_service(self._grasp_start_client, Trigger.Request(), 'Grasp start')
+        elif name == 'stop':
+            self._call_service(self._grasp_stop_client, Trigger.Request(), 'Grasp stop')
+        elif name == 'dump_trash':
+            req = DumpTrash.Request()
+            req.bucket_id = 1
+            self._call_service(self._dump_trash_client, req, 'Dump trash')
+
+    def _call_service(self, client, request, label):
+        """异步调用服务，结果通过日志反馈。"""
+        if not client.wait_for_service(timeout_sec=1.0):
+            self.get_logger().warning(f'{label} service not available')
+            return
+
+        def _do_call():
+            future = client.call_async(request)
+            rclpy.spin_until_future_complete(self, future, timeout_sec=120.0)
+            if future.done() and future.result() is not None:
+                resp = future.result()
+                if resp.success:
+                    self.get_logger().info(f'{label} succeeded: {resp.message}')
+                else:
+                    self.get_logger().warning(f'{label} failed: {resp.message}')
+            else:
+                self.get_logger().warning(f'{label} service call timed out')
+        threading.Thread(target=_do_call, daemon=True).start()
 
     def _publish_unknown(self, frame_hex):
         self._publish_string(self._command_pub, 'unknown')

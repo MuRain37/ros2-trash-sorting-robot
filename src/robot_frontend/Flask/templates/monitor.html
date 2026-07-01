@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+
+{% block title %}监控 - 机器人控制系统{% endblock %}
+
+{% block page_title %}摄像头监控{% endblock %}
+{% block page_subtitle %}实时查看彩色摄像头画面。{% endblock %}
+
+{% block content %}
+<div class="monitor-layout">
+    <section class="card camera-card">
+        <div class="card-header">
+            <span><i class="fas fa-camera me-2"></i>彩色摄像头</span>
+            <span class="status-pill warn" id="color-camera-status">等待画面</span>
+        </div>
+        <div class="card-body p-0">
+            <div class="camera-frame">
+                <img src="/api/camera/stream/color" alt="彩色摄像头画面" crossorigin="anonymous">
+            </div>
+        </div>
+    </section>
+</div>
+{% endblock %}
+
+{% block extra_css %}
+<style>
+    .monitor-layout {
+        max-width: 800px;
+        margin: 0 auto;
+    }
+
+    .camera-frame {
+        position: relative;
+        aspect-ratio: 4 / 3;
+        background: #101615;
+    }
+
+    .camera-frame img {
+        display: block;
+        width: 100%;
+        height: 100%;
+        object-fit: contain;
+    }
+</style>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    async function refreshCameraStatus() {
+        try {
+            const response = await fetch('/api/camera/info');
+            const data = await response.json();
+            const color = data.color || {};
+
+            const colorStatus = document.getElementById('color-camera-status');
+
+            colorStatus.textContent = color.connected ? '已连接' : '等待画面';
+            colorStatus.className = color.connected ? 'status-pill ok' : 'status-pill warn';
+        } catch (error) {
+            showToast('摄像头状态刷新失败', 'error');
+        }
+    }
+
+    refreshCameraStatus();
+    setInterval(refreshCameraStatus, 2000);
+</script>
+{% endblock %}

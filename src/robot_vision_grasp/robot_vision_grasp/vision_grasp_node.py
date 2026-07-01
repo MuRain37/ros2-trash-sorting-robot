@@ -1,4 +1,4 @@
-"""Vision object detection to MoveIt arm target bridge."""
+"""Vision object detection to MoveIt arm target — start/stop service mode."""
 import math
 import threading
 import time
@@ -16,6 +16,7 @@ from robot_hardware_bridge.arm_bridge import DEFAULT_GRIPPER_SERVICE
 from robot_interfaces.action import ArmPreset, ArmTarget
 from robot_interfaces.srv import SetGripper
 from sensor_msgs.msg import CameraInfo, Image
+from std_srvs.srv import Trigger
 from tf2_ros import Buffer, TransformException, TransformListener
 
 from robot_vision_grasp.grasp_geometry import _get_axis_angle, get_ik_pitch, gripper_close_open_ratio
@@ -30,7 +31,6 @@ LEFT_BUCKET_CLASSES = {'paper', 'yan', 'bottle'}
 RIGHT_BUCKET_CLASSES = {'usb', 'charger', 'pen'}
 GRIPPER_WAIT_SEC = 1.4
 GRIPPER_DURATION_MS = 1000.0
-TARGET_TIMEOUT_SEC = 5.0
 TARGET_OFFSETS_CM = {
     'bottle': (0.0, 0.0, -9.0),
     'charger': (1.5, 0.0, -4.0),
@@ -39,7 +39,7 @@ TARGET_OFFSETS_CM = {
 
 
 class VisionGraspNode(Node):
-    """Detect segmented objects and execute grasp motions through MoveIt."""
+    """Detect segmented objects and execute grasp motions — start/stop via service."""
 
     def __init__(self):
         super().__init__('vision_grasp_node')
@@ -50,13 +50,13 @@ class VisionGraspNode(Node):
         self._state_lock = threading.Lock()
         self._vision_lock = threading.Lock()
         self._sequence_lock = threading.Lock()
+        self._latest_color = None
         self._depth = None
         self._depth_encoding = 'passthrough'
         self._intrinsics = None
 
         self._bridge = CvBridge()
         self._model = self._load_model()
-        self._last_target_time = None
         self._last_tf_warning = 0.0
 
         self._tf_buffer = Buffer(cache_time=Duration(seconds=5.0))
@@ -64,12 +64,25 @@ class VisionGraspNode(Node):
         self._arm_action = ActionClient(self, ArmTarget, '/arm_target', callback_group=callback_group)
         self._arm_preset_action = ActionClient(self, ArmPreset, '/arm_preset', callback_group=callback_group)
         self._gripper_client = self.create_client(SetGripper, self._gripper_service, callback_group=callback_group)
+
         for msg_type, topic, callback in (
             (Image, self._color_topic, self._color_cb),
             (Image, self._depth_topic, self._depth_cb),
             (CameraInfo, self._depth_info_topic, self._info_cb),
         ):
             self.create_subscription(msg_type, topic, callback, 10, callback_group=callback_group)
+
+        # 检测循环控制
+        self._running = False
+        self._grasp_thread = None
+
+        self._start_srv = self.create_service(
+            Trigger, 'vision_grasp/start', self._start_cb, callback_group=callback_group,
+        )
+        self._stop_srv = self.create_service(
+            Trigger, 'vision_grasp/stop', self._stop_cb, callback_group=callback_group,
+        )
+        self.get_logger().info('Vision grasp node ready (start/stop service mode)')
 
     def _param(self, name, default):
         self.declare_parameter(name, default)
@@ -82,14 +95,13 @@ class VisionGraspNode(Node):
         self._confidence_threshold = float(self._param('confidence_threshold', 0.55))
         self._iou_threshold = float(self._param('iou_threshold', 0.65))
         self._mask_threshold = float(self._param('mask_threshold', 0.5))
-        self._color_topic = self._param('color_topic', '/camera/camera/color/image_raw',)
-        self._depth_topic = self._param('depth_topic', '/camera/camera/aligned_depth_to_color/image_raw',)
-        self._depth_info_topic = self._param('depth_info_topic', '/camera/camera/aligned_depth_to_color/camera_info',)
+        self._color_topic = self._param('color_topic', '/camera/camera/color/image_raw')
+        self._depth_topic = self._param('depth_topic', '/camera/camera/aligned_depth_to_color/image_raw')
+        self._depth_info_topic = self._param('depth_info_topic', '/camera/camera/aligned_depth_to_color/camera_info')
         self._base_frame = self._param('base_frame', 'arm_link0')
-        self._camera_frame = self._param('camera_frame', 'camera_optical_link',)
+        self._camera_frame = self._param('camera_frame', 'camera_optical_link')
         self._arm_goal_duration = float(self._param('arm_goal_duration', 2.0))
-        self._arm_preset_timeout = float(self._param('arm_preset_timeout', ACTION_TIMEOUT_SEC))
-        self._gripper_service = self._param('gripper_service', DEFAULT_GRIPPER_SERVICE,)
+        self._gripper_service = self._param('gripper_service', DEFAULT_GRIPPER_SERVICE)
 
     def _load_model(self):
         model_path = Path(self._model_path) if self._model_path else (
@@ -117,87 +129,111 @@ class VisionGraspNode(Node):
         except Exception as exc:
             self.get_logger().error(f'Depth convert failed: {exc}')
             return
-
         with self._state_lock:
             self._depth = depth
             self._depth_encoding = msg.encoding
 
     def _color_cb(self, msg):
-        if self._model is None or not self._target_timeout_elapsed():
-            return
-        if not self._sequence_lock.acquire(blocking=False):
-            return
-
-        sequence_locked = True
-        vision_locked = False
+        """Cache latest color frame for the detection loop."""
         try:
-            if not self._vision_lock.acquire(blocking=False):
-                return
-            vision_locked = True
+            self._latest_color = self._bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8')
+        except Exception as exc:
+            self.get_logger().error(f'Color convert failed: {exc}')
 
+    # ── start / stop 服务 ──────────────────────────────
+
+    def _start_cb(self, request, response):
+        """启动持续检测抓取循环。"""
+        if self._model is None:
+            response.success = False
+            response.message = 'model not loaded'
+            return response
+        if self._running:
+            response.success = True
+            response.message = 'already running'
+            return response
+
+        self._running = True
+        self._grasp_thread = threading.Thread(target=self._grasp_loop, daemon=True)
+        self._grasp_thread.start()
+        self.get_logger().info('Grasp loop started')
+        response.success = True
+        response.message = 'grasp loop started'
+        return response
+
+    def _stop_cb(self, request, response):
+        """停止检测抓取循环。"""
+        if not self._running:
+            response.success = True
+            response.message = 'already stopped'
+            return response
+
+        self._running = False
+        if self._grasp_thread is not None:
+            self._grasp_thread.join(timeout=5.0)
+            self._grasp_thread = None
+        self.get_logger().info('Grasp loop stopped')
+        response.success = True
+        response.message = 'grasp loop stopped'
+        return response
+
+    # ── 持续检测循环 ──────────────────────────────────
+
+    def _grasp_loop(self):
+        """循环检测目标，发现后执行抓取序列。每帧之间间隔 1 秒。"""
+        while self._running and rclpy.ok():
             with self._state_lock:
+                color = self._latest_color
                 depth = None if self._depth is None else self._depth.copy()
                 depth_encoding = self._depth_encoding
                 intrinsics = self._intrinsics
 
-            if depth is None or intrinsics is None:
-                return
+            if color is not None and depth is not None and intrinsics is not None:
+                try:
+                    target = self._detect_target(color, depth, depth_encoding, intrinsics)
+                    if target is not None:
+                        self.get_logger().info(
+                            f"Grasping {target['class_name']}: "
+                            f"({target['target_cm'][0]:.1f}, {target['target_cm'][1]:.1f}, "
+                            f"{target['target_cm'][2]:.1f}) cm"
+                        )
+                        self._execute_grasp_sequence(target)
+                except Exception as exc:
+                    self.get_logger().warning(f'Grasp loop iteration failed: {exc}')
 
-            try:
-                cv_img = self._bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8')
-            except Exception as exc:
-                self.get_logger().error(f'Color convert failed: {exc}')
-                return
+            # 每秒检测一帧，避免 CPU 满载
+            for _ in range(10):
+                if not self._running or not rclpy.ok():
+                    return
+                time.sleep(0.1)
 
-            try:
-                target = self._select_target(cv_img, depth, depth_encoding, intrinsics)
-            except Exception as exc:
-                self.get_logger().warning(f'Vision frame skipped: {exc}')
-                return
+    # ── 检测与抓取 ────────────────────────────────────
 
-            if target is None:
-                return
+    def _detect_target(self, color, depth, depth_encoding, intrinsics):
+        """单帧检测，返回 target dict 或 None。"""
+        if not self._vision_lock.acquire(blocking=False):
+            return None
+        try:
+            targets = self._model.detect_targets(
+                color, depth, intrinsics, encoding=depth_encoding,
+                conf_thres=self._confidence_threshold, mask_thres=self._mask_threshold,
+            )
+            if not targets:
+                return None
 
-            with self._state_lock:
-                self._last_target_time = self.get_clock().now()
-            threading.Thread(
-                target=self._run_grasp_sequence,
-                args=(target,),
-                daemon=True,
-            ).start()
-            sequence_locked = False
+            tf_target = self._camera_target_to_arm_target(targets[0])
+            if tf_target is None:
+                return None
+            self.get_logger().info(
+                f"{tf_target['class_name']}: "
+                f"target=({tf_target['target_cm'][0]:.1f}, "
+                f"{tf_target['target_cm'][1]:.1f}, "
+                f"{tf_target['target_cm'][2]:.1f})cm "
+                f"best_angle={tf_target['best_angle_deg']:.1f} deg"
+            )
+            return tf_target
         finally:
-            if vision_locked:
-                self._vision_lock.release()
-            if sequence_locked:
-                self._sequence_lock.release()
-
-    def _target_timeout_elapsed(self):
-        with self._state_lock:
-            last_target_time = self._last_target_time
-        if last_target_time is None:
-            return True
-        return (self.get_clock().now() - last_target_time).nanoseconds >= TARGET_TIMEOUT_SEC * 1e9
-
-    def _select_target(self, cv_img, depth, depth_encoding, intrinsics):
-        targets = self._model.detect_targets(
-            cv_img, depth, intrinsics, encoding=depth_encoding,
-            conf_thres=self._confidence_threshold, mask_thres=self._mask_threshold,
-        )
-        if not targets:
-            return None
-
-        tf_target = self._camera_target_to_arm_target(targets[0])
-        if tf_target is None:
-            return None
-        self.get_logger().info(
-            f"{tf_target['class_name']}: "
-            f"target=({tf_target['target_cm'][0]:.1f}, "
-            f"{tf_target['target_cm'][1]:.1f}, "
-            f"{tf_target['target_cm'][2]:.1f})cm "
-            f"best_angle={tf_target['best_angle_deg']:.1f} deg "
-        )
-        return tf_target
+            self._vision_lock.release()
 
     def _camera_target_to_arm_target(self, target):
         transform = self._lookup_tf_camera_transform()
@@ -219,7 +255,9 @@ class VisionGraspNode(Node):
 
     def _lookup_tf_camera_transform(self):
         try:
-            transform = self._tf_buffer.lookup_transform(self._base_frame, self._camera_frame, Time(), timeout=Duration(seconds=0.05))
+            transform = self._tf_buffer.lookup_transform(
+                self._base_frame, self._camera_frame, Time(), timeout=Duration(seconds=0.05),
+            )
         except TransformException as exc:
             self._warn_tf_failure(exc)
             return None
@@ -237,7 +275,7 @@ class VisionGraspNode(Node):
         if now - self._last_tf_warning < 5.0:
             return
         self._last_tf_warning = now
-        self.get_logger().warning(f'Camera TF unavailable ({self._base_frame} <- {self._camera_frame}): {exc}')
+        self.get_logger().warning(f'Camera TF unavailable: {exc}')
 
     @staticmethod
     def _rotation_from_quaternion(x, y, z, w):
@@ -254,7 +292,10 @@ class VisionGraspNode(Node):
     def _target_cm_for_object(self, object_arm_m, class_name):
         return object_arm_m * 100.0 + np.array(TARGET_OFFSETS_CM.get(class_name, (0.0, 0.0, -3.5)), dtype=float)
 
-    def _run_grasp_sequence(self, target):
+    def _execute_grasp_sequence(self, target):
+        """完整抓取周期：开夹爪 → 移动目标 → 夹紧 → 丢桶 → 归中。"""
+        if not self._sequence_lock.acquire(blocking=False):
+            return
         try:
             class_name = target['class_name']
             self._call_gripper(1.0, GRIPPER_DURATION_MS)
@@ -263,16 +304,12 @@ class VisionGraspNode(Node):
             if not self._call_gripper(gripper_close_open_ratio(class_name), GRIPPER_DURATION_MS):
                 return
             time.sleep(GRIPPER_WAIT_SEC)
-            if not self._send_arm_preset(self._bucket_preset_for_class(class_name)):
-                return
-            self._call_gripper(1.0, GRIPPER_DURATION_MS)
-            time.sleep(GRIPPER_WAIT_SEC)
+            bucket = self._bucket_preset_for_class(class_name)
+            if bucket is not None and self._send_arm_preset(bucket):
+                self._call_gripper(1.0, GRIPPER_DURATION_MS)
+                time.sleep(GRIPPER_WAIT_SEC)
             self._send_arm_preset(ARM_CENTER_PRESET)
-        except Exception as exc:
-            self.get_logger().error(f'Grasp sequence failed: {exc}')
         finally:
-            with self._state_lock:
-                self._last_target_time = self.get_clock().now()
             self._sequence_lock.release()
 
     @staticmethod
@@ -292,7 +329,7 @@ class VisionGraspNode(Node):
     def _send_arm_preset(self, action_type):
         goal = ArmPreset.Goal()
         goal.action_type = int(action_type)
-        return self._send_goal(self._arm_preset_action, goal, self._arm_preset_timeout, 'Arm preset')
+        return self._send_goal(self._arm_preset_action, goal, ACTION_TIMEOUT_SEC, 'Arm preset')
 
     def _send_goal(self, client, goal, timeout_sec, label):
         if not client.wait_for_server(timeout_sec=5.0):

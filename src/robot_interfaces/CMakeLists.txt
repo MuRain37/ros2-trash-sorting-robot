@@ -14,7 +14,6 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "srv/SetLiftSteps.srv"
   "srv/SetGripper.srv"
   "srv/SetServoAngle.srv"
-  "srv/DumpTrash.srv"
   DEPENDENCIES nav_msgs
 )
 

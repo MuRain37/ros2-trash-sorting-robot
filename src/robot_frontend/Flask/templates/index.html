@@ -1,0 +1,329 @@
+{% extends "base.html" %}
+
+{% block title %}首页 - 机器人控制系统{% endblock %}
+
+{% block page_title %}机器人运行首页{% endblock %}
+{% block page_subtitle %}展示运行状态、电量、垃圾桶占用比例和基础控制命令。{% endblock %}
+
+{% block content %}
+<div class="home-grid">
+    <section class="card status-card">
+        <div class="card-header">
+            <span><i class="fas fa-circle-play me-2"></i>工作状态</span>
+            <span class="status-pill ok" id="mode-pill">ROS2</span>
+        </div>
+        <div class="card-body">
+            <div class="status-display">
+                <div class="robot-face">
+                    <i class="fas fa-robot"></i>
+                </div>
+                <div>
+                    <div class="metric-value" id="robot-status">{{ robot_status.status }}</div>
+                    <div class="metric-label">当前状态</div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section class="card battery-card">
+        <div class="card-header">
+            <span><i class="fas fa-battery-full me-2"></i>电量</span>
+            <span class="status-pill dark">每 5 分钟 -1</span>
+        </div>
+        <div class="card-body">
+            <div class="battery-readout">
+                <div>
+                    <div class="metric-value"><span id="battery-level">{{ robot_status.battery_level }}</span>%</div>
+                    <div class="metric-label">当前电量</div>
+                </div>
+                <div class="battery-shell" aria-label="电量">
+                    <div class="battery-fill" id="battery-fill" style="width: {{ robot_status.battery_level }}%;"></div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section class="card bin-card">
+        <div class="card-header">
+            <span><i class="fas fa-trash-can me-2"></i>左侧垃圾桶</span>
+            <span class="status-pill dark">0-100%</span>
+        </div>
+        <div class="card-body">
+            <div class="bin-meter">
+                <div class="bin-tank">
+                    <div class="bin-fill left" id="left-bin-fill" style="height: {{ robot_status.bins.left }}%;"></div>
+                </div>
+                <div>
+                    <div class="metric-value"><span id="left-bin">{{ robot_status.bins.left }}</span>%</div>
+                    <div class="metric-label">占用空间比例</div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section class="card bin-card">
+        <div class="card-header">
+            <span><i class="fas fa-trash-can me-2"></i>右侧垃圾桶</span>
+            <span class="status-pill dark">0-100%</span>
+        </div>
+        <div class="card-body">
+            <div class="bin-meter">
+                <div class="bin-tank">
+                    <div class="bin-fill right" id="right-bin-fill" style="height: {{ robot_status.bins.right }}%;"></div>
+                </div>
+                <div>
+                    <div class="metric-value"><span id="right-bin">{{ robot_status.bins.right }}</span>%</div>
+                    <div class="metric-label">占用空间比例</div>
+                </div>
+            </div>
+        </div>
+    </section>
+</div>
+
+<section class="card command-card mt-4">
+    <div class="card-header">
+        <span><i class="fas fa-keyboard me-2"></i>简单命令</span>
+    </div>
+    <div class="card-body">
+        <div class="command-grid">
+            <button class="btn btn-secondary command-btn" type="button" onclick="sendCommand('standby')">
+                <i class="fas fa-pause"></i>
+                <span>待机</span>
+            </button>
+            <button class="btn btn-success command-btn" type="button" id="grasp-toggle-btn" onclick="toggleGrasp()">
+                <i class="fas fa-play"></i>
+                <span>视觉抓取启动</span>
+            </button>
+            <button class="btn btn-warning command-btn" type="button" onclick="sendCommand('unload')">
+                <i class="fas fa-dumpster"></i>
+                <span>卸载垃圾</span>
+            </button>
+        </div>
+    </div>
+</section>
+{% endblock %}
+
+{% block extra_css %}
+<style>
+    .home-grid {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 16px;
+    }
+
+    .home-grid .card-body {
+        min-height: 180px;
+    }
+
+    .status-display,
+    .battery-readout,
+    .bin-meter {
+        display: flex;
+        align-items: center;
+        gap: 18px;
+        height: 100%;
+    }
+
+    .robot-face {
+        width: 82px;
+        height: 82px;
+        display: grid;
+        place-items: center;
+        flex: 0 0 auto;
+        color: #ffffff;
+        background: linear-gradient(135deg, #202624, #22a06b);
+        border-radius: 8px;
+        font-size: 38px;
+    }
+
+    .battery-shell {
+        position: relative;
+        flex: 1;
+        min-width: 120px;
+        height: 46px;
+        padding: 5px;
+        border: 2px solid #202624;
+        border-radius: 8px;
+        background: #ffffff;
+    }
+
+    .battery-shell::after {
+        content: "";
+        position: absolute;
+        right: -10px;
+        top: 14px;
+        width: 8px;
+        height: 16px;
+        background: #202624;
+        border-radius: 0 4px 4px 0;
+    }
+
+    .battery-fill {
+        height: 100%;
+        background: linear-gradient(90deg, #22a06b, #86d06f);
+        border-radius: 5px;
+        transition: width 0.35s ease;
+    }
+
+    .bin-tank {
+        position: relative;
+        width: 72px;
+        height: 118px;
+        flex: 0 0 auto;
+        overflow: hidden;
+        background: #ffffff;
+        border: 2px solid #202624;
+        border-radius: 8px 8px 12px 12px;
+    }
+
+    .bin-tank::before {
+        content: "";
+        position: absolute;
+        left: 10px;
+        right: 10px;
+        top: 10px;
+        height: 1px;
+        background: rgba(31, 35, 40, 0.16);
+        box-shadow: 0 20px rgba(31, 35, 40, 0.16), 0 40px rgba(31, 35, 40, 0.16), 0 60px rgba(31, 35, 40, 0.16), 0 80px rgba(31, 35, 40, 0.16);
+        z-index: 2;
+    }
+
+    .bin-fill {
+        position: absolute;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        transition: height 0.35s ease;
+    }
+
+    .bin-fill.left {
+        background: linear-gradient(180deg, #2f80ed, #8dc5ff);
+    }
+
+    .bin-fill.right {
+        background: linear-gradient(180deg, #f5a524, #ffd166);
+    }
+
+    .command-grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 14px;
+    }
+
+    .command-btn {
+        min-height: 76px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 10px;
+        font-size: 18px;
+    }
+
+    .command-btn i {
+        font-size: 22px;
+    }
+
+    @media (max-width: 1200px) {
+        .home-grid {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+    }
+
+    @media (max-width: 720px) {
+        .home-grid,
+        .command-grid {
+            grid-template-columns: 1fr;
+        }
+    }
+</style>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    let graspRunning = false;
+
+    function clampPercent(value) {
+        return Math.max(0, Math.min(100, Number(value) || 0));
+    }
+
+    function updateGraspButton() {
+        const btn = document.getElementById('grasp-toggle-btn');
+        if (graspRunning) {
+            btn.className = 'btn btn-danger command-btn';
+            btn.innerHTML = '<i class="fas fa-stop"></i><span>视觉抓取停止</span>';
+        } else {
+            btn.className = 'btn btn-success command-btn';
+            btn.innerHTML = '<i class="fas fa-play"></i><span>视觉抓取启动</span>';
+        }
+    }
+
+    async function toggleGrasp() {
+        const action = graspRunning ? 'grasp_stop' : 'grasp_start';
+        try {
+            const response = await fetch('/api/robot/control', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ type: action })
+            });
+            const data = await response.json();
+            if (!response.ok || !data.success) {
+                throw new Error(data.message || data.error || '操作失败');
+            }
+            graspRunning = !graspRunning;
+            updateGraspButton();
+            showToast(data.message || (graspRunning ? '视觉抓取已启动' : '视觉抓取已停止'), 'success');
+        } catch (error) {
+            showToast(error.message || '操作失败', 'error');
+        }
+    }
+
+    function renderStatus(status) {
+        const battery = clampPercent(status.battery_level);
+        const leftBin = clampPercent(status.bins?.left);
+        const rightBin = clampPercent(status.bins?.right);
+
+        document.getElementById('robot-status').textContent = status.status || '待机';
+        document.getElementById('battery-level').textContent = battery;
+        document.getElementById('battery-fill').style.width = `${battery}%`;
+        document.getElementById('left-bin').textContent = leftBin;
+        document.getElementById('left-bin-fill').style.height = `${leftBin}%`;
+        document.getElementById('right-bin').textContent = rightBin;
+        document.getElementById('right-bin-fill').style.height = `${rightBin}%`;
+    }
+
+    async function refreshStatus() {
+        try {
+            const response = await fetch('/api/robot/status');
+            renderStatus(await response.json());
+        } catch (error) {
+            showToast('状态刷新失败', 'error');
+        }
+    }
+
+    async function sendCommand(type) {
+        const labels = {
+            standby: '待机',
+            start: '启动',
+            unload: '卸载垃圾'
+        };
+        try {
+            const response = await fetch('/api/robot/control', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ type })
+            });
+            const data = await response.json();
+            if (!response.ok || !data.success) {
+                throw new Error(data.error || '命令发送失败');
+            }
+            renderStatus(data.status);
+            showToast(`${labels[type]}命令已记录`, 'success');
+        } catch (error) {
+            showToast(error.message || '命令发送失败', 'error');
+        }
+    }
+
+    refreshStatus();
+    setInterval(refreshStatus, 15000);
+</script>
+{% endblock %}

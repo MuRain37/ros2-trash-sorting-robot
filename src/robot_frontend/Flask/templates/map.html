@@ -1,0 +1,561 @@
+{% extends "base.html" %}
+
+{% block title %}地图 - 机器人控制系统{% endblock %}
+
+{% block page_title %}地图导航{% endblock %}
+{% block page_subtitle %}点击地图设定导航目标，或框选矩形区域后提交区域清扫。{% endblock %}
+
+{% block content %}
+<section class="card map-card">
+    <div class="card-header map-toolbar">
+        <span><i class="fas fa-map-location-dot me-2"></i>地图</span>
+        <div class="tool-row">
+            <span class="status-pill warn" id="map-mode-label">等待地图</span>
+            <button class="btn btn-sm btn-primary" type="button" onclick="setMode('target')" id="target-mode-btn">
+                <i class="fas fa-location-dot me-1"></i>目标点
+            </button>
+            <button class="btn btn-sm btn-outline-primary" type="button" onclick="setMode('region')" id="region-mode-btn">
+                <i class="fas fa-vector-square me-1"></i>框选区域
+            </button>
+            <button class="btn btn-sm btn-success" type="button" onclick="cleanSelectedRegion()">
+                <i class="fas fa-broom me-1"></i>清扫区域
+            </button>
+            <button class="btn btn-sm btn-danger" type="button" onclick="deleteSelectedRegion()">
+                <i class="fas fa-trash me-1"></i>删除区域
+            </button>
+        </div>
+    </div>
+    <div class="card-body p-0">
+        <div class="map-stage" id="map-stage">
+            <canvas id="map-canvas"></canvas>
+            <div class="region-strip" id="region-strip"></div>
+        </div>
+    </div>
+</section>
+{% endblock %}
+
+{% block extra_css %}
+<style>
+    .map-card {
+        min-height: 720px;
+    }
+
+    .map-toolbar {
+        flex-wrap: wrap;
+    }
+
+    .tool-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        align-items: center;
+        justify-content: flex-end;
+    }
+
+    .map-stage {
+        position: relative;
+        height: 666px;
+        overflow: hidden;
+        background: #101615;
+    }
+
+    #map-canvas {
+        display: block;
+        width: 100%;
+        height: 100%;
+        cursor: crosshair;
+    }
+
+    .region-strip {
+        position: absolute;
+        left: 12px;
+        right: 12px;
+        bottom: 12px;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        pointer-events: none;
+    }
+
+    .region-chip {
+        pointer-events: auto;
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        min-height: 34px;
+        padding: 0 10px;
+        color: #1f2328;
+        background: rgba(255, 255, 255, 0.92);
+        border: 1px solid #d7dde5;
+        border-radius: 8px;
+        font-weight: 800;
+        cursor: pointer;
+    }
+
+    .region-chip.selected {
+        border-color: #2f80ed;
+        box-shadow: 0 0 0 3px rgba(47, 128, 237, 0.18);
+    }
+
+    .region-swatch {
+        width: 10px;
+        height: 22px;
+        border-radius: 4px;
+    }
+
+    @media (max-width: 720px) {
+        .map-stage {
+            height: 520px;
+        }
+
+        .tool-row {
+            justify-content: flex-start;
+        }
+    }
+</style>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    let mapData = {{ map_data|tojson }};
+    let regions = {{ regions|tojson }};
+    let selectedRegionId = regions[0]?.region_id || null;
+    let mode = 'target';
+    let isDragging = false;
+    let dragStart = null;
+    let dragCurrent = null;
+    let currentImageVersion = null;
+    const mapImage = new Image();
+
+    const canvas = document.getElementById('map-canvas');
+    const ctx = canvas.getContext('2d');
+    const stage = document.getElementById('map-stage');
+
+    mapImage.onload = () => drawMap();
+
+    function mapMeta() {
+        return mapData && mapData.has_map ? mapData.map : null;
+    }
+
+    function resizeCanvas() {
+        const rect = stage.getBoundingClientRect();
+        const ratio = window.devicePixelRatio || 1;
+        canvas.width = Math.floor(rect.width * ratio);
+        canvas.height = Math.floor(rect.height * ratio);
+        canvas.style.width = `${rect.width}px`;
+        canvas.style.height = `${rect.height}px`;
+        ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+        drawMap();
+    }
+
+    function viewport() {
+        const rect = canvas.getBoundingClientRect();
+        const meta = mapMeta();
+        if (!meta) {
+            return { x: 0, y: 0, width: rect.width, height: rect.height };
+        }
+        const mapAspect = meta.width / meta.height;
+        const canvasAspect = rect.width / rect.height;
+        if (canvasAspect > mapAspect) {
+            const height = rect.height;
+            const width = height * mapAspect;
+            return { x: (rect.width - width) / 2, y: 0, width, height };
+        }
+        const width = rect.width;
+        const height = width / mapAspect;
+        return { x: 0, y: (rect.height - height) / 2, width, height };
+    }
+
+    function worldToCanvas(point) {
+        const meta = mapMeta();
+        if (!meta || !point) return null;
+        const view = viewport();
+        const widthM = meta.width * meta.resolution;
+        const heightM = meta.height * meta.resolution;
+        return {
+            x: view.x + ((point.x - meta.origin.x) / widthM) * view.width,
+            y: view.y + (1 - ((point.y - meta.origin.y) / heightM)) * view.height
+        };
+    }
+
+    function canvasToWorld(point) {
+        const meta = mapMeta();
+        if (!meta) return null;
+        const view = viewport();
+        if (
+            point.x < view.x || point.x > view.x + view.width ||
+            point.y < view.y || point.y > view.y + view.height
+        ) {
+            return null;
+        }
+        const widthM = meta.width * meta.resolution;
+        const heightM = meta.height * meta.resolution;
+        return {
+            x: meta.origin.x + ((point.x - view.x) / view.width) * widthM,
+            y: meta.origin.y + (1 - ((point.y - view.y) / view.height)) * heightM,
+            theta: 0
+        };
+    }
+
+    function eventPoint(event) {
+        const rect = canvas.getBoundingClientRect();
+        return {
+            x: event.clientX - rect.left,
+            y: event.clientY - rect.top
+        };
+    }
+
+    function drawMap() {
+        const rect = canvas.getBoundingClientRect();
+        const width = rect.width;
+        const height = rect.height;
+        ctx.clearRect(0, 0, width, height);
+        ctx.fillStyle = '#101615';
+        ctx.fillRect(0, 0, width, height);
+
+        const view = viewport();
+        if (mapImage.complete && mapImage.naturalWidth) {
+            ctx.drawImage(mapImage, view.x, view.y, view.width, view.height);
+        }
+
+        drawGrid(view);
+        regions.forEach(drawRegion);
+        drawTargetPath();
+        drawRobot();
+        drawDraftRect();
+    }
+
+    function drawGrid(view) {
+        ctx.save();
+        ctx.strokeStyle = 'rgba(47, 128, 237, 0.16)';
+        ctx.lineWidth = 1;
+        for (let i = 0; i <= 10; i++) {
+            const x = view.x + (view.width / 10) * i;
+            ctx.beginPath();
+            ctx.moveTo(x, view.y);
+            ctx.lineTo(x, view.y + view.height);
+            ctx.stroke();
+        }
+        for (let i = 0; i <= 10; i++) {
+            const y = view.y + (view.height / 10) * i;
+            ctx.beginPath();
+            ctx.moveTo(view.x, y);
+            ctx.lineTo(view.x + view.width, y);
+            ctx.stroke();
+        }
+        ctx.restore();
+    }
+
+    function drawRegion(region) {
+        if (!region.vertices || region.vertices.length < 4) return;
+        const points = region.vertices.map(worldToCanvas).filter(Boolean);
+        if (points.length < 4) return;
+        const selected = region.region_id === selectedRegionId;
+        ctx.save();
+        ctx.fillStyle = `${region.color || '#2f80ed'}33`;
+        ctx.strokeStyle = region.color || '#2f80ed';
+        ctx.lineWidth = selected ? 4 : 2;
+        ctx.beginPath();
+        ctx.moveTo(points[0].x, points[0].y);
+        points.slice(1).forEach(point => ctx.lineTo(point.x, point.y));
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+        const center = points.reduce((acc, point) => ({ x: acc.x + point.x, y: acc.y + point.y }), { x: 0, y: 0 });
+        center.x /= points.length;
+        center.y /= points.length;
+        ctx.fillStyle = '#ffffff';
+        ctx.strokeStyle = '#101615';
+        ctx.lineWidth = 4;
+        ctx.font = '800 15px Microsoft YaHei';
+        ctx.textAlign = 'center';
+        ctx.strokeText(region.region_name, center.x, center.y);
+        ctx.fillText(region.region_name, center.x, center.y);
+        ctx.restore();
+    }
+
+    function drawTargetPath() {
+        if (!mapData.target_point) return;
+        const target = worldToCanvas(mapData.target_point);
+        const robot = worldToCanvas(mapData.robot_position);
+        if (!target) return;
+        ctx.save();
+        if (robot) {
+            ctx.strokeStyle = '#f5a524';
+            ctx.lineWidth = 3;
+            ctx.setLineDash([8, 8]);
+            ctx.beginPath();
+            ctx.moveTo(robot.x, robot.y);
+            ctx.lineTo(target.x, target.y);
+            ctx.stroke();
+            ctx.setLineDash([]);
+        }
+        ctx.fillStyle = '#f5a524';
+        ctx.strokeStyle = '#101615';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(target.x, target.y, 9, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+        ctx.restore();
+    }
+
+    function drawRobot() {
+        const pose = mapData.robot_position;
+        const pos = worldToCanvas(pose);
+        if (!pose || !pos) return;
+        ctx.save();
+        ctx.translate(pos.x, pos.y);
+        ctx.rotate(-(pose.theta || 0));
+        ctx.fillStyle = '#2f80ed';
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(18, 0);
+        ctx.lineTo(-13, 11);
+        ctx.lineTo(-13, -11);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+        ctx.restore();
+    }
+
+    function drawDraftRect() {
+        if (!dragStart || !dragCurrent) return;
+        ctx.save();
+        ctx.fillStyle = 'rgba(47, 128, 237, 0.18)';
+        ctx.strokeStyle = '#2f80ed';
+        ctx.lineWidth = 2;
+        ctx.setLineDash([7, 5]);
+        const x = Math.min(dragStart.x, dragCurrent.x);
+        const y = Math.min(dragStart.y, dragCurrent.y);
+        const w = Math.abs(dragStart.x - dragCurrent.x);
+        const h = Math.abs(dragStart.y - dragCurrent.y);
+        ctx.fillRect(x, y, w, h);
+        ctx.strokeRect(x, y, w, h);
+        ctx.restore();
+    }
+
+    function setMode(nextMode) {
+        mode = nextMode;
+        dragStart = null;
+        dragCurrent = null;
+        document.getElementById('target-mode-btn').className =
+            mode === 'target' ? 'btn btn-sm btn-primary' : 'btn btn-sm btn-outline-primary';
+        document.getElementById('region-mode-btn').className =
+            mode === 'region' ? 'btn btn-sm btn-primary' : 'btn btn-sm btn-outline-primary';
+        updateModeLabel();
+        drawMap();
+    }
+
+    function updateModeLabel() {
+        const label = document.getElementById('map-mode-label');
+        if (!mapData.has_map) {
+            label.textContent = '等待地图';
+            label.className = 'status-pill warn';
+            return;
+        }
+        label.textContent = mode === 'region' ? '拖拽框选区域' : '点击设定目标点';
+        label.className = 'status-pill ok';
+    }
+
+    function updateMapImage() {
+        const meta = mapMeta();
+        const version = meta ? meta.image_version : `empty-${Date.now()}`;
+        if (version === currentImageVersion && mapImage.complete) return;
+        currentImageVersion = version;
+        mapImage.src = `/api/map/image?v=${encodeURIComponent(version)}`;
+    }
+
+    async function setTarget(point) {
+        const world = canvasToWorld(point);
+        if (!world) {
+            showToast('请点击地图有效区域', 'warning');
+            return;
+        }
+        const response = await fetch('/api/map/target', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(world)
+        });
+        const data = await response.json();
+        if (!response.ok || !data.success) {
+            throw new Error(data.error || '目标点设置失败');
+        }
+        mapData.target_point = data.target_point;
+        mapData.nav_status = data.nav_status;
+        drawMap();
+        showToast('导航目标已发送', 'success');
+    }
+
+    async function createRegionFromDrag() {
+        const topLeftCanvas = {
+            x: Math.min(dragStart.x, dragCurrent.x),
+            y: Math.min(dragStart.y, dragCurrent.y)
+        };
+        const bottomRightCanvas = {
+            x: Math.max(dragStart.x, dragCurrent.x),
+            y: Math.max(dragStart.y, dragCurrent.y)
+        };
+        if (bottomRightCanvas.x - topLeftCanvas.x < 20 || bottomRightCanvas.y - topLeftCanvas.y < 20) {
+            showToast('区域太小，请重新框选', 'warning');
+            return;
+        }
+
+        const topLeft = canvasToWorld(topLeftCanvas);
+        const topRight = canvasToWorld({ x: bottomRightCanvas.x, y: topLeftCanvas.y });
+        const bottomRight = canvasToWorld(bottomRightCanvas);
+        const bottomLeft = canvasToWorld({ x: topLeftCanvas.x, y: bottomRightCanvas.y });
+        if (!topLeft || !topRight || !bottomRight || !bottomLeft) {
+            showToast('请在地图有效区域内框选', 'warning');
+            return;
+        }
+
+        const xs = [topLeft.x, topRight.x, bottomRight.x, bottomLeft.x];
+        const ys = [topLeft.y, topRight.y, bottomRight.y, bottomLeft.y];
+        const nextId = Math.max(0, ...regions.map(region => region.region_id)) + 1;
+        const palette = ['#2f80ed', '#22a06b', '#f5a524', '#d92d20', '#8b5cf6'];
+        const region = {
+            region_id: nextId,
+            name: `区域 ${nextId}`,
+            vertices: [topLeft, topRight, bottomRight, bottomLeft],
+            bounds: {
+                min_x: Math.min(...xs),
+                min_y: Math.min(...ys),
+                max_x: Math.max(...xs),
+                max_y: Math.max(...ys)
+            },
+            frame_id: 'map',
+            color: palette[(nextId - 1) % palette.length]
+        };
+
+        const response = await fetch('/api/map/regions', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(region)
+        });
+        const data = await response.json();
+        if (!response.ok || !data.success) {
+            throw new Error(data.error || '区域保存失败');
+        }
+        regions.push(data.region);
+        selectedRegionId = data.region.region_id;
+        setMode('target');
+        renderRegionStrip();
+        drawMap();
+        showToast('区域已框选', 'success');
+    }
+
+    async function cleanSelectedRegion() {
+        if (!selectedRegionId) {
+            showToast('请先框选或选择区域', 'warning');
+            return;
+        }
+        const response = await fetch('/api/map/clean_region', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ region_id: selectedRegionId })
+        });
+        const data = await response.json();
+        if (!response.ok || !data.success) {
+            showToast(data.error || '区域清扫提交失败', 'error');
+            return;
+        }
+        showToast(data.message || `区域 ${selectedRegionId} 已提交清扫`, 'success');
+    }
+
+    async function deleteSelectedRegion() {
+        if (!selectedRegionId) {
+            showToast('请先选择区域', 'warning');
+            return;
+        }
+        const response = await fetch(`/api/map/regions?region_id=${selectedRegionId}`, { method: 'DELETE' });
+        const data = await response.json();
+        if (!response.ok || !data.success) {
+            showToast(data.error || '删除区域失败', 'error');
+            return;
+        }
+        regions = regions.filter(region => region.region_id !== selectedRegionId);
+        selectedRegionId = regions[0]?.region_id || null;
+        renderRegionStrip();
+        drawMap();
+        showToast('区域已删除', 'success');
+    }
+
+    function selectRegion(regionId) {
+        selectedRegionId = regionId;
+        renderRegionStrip();
+        drawMap();
+    }
+
+    function renderRegionStrip() {
+        const strip = document.getElementById('region-strip');
+        strip.innerHTML = regions.map(region => `
+            <button class="region-chip ${region.region_id === selectedRegionId ? 'selected' : ''}" type="button" onclick="selectRegion(${region.region_id})">
+                <span class="region-swatch" style="background:${region.color}"></span>
+                ${region.region_name}
+            </button>
+        `).join('');
+    }
+
+    async function refreshMapData(showMessage = false) {
+        try {
+            const response = await fetch('/api/map/data');
+            mapData = await response.json();
+            updateModeLabel();
+            updateMapImage();
+            drawMap();
+            if (showMessage) {
+                showToast(mapData.has_map ? '地图已刷新' : '尚未收到地图', mapData.has_map ? 'success' : 'warning');
+            }
+        } catch (error) {
+            showToast('地图刷新失败', 'error');
+        }
+    }
+
+    canvas.addEventListener('mousedown', event => {
+        if (mode !== 'region') return;
+        isDragging = true;
+        dragStart = eventPoint(event);
+        dragCurrent = dragStart;
+        drawMap();
+    });
+
+    canvas.addEventListener('mousemove', event => {
+        if (!isDragging || mode !== 'region') return;
+        dragCurrent = eventPoint(event);
+        drawMap();
+    });
+
+    canvas.addEventListener('mouseup', async event => {
+        if (mode !== 'region') return;
+        isDragging = false;
+        dragCurrent = eventPoint(event);
+        try {
+            await createRegionFromDrag();
+        } catch (error) {
+            showToast(error.message || '区域创建失败', 'error');
+        } finally {
+            dragStart = null;
+            dragCurrent = null;
+            drawMap();
+        }
+    });
+
+    canvas.addEventListener('click', async event => {
+        if (mode !== 'target') return;
+        try {
+            await setTarget(eventPoint(event));
+        } catch (error) {
+            showToast(error.message || '目标点设置失败', 'error');
+        }
+    });
+
+    window.addEventListener('resize', resizeCanvas);
+    renderRegionStrip();
+    resizeCanvas();
+    updateModeLabel();
+    updateMapImage();
+    setInterval(refreshMapData, 1500);
+</script>
+{% endblock %}

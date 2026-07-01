@@ -1,39 +1,64 @@
 """机械臂预设姿态配置：用 5 个舵机 raw 值描述一个 MoveIt 关节目标."""
 
 import math
+from pathlib import Path
+
+import yaml
 
 
 ACTION_ARM_CENTER = 0
 ACTION_LEFT_BUCKET = 1
 ACTION_RIGHT_BUCKET = 2
 
-# 动作类型编号需要和 robot_interfaces/action/ArmPreset.action 中的常量一致
 ACTION_NAMES = {
     ACTION_ARM_CENTER: 'arm_center',
     ACTION_LEFT_BUCKET: 'left_bucket',
     ACTION_RIGHT_BUCKET: 'right_bucket',
 }
 
-# 标定时只需要改这里：每行依次对应 servo1 ~ servo5 的原始位置值
-PRESET_SERVO_RAW = {
-    ACTION_ARM_CENTER: [500.0, 750.0, 0.0, 150.0, 500.0],
-    ACTION_LEFT_BUCKET: [500.0, 500.0, 500.0, 500.0, 500.0],
-    ACTION_RIGHT_BUCKET: [500.0, 500.0, 500.0, 500.0, 500.0],
-}
-
-# 舵机 raw 值范围：中位 500，最小 0，最大 1000
 SERVO_CENTER = 500.0
 SERVO_RAW_MIN = 0.0
 SERVO_RAW_MAX = 1000.0
-# 各关节半角行程（度），需要和硬件桥中的映射保持一致
 JOINT_MAX_DEGREES = (180.0, 120.0, 120.0, 120.0, 120.0)
-# 各关节方向系数：±1，由舵机安装方向决定
 JOINT_DIRECTIONS = (-1.0, -1.0, -1.0, -1.0, 1.0)
+ARM_CENTER_JOINTS = (
+    'arm_base_joint', 'arm_shoulder_joint', 'arm_elbow_joint',
+    'arm_wrist_joint', 'arm_tool_rotate_joint',
+)
 
 
 def preset_name(action_type):
     """返回预设动作类型的可读名称."""
     return ACTION_NAMES.get(int(action_type), f'unknown_{int(action_type)}')
+
+
+def joint_position_to_servo_raw(index, joint_position):
+    """MoveIt 关节角（弧度）→ 舵机原始位置值."""
+    degrees = math.degrees(float(joint_position))
+    raw = SERVO_CENTER + JOINT_DIRECTIONS[index] * degrees * (
+        SERVO_CENTER / JOINT_MAX_DEGREES[index]
+    )
+    return max(SERVO_RAW_MIN, min(SERVO_RAW_MAX, raw))
+
+
+def _load_arm_center_raw():
+    """从 robot_description 配置文件加载归中姿态的舵机 raw 值."""
+    config_path = (
+        Path(__file__).resolve().parents[2]
+        / 'robot_description' / 'config' / 'arm_initial_positions.yaml'
+    )
+    positions = yaml.safe_load(config_path.read_text())['initial_positions']
+    return [
+        joint_position_to_servo_raw(index, positions[name])
+        for index, name in enumerate(ARM_CENTER_JOINTS)
+    ]
+
+
+PRESET_SERVO_RAW = {
+    ACTION_ARM_CENTER: _load_arm_center_raw(),
+    ACTION_LEFT_BUCKET: [900.0, 600.0, 290.0, 100.0, 500.0],
+    ACTION_RIGHT_BUCKET: [100.0, 600.0, 290.0, 100.0, 500.0],
+}
 
 
 def servo_raw_to_joint_position(index, raw_position):
@@ -49,7 +74,6 @@ def servo_raw_to_joint_position(index, raw_position):
 
     max_degrees = JOINT_MAX_DEGREES[index]
     direction = JOINT_DIRECTIONS[index]
-    # raw=500 对应 0 度；方向和行程按实际舵机安装方式映射
     degrees = (raw_position - SERVO_CENTER) * (max_degrees / SERVO_CENTER)
     degrees *= direction
     return math.radians(degrees)

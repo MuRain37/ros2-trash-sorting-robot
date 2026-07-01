@@ -1,0 +1,248 @@
+{% extends "base.html" %}
+
+{% block title %}日志 - 机器人控制系统{% endblock %}
+
+{% block page_title %}操作日志{% endblock %}
+{% block page_subtitle %}查看控制、导航、对话和系统事件历史，支持分页查询和删除。{% endblock %}
+
+{% block content %}
+<section class="card">
+    <div class="card-header">
+        <span><i class="fas fa-clock-rotate-left me-2"></i>历史日志</span>
+        <span class="status-pill dark" id="log-storage-label">加载中</span>
+    </div>
+    <div class="card-body">
+        <div class="log-toolbar">
+            <input class="form-control" id="keyword-input" type="search" placeholder="搜索动作、详情、用户或状态">
+            <select class="form-select" id="action-type-select">
+                <option value="">全部类型</option>
+                <option value="系统">系统</option>
+                <option value="机器人控制">机器人控制</option>
+                <option value="导航目标">导航目标</option>
+                <option value="文本指令">文本指令</option>
+                <option value="语音指令">语音指令</option>
+                <option value="区域清扫">区域清扫</option>
+                <option value="划定区域">划定区域</option>
+                <option value="删除区域">删除区域</option>
+            </select>
+            <button class="btn btn-primary" type="button" onclick="loadLogs(1)">
+                <i class="fas fa-magnifying-glass me-2"></i>查询
+            </button>
+            <button class="btn btn-danger" type="button" onclick="clearLogs()">
+                <i class="fas fa-trash me-2"></i>清空
+            </button>
+        </div>
+
+        <div class="table-responsive mt-3">
+            <table class="table log-table align-middle">
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>时间</th>
+                        <th>类型</th>
+                        <th>状态</th>
+                        <th>详情</th>
+                        <th>用户/IP</th>
+                        <th class="text-end">操作</th>
+                    </tr>
+                </thead>
+                <tbody id="logs-body">
+                    <tr><td colspan="7" class="text-muted text-center py-4">加载中</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <div class="log-footer">
+            <span id="log-total-label">0 条</span>
+            <div class="pager">
+                <button class="btn btn-outline-secondary" type="button" id="prev-page-btn" onclick="loadLogs(currentPage - 1)">
+                    <i class="fas fa-chevron-left"></i>
+                </button>
+                <span id="page-label">1 / 1</span>
+                <button class="btn btn-outline-secondary" type="button" id="next-page-btn" onclick="loadLogs(currentPage + 1)">
+                    <i class="fas fa-chevron-right"></i>
+                </button>
+            </div>
+        </div>
+    </div>
+</section>
+{% endblock %}
+
+{% block extra_css %}
+<style>
+    .log-toolbar {
+        display: grid;
+        grid-template-columns: minmax(220px, 1fr) 180px auto auto;
+        gap: 10px;
+        align-items: center;
+    }
+
+    .log-table {
+        margin: 0;
+    }
+
+    .log-table th {
+        color: #667085;
+        white-space: nowrap;
+        font-size: 13px;
+    }
+
+    .log-detail {
+        max-width: 520px;
+        white-space: normal;
+        word-break: break-word;
+    }
+
+    .log-footer {
+        display: flex;
+        justify-content: space-between;
+        gap: 14px;
+        align-items: center;
+        margin-top: 16px;
+        color: #667085;
+    }
+
+    .pager {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+    }
+
+    .pager .btn {
+        width: 42px;
+        height: 38px;
+        padding: 0;
+    }
+
+    @media (max-width: 900px) {
+        .log-toolbar {
+            grid-template-columns: 1fr;
+        }
+
+        .log-footer {
+            align-items: flex-start;
+            flex-direction: column;
+        }
+    }
+</style>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    let currentPage = 1;
+    let totalPages = 1;
+    const pageSize = 20;
+
+    function escapeHtml(value) {
+        return String(value ?? '').replace(/[&<>"']/g, char => ({
+            '&': '&amp;',
+            '<': '&lt;',
+            '>': '&gt;',
+            '"': '&quot;',
+            "'": '&#039;'
+        }[char]));
+    }
+
+    function statusPill(row) {
+        const ok = row.success;
+        const cls = ok ? 'status-pill ok' : 'status-pill warn';
+        return `<span class="${cls}">${escapeHtml(row.status || (ok ? '完成' : '失败'))}</span>`;
+    }
+
+    function renderLogs(data) {
+        const body = document.getElementById('logs-body');
+        const rows = data.items || [];
+        if (!rows.length) {
+            body.innerHTML = '<tr><td colspan="7" class="text-muted text-center py-4">暂无日志</td></tr>';
+        } else {
+            body.innerHTML = rows.map(row => `
+                <tr>
+                    <td>${row.id}</td>
+                    <td>${escapeHtml(row.timestamp)}</td>
+                    <td>${escapeHtml(row.action_type)}</td>
+                    <td>${statusPill(row)}</td>
+                    <td class="log-detail">${escapeHtml(row.action_details)}</td>
+                    <td>
+                        <div>${escapeHtml(row.user_id || '-')}</div>
+                        <small class="text-muted">${escapeHtml(row.ip_address || '-')}</small>
+                    </td>
+                    <td class="text-end">
+                        <button class="btn btn-sm btn-outline-danger" type="button" onclick="deleteLog(${row.id})">
+                            <i class="fas fa-trash"></i>
+                        </button>
+                    </td>
+                </tr>
+            `).join('');
+        }
+
+        currentPage = data.page || 1;
+        totalPages = data.pages || 1;
+        document.getElementById('log-total-label').textContent = `${data.total || 0} 条`;
+        document.getElementById('page-label').textContent = `${currentPage} / ${totalPages}`;
+        document.getElementById('prev-page-btn').disabled = currentPage <= 1;
+        document.getElementById('next-page-btn').disabled = currentPage >= totalPages;
+
+        const storage = document.getElementById('log-storage-label');
+        storage.textContent = data.storage === 'mysql' ? 'MySQL' : '内存';
+        storage.className = data.storage === 'mysql' ? 'status-pill ok' : 'status-pill warn';
+    }
+
+    async function loadLogs(page = 1) {
+        const keyword = document.getElementById('keyword-input').value.trim();
+        const actionType = document.getElementById('action-type-select').value;
+        const params = new URLSearchParams({
+            page: Math.max(1, page),
+            page_size: pageSize
+        });
+        if (keyword) params.set('keyword', keyword);
+        if (actionType) params.set('action_type', actionType);
+
+        try {
+            const response = await fetch(`/api/logs?${params.toString()}`);
+            const data = await response.json();
+            if (!response.ok || !data.success) {
+                throw new Error(data.error || '日志查询失败');
+            }
+            renderLogs(data);
+        } catch (error) {
+            showToast(error.message || '日志查询失败', 'error');
+        }
+    }
+
+    async function deleteLog(id) {
+        if (!window.confirm(`删除日志 ${id}？`)) return;
+        try {
+            const response = await fetch(`/api/logs/${id}`, { method: 'DELETE' });
+            const data = await response.json();
+            if (!response.ok || !data.success) {
+                throw new Error(data.error || '删除失败');
+            }
+            showToast('日志已删除', 'success');
+            loadLogs(currentPage);
+        } catch (error) {
+            showToast(error.message || '删除失败', 'error');
+        }
+    }
+
+    async function clearLogs() {
+        if (!window.confirm('清空全部操作日志？')) return;
+        try {
+            const response = await fetch('/api/logs', { method: 'DELETE' });
+            const data = await response.json();
+            if (!response.ok || !data.success) {
+                throw new Error(data.error || '清空失败');
+            }
+            showToast('日志已清空', 'success');
+            loadLogs(1);
+        } catch (error) {
+            showToast(error.message || '清空失败', 'error');
+        }
+    }
+
+    document.getElementById('keyword-input').addEventListener('keydown', event => {
+        if (event.key === 'Enter') loadLogs(1);
+    });
+
+    loadLogs(1);
+</script>
+{% endblock %}

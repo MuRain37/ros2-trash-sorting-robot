@@ -7,6 +7,7 @@ from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import (
     DeclareLaunchArgument,
+    ExecuteProcess,
     IncludeLaunchDescription,
     OpaqueFunction,
     RegisterEventHandler,
@@ -193,6 +194,23 @@ def launch_setup(context):
             )
         )
 
+    if _as_bool(LaunchConfiguration('use_frontend').perform(context)):
+        workspace = os.path.dirname(
+            os.path.dirname(
+                os.path.dirname(
+                    os.path.dirname(robot_launch_pkg)
+                )
+            )
+        )
+        frontend_dir = os.path.join(workspace, 'src', 'robot_frontend', 'Flask')
+        actions.append(
+            ExecuteProcess(
+                cmd=['python3', 'app.py'],
+                cwd=frontend_dir,
+                output='screen',
+            )
+        )
+
     if _as_bool(LaunchConfiguration('use_rviz').perform(context)):
         actions.append(
             _include_module(
@@ -249,6 +267,11 @@ def generate_launch_description():
             'use_voice',
             default_value='false',
             description='Start voice module (robot_speak)',
+        ),
+        DeclareLaunchArgument(
+            'use_frontend',
+            default_value='true',
+            description='Start web frontend (Flask)',
         ),
         DeclareLaunchArgument(
             'open_loop_control',
