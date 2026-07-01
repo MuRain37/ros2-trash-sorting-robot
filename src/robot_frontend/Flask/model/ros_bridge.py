@@ -28,9 +28,10 @@ else:
     ROS_IMPORT_ERROR = None
 
 try:
-    from robot_interfaces.srv import AddCoverageRectangle
+    from robot_interfaces.srv import AddCoverageRectangle, DumpTrash
 except Exception as exc:
     AddCoverageRectangle = None
+    DumpTrash = None
     ROBOT_INTERFACES_IMPORT_ERROR = exc
 else:
     ROBOT_INTERFACES_IMPORT_ERROR = None
@@ -80,6 +81,12 @@ class FlaskRosNode(Node):
             self.coverage_task_client = self.create_client(
                 AddCoverageRectangle,
                 config["coverage_task_service"],
+            )
+        self.dump_trash_client = None
+        if DumpTrash is not None:
+            self.dump_trash_client = self.create_client(
+                DumpTrash,
+                config["dump_trash_service"],
             )
         self._grasp_start_client = self.create_client(Trigger, "vision_grasp/start")
         self._grasp_stop_client = self.create_client(Trigger, "vision_grasp/stop")
@@ -132,7 +139,8 @@ class FlaskRosNode(Node):
             "Flask ROS bridge ready: "
             f"depth={self.depth_topics}, "
             f"color={self.color_topics}, map={config['map_topic']}, "
-            f"coverage_service={config['coverage_task_service']}"
+            f"coverage_service={config['coverage_task_service']}, "
+            f"dump_service={config['dump_trash_service']}"
         )
 
     def handle_depth_image(self, msg, topic):
@@ -232,8 +240,16 @@ class FlaskRosNode(Node):
             finally:
                 response_event.set()
         future.add_done_callback(on_response)
-        response_event.wait(timeout_sec=3.0)
+        if not response_event.wait(timeout=3.0):
+            return {"success": False, "message": f"vision_grasp/{action} service response timeout"}
         return result
+
+    def call_dump_trash(self, bucket_id):
+        if DumpTrash is None or self.dump_trash_client is None:
+            raise RuntimeError(f"robot_interfaces 未加载: {ROBOT_INTERFACES_IMPORT_ERROR}")
+        request = DumpTrash.Request()
+        request.bucket_id = int(bucket_id)
+        return self.dump_trash_client.call_async(request)
 
     def call_coverage_task(self, min_x, min_y, max_x, max_y, frame_id):
         if AddCoverageRectangle is None or self.coverage_task_client is None:
@@ -594,7 +610,7 @@ class RosBridge:
                 "success": False,
                 "error": (
                     "区域清扫接口未加载，请先执行 "
-                    "source /home/xjw/ros2_yuan/install/setup.bash"
+                    "source /home/xjw/ros2_robot/install/setup.bash"
                 ),
             }
 
@@ -641,6 +657,59 @@ class RosBridge:
             return {"success": False, "error": "覆盖清扫服务响应超时"}
         return result
 
+    def dump_trash(self, bucket_id):
+        if not self.started or not self.node:
+            return {"success": False, "error": self.start_error or "ROS bridge 未启动"}
+
+        try:
+            bucket_id = int(bucket_id)
+        except (TypeError, ValueError):
+            return {"success": False, "error": "垃圾桶编号无效"}
+
+        if bucket_id not in (1, 2):
+            return {"success": False, "error": "垃圾桶编号必须是 1 或 2"}
+
+        if DumpTrash is None or self.node.dump_trash_client is None:
+            return {
+                "success": False,
+                "error": (
+                    "卸载垃圾接口未加载，请先执行 "
+                    "source /home/xjw/ros2_robot/install/setup.bash"
+                ),
+            }
+
+        service_timeout_sec = float(self.config.get("goal_timeout_sec", 3.0))
+        if not self.node.dump_trash_client.wait_for_service(timeout_sec=service_timeout_sec):
+            return {
+                "success": False,
+                "error": f"卸载垃圾服务不可用: {self.config['dump_trash_service']}",
+            }
+
+        timeout_sec = float(self.config.get("dump_timeout_sec", 60.0))
+        response_event = threading.Event()
+        result = {}
+        future = self.node.call_dump_trash(bucket_id)
+
+        def on_response(done):
+            try:
+                response = done.result()
+                result.update(
+                    {
+                        "success": bool(response.success),
+                        "message": response.message,
+                        "bucket_id": bucket_id,
+                    }
+                )
+            except Exception as exc:
+                result.update({"success": False, "error": str(exc), "bucket_id": bucket_id})
+            finally:
+                response_event.set()
+
+        future.add_done_callback(on_response)
+        if not response_event.wait(timeout=timeout_sec):
+            return {"success": False, "error": "卸载垃圾服务响应超时", "bucket_id": bucket_id}
+        return result
+
     def _handle_nav_result(self, done):
         try:
             result = done.result()
@@ -682,11 +751,13 @@ class RosBridge:
                     "amcl_pose": self.config["amcl_pose_topic"],
                     "scan": self.config["scan_topic"],
                     "coverage_task_service": self.config["coverage_task_service"],
+                    "dump_trash_service": self.config["dump_trash_service"],
                 },
                 "camera": self.get_camera_info(),
                 "has_map": self.map is not None,
                 "has_robot_pose": self.robot_pose is not None,
                 "coverage_interface_loaded": AddCoverageRectangle is not None,
+                "dump_interface_loaded": DumpTrash is not None,
                 "coverage_interface_error": str(ROBOT_INTERFACES_IMPORT_ERROR) if ROBOT_INTERFACES_IMPORT_ERROR else None,
                 "nav_status": dict(self.nav_status),
                 "errors": dict(self.errors),

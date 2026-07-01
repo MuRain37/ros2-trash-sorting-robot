@@ -235,7 +235,6 @@ def control_robot():
     labels = {
         "standby": "待机",
         "start": "启动",
-        "unload": "卸载垃圾",
         "grasp_start": "视觉抓取启动",
         "grasp_stop": "视觉抓取停止",
     }
@@ -266,6 +265,27 @@ def control_robot():
             "status": RuntimeData.robot_status(),
         }
     )
+
+
+@app.route("/api/robot/dump_bucket", methods=["POST"])
+def dump_bucket():
+    data = request.get_json(silent=True) or {}
+    try:
+        bucket_id = int(data.get("bucket_id"))
+    except (TypeError, ValueError):
+        return jsonify({"success": False, "error": "bucket_id 必须是 1 或 2"}), 400
+
+    result = ROS_BRIDGE.dump_trash(bucket_id)
+    success = bool(result.get("success"))
+    add_log(
+        "卸载垃圾桶",
+        f"执行卸载桶 {bucket_id}",
+        status="完成" if success else "失败",
+        success=success,
+        metadata={"bucket_id": bucket_id, "service_result": result},
+    )
+    status_code = 200 if success else 503
+    return jsonify(result), status_code
 
 
 @app.route("/api/robot/text_command", methods=["POST"])

@@ -94,9 +94,13 @@
                 <i class="fas fa-play"></i>
                 <span>视觉抓取启动</span>
             </button>
-            <button class="btn btn-warning command-btn" type="button" onclick="sendCommand('unload')">
+            <button class="btn btn-warning command-btn" type="button" onclick="dumpBucket(1)">
                 <i class="fas fa-dumpster"></i>
-                <span>卸载垃圾</span>
+                <span>卸载桶1</span>
+            </button>
+            <button class="btn btn-warning command-btn" type="button" onclick="dumpBucket(2)">
+                <i class="fas fa-dumpster-fire"></i>
+                <span>卸载桶2</span>
             </button>
         </div>
     </div>
@@ -206,7 +210,7 @@
 
     .command-grid {
         display: grid;
-        grid-template-columns: repeat(3, minmax(0, 1fr));
+        grid-template-columns: repeat(4, minmax(0, 1fr));
         gap: 14px;
     }
 
@@ -303,8 +307,7 @@
     async function sendCommand(type) {
         const labels = {
             standby: '待机',
-            start: '启动',
-            unload: '卸载垃圾'
+            start: '启动'
         };
         try {
             const response = await fetch('/api/robot/control', {
@@ -314,12 +317,29 @@
             });
             const data = await response.json();
             if (!response.ok || !data.success) {
-                throw new Error(data.error || '命令发送失败');
+                throw new Error(data.message || data.error || '命令发送失败');
             }
             renderStatus(data.status);
-            showToast(`${labels[type]}命令已记录`, 'success');
+            showToast(data.message || `${labels[type] || '命令'}已完成`, 'success');
         } catch (error) {
             showToast(error.message || '命令发送失败', 'error');
+        }
+    }
+
+    async function dumpBucket(bucketId) {
+        try {
+            const response = await fetch('/api/robot/dump_bucket', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ bucket_id: bucketId })
+            });
+            const data = await response.json();
+            if (!response.ok || !data.success) {
+                throw new Error(data.error || data.message || '卸载失败');
+            }
+            showToast(data.message || `卸载桶${bucketId}完成`, 'success');
+        } catch (error) {
+            showToast(error.message || `卸载桶${bucketId}失败`, 'error');
         }
     }
 
