@@ -183,6 +183,16 @@ def launch_setup(context):
             )
         )
 
+    if _as_bool(LaunchConfiguration('use_voice').perform(context)):
+        actions.append(
+            IncludeLaunchDescription(
+                PythonLaunchDescriptionSource([
+                    get_package_share_directory('robot_speak'),
+                    '/launch/robot_speak.launch.py',
+                ]),
+            )
+        )
+
     if _as_bool(LaunchConfiguration('use_rviz').perform(context)):
         actions.append(
             _include_module(
@@ -234,6 +244,11 @@ def generate_launch_description():
             'use_drive',
             default_value='false',
             description='Start real sensors and drivers when mode=custom',
+        ),
+        DeclareLaunchArgument(
+            'use_voice',
+            default_value='false',
+            description='Start voice module (robot_speak)',
         ),
         DeclareLaunchArgument(
             'open_loop_control',

@@ -24,7 +24,8 @@ setup(
     },
     entry_points={
         'console_scripts': [
-            'dump_trash_client = robot_dump_task.dump_trash_client:main',
+            'arm_preset_action = robot_manipulation.arm_preset_action:main',
+            'dump_trash_node = robot_manipulation.dump_bridge:main',
         ],
     },
 )
