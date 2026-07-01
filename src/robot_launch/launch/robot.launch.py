@@ -194,6 +194,16 @@ def launch_setup(context):
             )
         )
 
+    if _as_bool(LaunchConfiguration('use_vision_grasp').perform(context)):
+        actions.append(
+            IncludeLaunchDescription(
+                PythonLaunchDescriptionSource([
+                    get_package_share_directory('robot_vision_grasp'),
+                    '/launch/vision_grasp.launch.py',
+                ]),
+            )
+        )
+
     if _as_bool(LaunchConfiguration('use_frontend').perform(context)):
         workspace = os.path.dirname(
             os.path.dirname(
@@ -267,6 +277,11 @@ def generate_launch_description():
             'use_voice',
             default_value='false',
             description='Start voice module (robot_speak)',
+        ),
+        DeclareLaunchArgument(
+            'use_vision_grasp',
+            default_value='false',
+            description='Start vision grasp node',
         ),
         DeclareLaunchArgument(
             'use_frontend',

@@ -40,7 +40,7 @@ def generate_launch_description():
     )
 
     arm_preset = Node(
-        package='robot_arm',
+        package='robot_manipulation',
         executable='arm_preset_action',
         name='arm_preset_action_server',
         output='screen',

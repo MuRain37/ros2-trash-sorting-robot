@@ -33,6 +33,7 @@ def generate_launch_description():
         ]),
         launch_arguments={
             'pointcloud.enable': 'true',
+            'align_depth.enable': 'true',
             'enable_gyro': 'true',
             'enable_accel': 'true',
         }.items(),
