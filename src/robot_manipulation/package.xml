@@ -10,8 +10,6 @@
   <depend>rclpy</depend>
   <depend>robot_arm</depend>
   <depend>robot_interfaces</depend>
-  <depend>std_msgs</depend>
-  <depend>trajectory_msgs</depend>
 
   <test_depend>python3-pytest</test_depend>
 

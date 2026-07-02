@@ -7,7 +7,6 @@ find_package(nav_msgs REQUIRED)
 rosidl_generate_interfaces(${PROJECT_NAME}
   "action/ArmTarget.action"
   "action/ArmPreset.action"
-  "action/ArmScanLock.action"
   "action/ExecuteCoveragePath.action"
   "srv/AddCoverageRectangle.srv"
   "srv/GenerateCoveragePath.srv"

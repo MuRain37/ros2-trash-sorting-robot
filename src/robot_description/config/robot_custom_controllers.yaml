@@ -24,7 +24,7 @@ robot_diff_drive_controller:
     odom_frame_id: odom
     base_frame_id: base_footprint
     pose_covariance_diagonal: [0.001, 0.001, 0.0, 0.0, 0.0, 0.01]
-    twist_covariance_diagonal: [0.001, 0.001, 0.0, 0.0, 0.0, 0.01]
+    twist_covariance_diagonal: [0.001, 0.001, 0.0, 0.0, 0.0, 0.1]
 
     enable_odom_tf: false
 

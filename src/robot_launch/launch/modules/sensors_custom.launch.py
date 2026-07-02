@@ -16,11 +16,6 @@ def generate_launch_description():
         get_package_share_directory('imu_ros2_device')
         + '/config/imu_filter_param.yaml'
     )
-    ekf_params = (
-        get_package_share_directory('robot_launch')
-        + '/config/ekf.yaml'
-    )
-
     declare_params_file = DeclareLaunchArgument(
         'params_file',
         default_value=ydlidar_pkg + '/params/ydlidar.yaml',
@@ -52,17 +47,6 @@ def generate_launch_description():
         package='imu_filter_madgwick',
         executable='imu_filter_madgwick_node',
         parameters=[imu_filter_params],
-    )
-
-    ekf_filter = Node(
-        package='robot_localization',
-        executable='ekf_node',
-        name='ekf_filter_node',
-        output='screen',
-        parameters=[ekf_params],
-        remappings=[
-            ('odometry/filtered', '/odom'),
-        ],
     )
 
     pointcloud_to_laserscan = Node(
@@ -104,6 +88,5 @@ def generate_launch_description():
         pointcloud_to_laserscan,
         imu_device,
         imu_filter,
-        ekf_filter,
         lidar,
     ])
