@@ -1,0 +1,33 @@
+slam_toolbox:
+  ros__parameters:
+    use_sim_time: false
+    mode: mapping
+
+    map_frame: map
+    odom_frame: odom
+    base_frame: base_footprint
+    scan_topic: /scan
+
+    resolution: 0.03
+
+    # ---------- 关键帧密度 ----------
+    # 加大间距，减少节点数量 → 修正时不会产生密集的级联变形
+    minimum_travel_distance: 0.3
+    minimum_travel_heading: 0.3
+
+    # ---------- 扫描匹配 ----------
+    # 提高匹配响应阈值，只接受高质量匹配（默认 0.8 太高，0.3 是折中）
+    link_match_minimum_response_fine: 0.3
+    # 限制单次匹配的搜索范围，避免大幅度跳变修正
+    correlation_search_space_dimension: 0.3
+
+    # ---------- 位姿修正惩罚 ----------
+    # 加重距离/角度修正的代价，让优化器倾向小幅调整
+    distance_variance_penalty: 0.7
+    angle_variance_penalty: 1.5
+
+    # ---------- 回环检测 ----------
+    do_loop_closing: true
+    # 提高回环接受门槛，减少误回环造成的地图变形
+    loop_match_minimum_response_coarse: 0.45
+    loop_match_minimum_response_fine: 0.55

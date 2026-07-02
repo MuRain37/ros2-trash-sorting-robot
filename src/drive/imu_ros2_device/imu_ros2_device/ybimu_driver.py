@@ -23,7 +23,7 @@ class ybimu_driver(Node):
         self.robot = None
         self.declare_parameter("publish_rate", 50.0)
         self.declare_parameter("orientation_variance", 0.01)
-        self.declare_parameter("angular_velocity_variance", 0.02)
+        self.declare_parameter("angular_velocity_variance", 0.01)
         self.declare_parameter("linear_acceleration_variance", 0.04)
         self.orientation_covariance = self._diagonal_covariance(
             self.get_parameter("orientation_variance").value
