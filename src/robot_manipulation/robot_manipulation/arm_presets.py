@@ -3,6 +3,7 @@
 import math
 from pathlib import Path
 
+from ament_index_python.packages import get_package_share_directory
 import yaml
 
 
@@ -44,8 +45,9 @@ def joint_position_to_servo_raw(index, joint_position):
 def _load_arm_center_raw():
     """从 robot_description 配置文件加载归中姿态的舵机 raw 值."""
     config_path = (
-        Path(__file__).resolve().parents[2]
-        / 'robot_description' / 'config' / 'arm_initial_positions.yaml'
+        Path(get_package_share_directory('robot_description'))
+        / 'config'
+        / 'arm_initial_positions.yaml'
     )
     positions = yaml.safe_load(config_path.read_text())['initial_positions']
     return [
@@ -56,8 +58,8 @@ def _load_arm_center_raw():
 
 PRESET_SERVO_RAW = {
     ACTION_ARM_CENTER: _load_arm_center_raw(),
-    ACTION_LEFT_BUCKET: [900.0, 600.0, 290.0, 100.0, 500.0],
-    ACTION_RIGHT_BUCKET: [100.0, 600.0, 290.0, 100.0, 500.0],
+    ACTION_LEFT_BUCKET: [900.0, 650.0, 240.0, 100.0, 500.0],
+    ACTION_RIGHT_BUCKET: [100.0, 650.0, 240.0, 100.0, 500.0],
 }
 
 

@@ -144,7 +144,8 @@ class SerialPort:
             n = self._serial.write(data)
             self._serial.flush()
             if self._debug:
-                self._log(f'[SerialPort] TX {n}B: {data!r}')
+                # self._log(f'[SerialPort] TX {n}B: {data!r}')
+                pass
             return n
         except serial.SerialException as e:
             self._log(f'[SerialPort] 写入失败: {e}')
@@ -161,7 +162,8 @@ class SerialPort:
                 chunk = self._serial.read(64)  # 每次最多读64字节
                 if chunk:
                     if self._debug:
-                        self._log(f'[SerialPort] RX {len(chunk)}B: {chunk!r}')
+                        # self._log(f'[SerialPort] RX {len(chunk)}B: {chunk!r}')
+                        pass
                     with self._lock:
                         self._rx_buf.extend(chunk)
             except serial.SerialException:

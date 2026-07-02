@@ -46,7 +46,7 @@ class SerialFeedbackDispatcher:
             )
             return
 
-        self._node.get_logger().info(f'Parsed motor state: {motor_state}')
+        # self._node.get_logger().info(f'Parsed motor state: {motor_state}')
         # 非开环模式下，用真实电机状态更新反馈
         if not self._node._motor_open_loop_control:
             self._node._motor.publish_feedback(motor_state)

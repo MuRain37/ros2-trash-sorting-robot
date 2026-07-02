@@ -8,6 +8,7 @@
   <license>TODO: License declaration</license>
 
   <depend>rclpy</depend>
+  <depend>ament_index_python</depend>
   <depend>robot_arm</depend>
   <depend>robot_interfaces</depend>
   <depend>python3-yaml</depend>

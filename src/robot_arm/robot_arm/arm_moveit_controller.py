@@ -87,7 +87,7 @@ class ArmMoveItController:
         )
 
     def move_to_target(self, x, y, z,ideal_pitch=90.0, gripper_rotation_deg=0.0, feedback_callback=None):
-        """在 90°~-20° 逐度搜索 IK，选出最接近 ideal_pitch 的解并执行。
+        """在 90°~-0° 逐度搜索 IK，选出最接近 ideal_pitch 的解并执行。
 
         ideal_pitch：get_ik_pitch 返回的理想俯仰角（度）。
                     None 表示自动模式，取最高可行俯仰角。
@@ -109,8 +109,8 @@ class ArmMoveItController:
         best_ik = None       # (joint_positions, target_angles_deg, candidate_pitch)
         best_error = float('inf')
 
-        # 从 90° 到 -20° 逐度搜索=
-        for candidate_pitch in range(90, -21, -1):
+        # 从 90° 到 0° 逐度搜索=
+        for candidate_pitch in range(90, 0, -2):
             self._node.get_logger().info(f'pitch={candidate_pitch}')
             ik_result = self._compute_moveit_ik(
                 x, y, z, candidate_pitch, gripper_rotation_deg, feedback_callback
@@ -129,7 +129,7 @@ class ArmMoveItController:
                 if error < best_error:
                     best_error = error
                     best_ik = (joint_positions, target_angles_deg, candidate_pitch)
-                    if error == 0:
+                    if error < 5:
                         break  # 完美匹配
             else:
                 # 自动模式：取最高可行俯仰角
@@ -317,7 +317,6 @@ class ArmMoveItController:
                 self._last_ik_error = 'IK response has no complete joint state'
                 continue
             positions = dict(zip(joint_state.name, joint_state.position))
-            # 第5轴只影响夹爪绕自身轴旋转，不影响 TCP 位置；IK 仍按旧的
             # arm_tool_rotate_joint=0 求前4轴，成功后再把第5轴写入 joint goal。
             positions['arm_tool_rotate_joint'] = (
                 gripper_rotation_deg * DEG_TO_RAD
@@ -381,7 +380,7 @@ class ArmMoveItController:
         )
         ik_request.avoid_collisions = False
         ik_request.ik_link_name = self.TARGET_LINK
-        ik_request.pose_stamped = self._target_pose(x_cm, y_cm, z_cm, pitch_deg)
+        ik_request.pose_stamped = self._target_pose(x_cm, y_cm, z_cm, pitch_deg, gripper_rotation_deg)
         ik_request.timeout.sec = int(self.IK_TIMEOUT)
         ik_request.timeout.nanosec = int((self.IK_TIMEOUT - int(self.IK_TIMEOUT)) * 1e9)
         return request
@@ -471,7 +470,7 @@ class ArmMoveItController:
             for t1, t2, t3, t4 in candidates
         ]
 
-    def _target_pose(self, x_cm, y_cm, z_cm, pitch_deg, gripper_rotation_deg):
+    def _target_pose(self, x_cm, y_cm, z_cm, pitch_deg=90.0, gripper_rotation_deg=0.0):
         pose = PoseStamped()
         origin_x, origin_y, origin_z = (v / 100.0 for v in self._arm_origin_cm)
         pose.header.frame_id = self.TARGET_FRAME
@@ -668,3 +667,6 @@ class ArmMoveItController:
         if angles is None or len(angles) != 5:
             return list(ZERO_ANGLES)
         return [float(angle) for angle in angles]
+    
+    def _format_angles(self, angles):
+        return '[' + ', '.join(f'{angle:.2f}' for angle in angles) + ']'

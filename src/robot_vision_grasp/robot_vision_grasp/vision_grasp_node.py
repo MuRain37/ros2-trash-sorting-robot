@@ -29,12 +29,12 @@ ACTION_TIMEOUT_SEC = 30.0
 ARM_CENTER_PRESET = ArmPreset.Goal.ARM_CENTER
 LEFT_BUCKET_CLASSES = {'paper', 'yan', 'bottle'}
 RIGHT_BUCKET_CLASSES = {'usb', 'charger', 'pen'}
-GRIPPER_WAIT_SEC = 1.4
+GRIPPER_WAIT_SEC = 1.0
 GRIPPER_DURATION_MS = 500.0
 TARGET_OFFSETS_CM = {
-    'bottle': (0.0, 0.0, -9.0),
-    'charger': (1.5, 0.0, -4.0),
-    'paper': (1.5, 0.0, -4.0),
+    'bottle': (0.0, 0.0, -6.0),
+    'charger': (1.5, 0.0, -3.5),
+    'paper': (1.5, 0.0, -3.5),
 }
 
 
@@ -200,12 +200,7 @@ class VisionGraspNode(Node):
                         self._execute_grasp_sequence(target)
                 except Exception as exc:
                     self.get_logger().warning(f'Grasp loop iteration failed: {exc}')
-
-            # 每秒检测一帧，避免 CPU 满载
-            for _ in range(10):
-                if not self._running or not rclpy.ok():
-                    return
-                time.sleep(0.1)
+            time.sleep(0.1)
 
     # ── 检测与抓取 ────────────────────────────────────
 
@@ -224,13 +219,6 @@ class VisionGraspNode(Node):
             tf_target = self._camera_target_to_arm_target(targets[0])
             if tf_target is None:
                 return None
-            self.get_logger().info(
-                f"{tf_target['class_name']}: "
-                f"target=({tf_target['target_cm'][0]:.1f}, "
-                f"{tf_target['target_cm'][1]:.1f}, "
-                f"{tf_target['target_cm'][2]:.1f})cm "
-                f"best_angle={tf_target['best_angle_deg']:.1f} deg"
-            )
             return tf_target
         finally:
             self._vision_lock.release()
@@ -290,7 +278,7 @@ class VisionGraspNode(Node):
         ])
 
     def _target_cm_for_object(self, object_arm_m, class_name):
-        return object_arm_m * 100.0 + np.array(TARGET_OFFSETS_CM.get(class_name, (0.0, 0.0, -3.5)), dtype=float)
+        return object_arm_m * 100.0 + np.array(TARGET_OFFSETS_CM.get(class_name, (0.0, 0.0, -2.5)), dtype=float)
 
     def _execute_grasp_sequence(self, target):
         """完整抓取周期：开夹爪 → 移动目标 → 夹紧 → 丢桶 → 归中。"""
@@ -310,14 +298,15 @@ class VisionGraspNode(Node):
                 self._call_gripper(1.0, GRIPPER_DURATION_MS)
                 time.sleep(GRIPPER_WAIT_SEC)
             self._send_arm_preset(ARM_CENTER_PRESET)
+            self._call_gripper(0.0, GRIPPER_DURATION_MS)
         finally:
             self._sequence_lock.release()
 
     @staticmethod
     def _bucket_preset_for_class(class_name):
         if class_name in LEFT_BUCKET_CLASSES:
-            return ArmPreset.Goal.LEFT_BUCKET
-        return ArmPreset.Goal.RIGHT_BUCKET if class_name in RIGHT_BUCKET_CLASSES else None
+            return 1
+        return 2
 
     def _send_arm_target(self, target):
         goal = ArmTarget.Goal()
@@ -325,6 +314,14 @@ class VisionGraspNode(Node):
         goal.duration = self._arm_goal_duration
         goal.end_angle = float(target['best_angle_deg'])
         goal.gripper_rotation = float(target['gripper_rotation_deg'])
+
+        self.get_logger().info(
+            f"Arm target goal: class={target['class_name']}, "
+            f"xyz=({goal.x:.2f}, {goal.y:.2f}, {goal.z:.2f}) cm, "
+            f"pitch={goal.end_angle:.2f} deg, "
+            f"gripper_rotation={goal.gripper_rotation:.2f} deg"
+        )
+
         return self._send_goal(self._arm_action, goal, ACTION_TIMEOUT_SEC, 'Arm target')
 
     def _send_arm_preset(self, action_type):
