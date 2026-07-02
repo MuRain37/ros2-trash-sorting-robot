@@ -21,7 +21,26 @@ class ybimu_driver(Node):
     def __init__(self, name):
         super().__init__(name)
         self.robot = None
+        self.declare_parameter("publish_rate", 50.0)
+        self.declare_parameter("orientation_variance", 0.01)
+        self.declare_parameter("angular_velocity_variance", 0.02)
+        self.declare_parameter("linear_acceleration_variance", 0.04)
+        self.orientation_covariance = self._diagonal_covariance(
+            self.get_parameter("orientation_variance").value
+        )
+        self.angular_velocity_covariance = self._diagonal_covariance(
+            self.get_parameter("angular_velocity_variance").value
+        )
+        self.linear_acceleration_covariance = self._diagonal_covariance(
+            self.get_parameter("linear_acceleration_variance").value
+        )
 
+    def _diagonal_covariance(self, variance):
+        return [
+            float(variance), 0.0, 0.0,
+            0.0, float(variance), 0.0,
+            0.0, 0.0, float(variance),
+        ]
 
     def init_topic(self):
         port_list = ["/dev/myimu", "/dev/ttyUSB0", "/dev/ttyUSB1", "/dev/ttyUSB2"]
@@ -44,7 +63,11 @@ class ybimu_driver(Node):
         self.eulerPublisher = self.create_publisher(Float32MultiArray, "euler", 100)
 
         # create timer
-        self.timer = self.create_timer(0.1, self.pub_data)
+        publish_rate = self.get_parameter("publish_rate").value
+        if publish_rate <= 0.0:
+            self.get_logger().warn("publish_rate must be positive, using 50.0 Hz")
+            publish_rate = 50.0
+        self.timer = self.create_timer(1.0 / publish_rate, self.pub_data)
 
 
     # pub data
@@ -81,6 +104,9 @@ class ybimu_driver(Node):
         imu.orientation.x = q1
         imu.orientation.y = q2
         imu.orientation.z = q3
+        imu.orientation_covariance = self.orientation_covariance
+        imu.angular_velocity_covariance = self.angular_velocity_covariance
+        imu.linear_acceleration_covariance = self.linear_acceleration_covariance
 
         mag.header.stamp = time_stamp.to_msg()
         mag.header.frame_id = "imu_link"

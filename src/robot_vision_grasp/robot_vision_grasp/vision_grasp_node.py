@@ -30,7 +30,7 @@ ARM_CENTER_PRESET = ArmPreset.Goal.ARM_CENTER
 LEFT_BUCKET_CLASSES = {'paper', 'yan', 'bottle'}
 RIGHT_BUCKET_CLASSES = {'usb', 'charger', 'pen'}
 GRIPPER_WAIT_SEC = 1.4
-GRIPPER_DURATION_MS = 1000.0
+GRIPPER_DURATION_MS = 500.0
 TARGET_OFFSETS_CM = {
     'bottle': (0.0, 0.0, -9.0),
     'charger': (1.5, 0.0, -4.0),
@@ -300,6 +300,7 @@ class VisionGraspNode(Node):
             class_name = target['class_name']
             self._call_gripper(1.0, GRIPPER_DURATION_MS)
             if not self._send_arm_target(target):
+                self._call_gripper(0.0, GRIPPER_DURATION_MS)
                 return
             if not self._call_gripper(gripper_close_open_ratio(class_name), GRIPPER_DURATION_MS):
                 return

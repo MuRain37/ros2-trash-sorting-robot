@@ -3,12 +3,9 @@
 import math
 import time
 
-from geometry_msgs.msg import Pose
-from geometry_msgs.msg import PoseStamped
+from geometry_msgs.msg import Pose, PoseStamped
 from moveit_msgs.action import MoveGroup
-from moveit_msgs.msg import Constraints
-from moveit_msgs.msg import JointConstraint
-from moveit_msgs.msg import MoveItErrorCodes
+from moveit_msgs.msg import Constraints, JointConstraint, MoveItErrorCodes
 from moveit_msgs.srv import GetPositionIK
 import rclpy
 from rclpy.action import ActionClient
@@ -25,13 +22,10 @@ MOVEIT_ERROR_NAMES = {
 
 
 class ArmMoveItController:
-    """封装 MoveIt IK、规划和执行流程。"""
-
     ALLOWED_PLANNING_TIME = 5.0
     FIXED_END_JOINT_POSITION = 0.0
     GOAL_JOINT_TOLERANCE = 0.001
-    IK_CALL_TIMEOUT = 1.0
-    IK_TIMEOUT = 0.5
+    IK_CALL_TIMEOUT, IK_TIMEOUT = 1.0, 0.5
     NUM_PLANNING_ATTEMPTS = 10
     TARGET_FRAME = 'base_link'
     TARGET_JOINT_COUNT = 5
@@ -68,23 +62,17 @@ class ArmMoveItController:
     ]
 
     def __init__(self, node, group_name, move_action_name, callback_group):
-        self._node = node
-        self._group_name = group_name
+        self._node, self._group_name = node, group_name
         self._move_action_name = move_action_name
         self._arm_origin_cm = self.DEFAULT_TARGET_ORIGIN_CM
         self._arm_link_lengths_cm = None
         self._last_ik_error = None
 
         self._move_group = ActionClient(
-            node,
-            MoveGroup,
-            move_action_name,
-            callback_group=callback_group,
+            node, MoveGroup, move_action_name, callback_group=callback_group
         )
         self._compute_ik = node.create_client(
-            GetPositionIK,
-            '/compute_ik',
-            callback_group=callback_group,
+            GetPositionIK, '/compute_ik', callback_group=callback_group
         )
 
     def set_link_lengths(self, origin, lengths):
@@ -260,14 +248,10 @@ class ArmMoveItController:
                 f'action server {self._move_action_name} is not ready',
             )
 
-        goal_msg = self._build_move_group_goal(joint_positions)
-        send_future = self._move_group.send_goal_async(goal_msg)
-        if not self._wait_for_future(
-            send_future,
-            feedback_callback,
-            0.1,
-            target_angles_deg,
-        ):
+        send_future = self._move_group.send_goal_async(
+            self._build_move_group_goal(joint_positions)
+        )
+        if not self._wait_for_future(send_future, feedback_callback, 0.1, target_angles_deg):
             return False, list(ZERO_ANGLES), 'interrupted while sending goal'
 
         move_goal_handle = send_future.result()
@@ -276,10 +260,7 @@ class ArmMoveItController:
 
         result_future = move_goal_handle.get_result_async()
         if not self._wait_for_future(
-            result_future,
-            feedback_callback,
-            0.5,
-            target_angles_deg,
+            result_future, feedback_callback, 0.5, target_angles_deg
         ):
             return False, list(ZERO_ANGLES), 'interrupted while waiting result'
 
@@ -292,6 +273,7 @@ class ArmMoveItController:
                 list(ZERO_ANGLES),
                 f'error_code={error_code} ({error_name})',
             )
+        return True, self._extract_final_angles(result, target_angles_deg), None
 
         final_angles = self._extract_final_angles(result, target_angles_deg)
         return True, final_angles, None
@@ -378,7 +360,6 @@ class ArmMoveItController:
             target_angles_deg = [joint_positions[i] / DEG_TO_RAD
                                  for i in range(5)]
             return joint_positions, target_angles_deg
-
         return None
 
     def _build_ik_request(self, x_cm, y_cm, z_cm, pitch_deg, gripper_rotation_deg, seed_positions):
@@ -427,11 +408,9 @@ class ArmMoveItController:
             if key not in seen:
                 seen.add(key)
                 unique_seeds.append(fixed_seed)
-
         return unique_seeds
 
     def _geometric_seed_positions(self, x_cm, y_cm, z_cm, pitch_deg):
-        """用四连杆几何解生成 IK 初始种子。"""
         if self._arm_link_lengths_cm is None:
             return []
 
@@ -441,7 +420,6 @@ class ArmMoveItController:
         end_dir_x = math.cos(end_pitch) * math.cos(theta1)
         end_dir_y = math.cos(end_pitch) * math.sin(theta1)
         end_dir_z = math.sin(end_pitch)
-
         wrist_x = x_cm - l4 * end_dir_x
         wrist_y = y_cm - l4 * end_dir_y
         wrist_z = z_cm - l4 * end_dir_z
@@ -470,7 +448,6 @@ class ArmMoveItController:
         )
         elbow_inner = math.acos(cos_elbow_inner)
         beta = math.acos(cos_beta)
-
         candidates = []
         for shoulder_sign in (1.0, -1.0):
             if shoulder_sign < 0.0 and beta <= 1e-9:
@@ -486,18 +463,15 @@ class ArmMoveItController:
 
         return [
             {
-                'arm_base_joint': self._normalize_angle(theta1),
-                'arm_shoulder_joint': self._normalize_angle(theta2),
-                'arm_elbow_joint': self._normalize_angle(theta3),
-                'arm_wrist_joint': self._normalize_angle(theta4),
+                'arm_base_joint': math.atan2(math.sin(t1), math.cos(t1)),
+                'arm_shoulder_joint': math.atan2(math.sin(t2), math.cos(t2)),
+                'arm_elbow_joint': math.atan2(math.sin(t3), math.cos(t3)),
+                'arm_wrist_joint': math.atan2(math.sin(t4), math.cos(t4)),
             }
-            for theta1, theta2, theta3, theta4 in candidates
+            for t1, t2, t3, t4 in candidates
         ]
 
-    def _normalize_angle(self, angle):
-        return math.atan2(math.sin(angle), math.cos(angle))
-
-    def _target_pose(self, x_cm, y_cm, z_cm, pitch_deg):
+    def _target_pose(self, x_cm, y_cm, z_cm, pitch_deg, gripper_rotation_deg):
         pose = PoseStamped()
         origin_x, origin_y, origin_z = (v / 100.0 for v in self._arm_origin_cm)
         pose.header.frame_id = self.TARGET_FRAME
@@ -561,13 +535,9 @@ class ArmMoveItController:
         half_roll = roll * 0.5
         half_pitch = pitch * 0.5
         half_yaw = yaw * 0.5
-
-        cr = math.cos(half_roll)
-        sr = math.sin(half_roll)
-        cp = math.cos(half_pitch)
-        sp = math.sin(half_pitch)
-        cy = math.cos(half_yaw)
-        sy = math.sin(half_yaw)
+        cr, sr = math.cos(half_roll), math.sin(half_roll)
+        cp, sp = math.cos(half_pitch), math.sin(half_pitch)
+        cy, sy = math.cos(half_yaw), math.sin(half_yaw)
 
         orientation = Pose().orientation
         orientation.w = cr * cp * cy + sr * sp * sy
@@ -575,6 +545,75 @@ class ArmMoveItController:
         orientation.y = cr * sp * cy + sr * cp * sy
         orientation.z = cr * cp * sy - sr * sp * cy
         return orientation
+
+    def _multiply_quaternions(self, first, second):
+        orientation = Pose().orientation
+        orientation.w = (
+            first.w * second.w
+            - first.x * second.x
+            - first.y * second.y
+            - first.z * second.z
+        )
+        orientation.x = (
+            first.w * second.x
+            + first.x * second.w
+            + first.y * second.z
+            - first.z * second.y
+        )
+        orientation.y = (
+            first.w * second.y
+            - first.x * second.z
+            + first.y * second.w
+            + first.z * second.x
+        )
+        orientation.z = (
+            first.w * second.z
+            + first.x * second.y
+            - first.y * second.x
+            + first.z * second.w
+        )
+        return orientation
+
+    def _build_move_group_goal(self, joint_positions):
+        goal_msg = MoveGroup.Goal()
+        request = goal_msg.request
+        request.group_name = self._group_name
+        request.num_planning_attempts = self.NUM_PLANNING_ATTEMPTS
+        request.allowed_planning_time = self.ALLOWED_PLANNING_TIME
+        request.max_velocity_scaling_factor = self.VELOCITY_SCALING
+        request.max_acceleration_scaling_factor = self.ACCELERATION_SCALING
+        request.start_state.is_diff = True
+
+        request.workspace_parameters.header.frame_id = self.TARGET_FRAME
+        request.workspace_parameters.min_corner.x = self.WORKSPACE_MIN[0]
+        request.workspace_parameters.min_corner.y = self.WORKSPACE_MIN[1]
+        request.workspace_parameters.min_corner.z = self.WORKSPACE_MIN[2]
+        request.workspace_parameters.max_corner.x = self.WORKSPACE_MAX[0]
+        request.workspace_parameters.max_corner.y = self.WORKSPACE_MAX[1]
+        request.workspace_parameters.max_corner.z = self.WORKSPACE_MAX[2]
+
+        constraints = Constraints()
+        constraints.name = 'moveit_ik_joint_goal'
+        constraints.joint_constraints = [
+            self._joint_constraint(joint, position)
+            for joint, position in zip(self.MOVEIT_JOINTS, joint_positions)
+        ]
+        path_constraints = Constraints()
+        path_constraints.name = 'fixed_end_joints_path'
+        path_constraints.joint_constraints = [
+            self._joint_constraint(joint, 0.0) for joint in self.FIXED_END_JOINTS
+        ]
+        request.goal_constraints = [constraints]
+        request.path_constraints = path_constraints
+
+        options = goal_msg.planning_options
+        options.plan_only = False
+        options.replan = True
+        options.replan_attempts = 2
+        options.replan_delay = 0.1
+        options.planning_scene_diff.is_diff = True
+        options.planning_scene_diff.robot_state.is_diff = True
+        return goal_msg
 
     def _joint_constraint(self, joint_name, position):
         constraint = JointConstraint()
@@ -586,8 +625,7 @@ class ArmMoveItController:
         return constraint
 
     def _extract_final_angles(self, result, fallback_angles):
-        trajectory = result.executed_trajectory
-        joint_trajectory = trajectory.joint_trajectory
+        joint_trajectory = result.executed_trajectory.joint_trajectory
         if not joint_trajectory.points:
             joint_trajectory = result.planned_trajectory.joint_trajectory
         if not joint_trajectory.points:
@@ -605,20 +643,13 @@ class ArmMoveItController:
             return list(ZERO_ANGLES)
 
     def _wait_for_future(
-        self,
-        future,
-        feedback_callback=None,
-        progress=0.0,
-        current_angles=None,
+        self, future, feedback_callback=None, progress=0.0, current_angles=None,
         timeout_sec=None,
     ):
         start_time = time.monotonic()
         feedback_time = 0.0
         while rclpy.ok() and not future.done():
-            if (
-                timeout_sec is not None
-                and time.monotonic() - start_time >= timeout_sec
-            ):
+            if timeout_sec is not None and time.monotonic() - start_time >= timeout_sec:
                 future.cancel()
                 return False
 
@@ -637,6 +668,3 @@ class ArmMoveItController:
         if angles is None or len(angles) != 5:
             return list(ZERO_ANGLES)
         return [float(angle) for angle in angles]
-
-    def _format_angles(self, angles):
-        return '[' + ', '.join(f'{angle:.2f}' for angle in angles) + ']'
