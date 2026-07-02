@@ -1,0 +1,13 @@
+# Hold a calibrated arm pose while camera point cloud is converted to 2D laser.
+
+# 0 means hold until the action is canceled.
+float64 hold_seconds
+---
+bool success
+string message
+float64[5] model_joint_positions
+float64[5] hardware_joint_positions
+---
+float64 elapsed_seconds
+float64[5] model_joint_positions
+float64[5] hardware_joint_positions
