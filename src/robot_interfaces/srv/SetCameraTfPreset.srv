@@ -1,0 +1,4 @@
+uint8 action_type
+---
+bool success
+string message

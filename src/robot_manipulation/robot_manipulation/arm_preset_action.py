@@ -1,5 +1,7 @@
 """机械臂预设姿态 Action 节点：接收动作类型并委托 MoveIt 执行."""
 
+import time
+
 import rclpy
 from rclpy.action import ActionServer
 from rclpy.action import CancelResponse
@@ -11,6 +13,9 @@ from rclpy.node import Node
 from robot_arm.arm_moveit_controller import ArmMoveItController
 from robot_arm.arm_moveit_controller import ZERO_ANGLES
 from robot_interfaces.action import ArmPreset
+from robot_interfaces.srv import SetCameraTfPreset
+from robot_manipulation.arm_presets import ACTION_ARM_CENTER
+from robot_manipulation.arm_presets import ACTION_ARM_MAPPING
 from robot_manipulation.arm_presets import preset_name
 from robot_manipulation.arm_presets import preset_to_joint_positions
 
@@ -27,12 +32,29 @@ class ArmPresetActionServer(Node):
         self.declare_parameter('move_action_name', '/move_action')
         # 对外提供的预设姿态 Action 名
         self.declare_parameter('action_name', '/arm_preset')
+        # 成功进入关键预设姿态后，同步请求真实相机 TF 节点切换参数
+        self.declare_parameter(
+            'camera_tf_preset_service',
+            '/real_camera_static_tf/set_preset',
+        )
+        self.declare_parameter('camera_tf_preset_timeout_sec', 1.0)
 
         self._group_name = self.get_parameter('group_name').value
         self._move_action_name = self.get_parameter('move_action_name').value
         self._action_name = self.get_parameter('action_name').value
+        self._camera_tf_preset_service_name = self.get_parameter(
+            'camera_tf_preset_service'
+        ).value
+        self._camera_tf_preset_timeout_sec = float(
+            self.get_parameter('camera_tf_preset_timeout_sec').value
+        )
 
         callback_group = ReentrantCallbackGroup()
+        self._camera_tf_preset_client = self.create_client(
+            SetCameraTfPreset,
+            self._camera_tf_preset_service_name,
+            callback_group=callback_group,
+        )
         # 复用 MoveIt 控制器，最终仍通过 /move_action 规划和执行
         self._moveit = ArmMoveItController(
             self,
@@ -111,12 +133,66 @@ class ArmPresetActionServer(Node):
 
         # MoveIt 成功才标记 succeed；失败则 abort，并把失败信息放进结果
         if success:
-            self._publish_feedback(goal_handle, 1.0, final_angles)
-            goal_handle.succeed()
+            tf_success, tf_message = self._set_camera_tf_preset(action_type)
+            if tf_success:
+                self._publish_feedback(goal_handle, 1.0, final_angles)
+                goal_handle.succeed()
+            else:
+                success = False
+                message = tf_message
+                goal_handle.abort()
         else:
             goal_handle.abort()
 
         return self._result(success, message, final_angles)
+
+    def _set_camera_tf_preset(self, action_type):
+        """机械臂进入关键姿态后，请求真实相机 TF 节点切换参数."""
+        if action_type not in (ACTION_ARM_CENTER, ACTION_ARM_MAPPING):
+            return True, 'camera tf unchanged'
+
+        if not self._camera_tf_preset_client.wait_for_service(
+            timeout_sec=self._camera_tf_preset_timeout_sec,
+        ):
+            return (
+                False,
+                f'camera tf preset service unavailable: '
+                f'{self._camera_tf_preset_service_name}',
+            )
+
+        request = SetCameraTfPreset.Request()
+        request.action_type = int(action_type)
+        future = self._camera_tf_preset_client.call_async(request)
+        deadline = time.monotonic() + self._camera_tf_preset_timeout_sec
+        while rclpy.ok() and not future.done():
+            if time.monotonic() >= deadline:
+                return (
+                    False,
+                    f'camera tf preset service timed out: '
+                    f'{self._camera_tf_preset_service_name}',
+                )
+            time.sleep(0.01)
+
+        if not future.done():
+            return (
+                False,
+                f'camera tf preset service interrupted: '
+                f'{self._camera_tf_preset_service_name}',
+            )
+
+        try:
+            response = future.result()
+        except Exception as exc:  # noqa: BLE001 - surface service failure
+            return False, f'camera tf preset service failed: {exc}'
+
+        if not response.success:
+            return False, response.message
+
+        self.get_logger().info(
+            f'Camera TF preset switched: action_type={action_type} '
+            f'({preset_name(action_type)})'
+        )
+        return True, response.message
 
     def _publish_feedback(self, goal_handle, progress, angles):
         """发布 action 反馈；返回 False 时通知控制器停止等待."""

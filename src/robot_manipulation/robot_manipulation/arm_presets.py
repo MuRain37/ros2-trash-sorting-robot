@@ -6,12 +6,14 @@ import math
 ACTION_ARM_CENTER = 0
 ACTION_LEFT_BUCKET = 1
 ACTION_RIGHT_BUCKET = 2
+ACTION_ARM_MAPPING = 3
 
 # 动作类型编号需要和 robot_interfaces/action/ArmPreset.action 中的常量一致
 ACTION_NAMES = {
     ACTION_ARM_CENTER: 'arm_center',
     ACTION_LEFT_BUCKET: 'left_bucket',
     ACTION_RIGHT_BUCKET: 'right_bucket',
+    ACTION_ARM_MAPPING: 'arm_mapping',
 }
 
 # 标定时只需要改这里：每行依次对应 servo1 ~ servo5 的原始位置值
@@ -19,6 +21,14 @@ PRESET_SERVO_RAW = {
     ACTION_ARM_CENTER: [500.0, 750.0, 0.0, 150.0, 500.0],
     ACTION_LEFT_BUCKET: [500.0, 500.0, 500.0, 500.0, 500.0],
     ACTION_RIGHT_BUCKET: [500.0, 500.0, 500.0, 500.0, 500.0],
+    # 对应 robot_description/config/arm_initial_positions.yaml 的默认建图姿态
+    ACTION_ARM_MAPPING: [
+        500.0,
+        599.1933182820237,
+        272.58350181599076,
+        162.57560515087266,
+        500.0,
+    ],
 }
 
 # 舵机 raw 值范围：中位 500，最小 0，最大 1000

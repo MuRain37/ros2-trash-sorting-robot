@@ -34,6 +34,40 @@ class FakeMoveIt:
         return self.success, self.final_angles, self.message
 
 
+class FakeCameraTfResponse:
+
+    def __init__(self, success=True, message='tf ok'):
+        self.success = success
+        self.message = message
+
+
+class FakeFuture:
+
+    def __init__(self, response):
+        self._response = response
+
+    def done(self):
+        return True
+
+    def result(self):
+        return self._response
+
+
+class FakeCameraTfClient:
+
+    def __init__(self, available=True, success=True, message='tf ok'):
+        self.available = available
+        self.response = FakeCameraTfResponse(success, message)
+        self.requests = []
+
+    def wait_for_service(self, timeout_sec=None):
+        return self.available
+
+    def call_async(self, request):
+        self.requests.append(request.action_type)
+        return FakeFuture(self.response)
+
+
 class FakeGoalHandle:
 
     def __init__(self, action_type, cancel_requested=False):
@@ -56,9 +90,14 @@ class FakeGoalHandle:
         self.status = 'canceled'
 
 
-def make_server(fake_moveit):
+def make_server(fake_moveit, fake_camera_tf_client=None):
     server = ArmPresetActionServer.__new__(ArmPresetActionServer)
     server._moveit = fake_moveit
+    server._camera_tf_preset_client = (
+        fake_camera_tf_client or FakeCameraTfClient()
+    )
+    server._camera_tf_preset_service_name = '/real_camera_static_tf/set_preset'
+    server._camera_tf_preset_timeout_sec = 0.01
     server.get_logger = lambda: FakeLogger()
     return server
 
@@ -99,6 +138,9 @@ def test_arm_preset_action_executes_valid_action():
         0.5,
         1.0,
     ]
+    assert server._camera_tf_preset_client.requests == [
+        ArmPreset.Goal.ARM_CENTER,
+    ]
     assert goal_handle.status == 'succeed'
 
 
@@ -116,4 +158,21 @@ def test_arm_preset_action_returns_moveit_failure_message():
     assert result.success is False
     assert result.message == 'failed'
     assert list(result.final_angles) == [0.0] * 5
+    assert server._camera_tf_preset_client.requests == []
+    assert goal_handle.status == 'abort'
+
+
+def test_arm_preset_action_aborts_when_camera_tf_service_fails():
+    fake_camera_tf_client = FakeCameraTfClient(
+        success=False,
+        message='tf failed',
+    )
+    server = make_server(FakeMoveIt(), fake_camera_tf_client)
+    goal_handle = FakeGoalHandle(ArmPreset.Goal.ARM_CENTER)
+
+    result = server._execute_arm_preset(goal_handle)
+
+    assert result.success is False
+    assert result.message == 'tf failed'
+    assert fake_camera_tf_client.requests == [ArmPreset.Goal.ARM_CENTER]
     assert goal_handle.status == 'abort'

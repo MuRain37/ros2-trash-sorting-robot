@@ -14,7 +14,7 @@ Panels:
         - /LaserScan1/Topic1
         - /PointCloud21
       Splitter Ratio: 0.5
-    Tree Height: 752
+    Tree Height: 790
   - Class: rviz_common/Selection
     Name: Selection
   - Class: rviz_common/Tool Properties
@@ -72,116 +72,6 @@ Visualization Manager:
         Expand Link Details: false
         Expand Tree: false
         Link Tree Style: Links in Alphabetic Order
-        arm_link0:
-          Alpha: 1
-          Show Axes: false
-          Show Trail: false
-          Value: true
-        arm_link1:
-          Alpha: 1
-          Show Axes: false
-          Show Trail: false
-          Value: true
-        arm_link2:
-          Alpha: 1
-          Show Axes: false
-          Show Trail: false
-          Value: true
-        arm_link3:
-          Alpha: 1
-          Show Axes: false
-          Show Trail: false
-          Value: true
-        arm_link4:
-          Alpha: 1
-          Show Axes: false
-          Show Trail: false
-          Value: true
-        base_footprint:
-          Alpha: 1
-          Show Axes: false
-          Show Trail: false
-        base_link:
-          Alpha: 1
-          Show Axes: false
-          Show Trail: false
-          Value: true
-        camera_bracket:
-          Alpha: 1
-          Show Axes: false
-          Show Trail: false
-          Value: true
-        camera_link:
-          Alpha: 1
-          Show Axes: false
-          Show Trail: false
-          Value: true
-        camera_optical_link:
-          Alpha: 1
-          Show Axes: false
-          Show Trail: false
-        front_left_wheel:
-          Alpha: 1
-          Show Axes: false
-          Show Trail: false
-          Value: true
-        front_right_wheel:
-          Alpha: 1
-          Show Axes: false
-          Show Trail: false
-          Value: true
-        left_barrel:
-          Alpha: 1
-          Show Axes: false
-          Show Trail: false
-          Value: true
-        left_gripper_finger:
-          Alpha: 1
-          Show Axes: false
-          Show Trail: false
-          Value: true
-        lidar_bracket:
-          Alpha: 1
-          Show Axes: false
-          Show Trail: false
-          Value: true
-        lidar_link:
-          Alpha: 1
-          Show Axes: false
-          Show Trail: false
-          Value: true
-        rear_left_wheel:
-          Alpha: 1
-          Show Axes: false
-          Show Trail: false
-          Value: true
-        rear_right_wheel:
-          Alpha: 1
-          Show Axes: false
-          Show Trail: false
-          Value: true
-        right_barrel:
-          Alpha: 1
-          Show Axes: false
-          Show Trail: false
-          Value: true
-        right_gripper_finger:
-          Alpha: 1
-          Show Axes: false
-          Show Trail: false
-          Value: true
-        tool0:
-          Alpha: 1
-          Show Axes: false
-          Show Trail: false
-        tool_pitch_link:
-          Alpha: 1
-          Show Axes: false
-          Show Trail: false
-        tool_roll_link:
-          Alpha: 1
-          Show Axes: false
-          Show Trail: false
       Mass Properties:
         Inertia: false
         Mass: false
@@ -192,7 +82,7 @@ Visualization Manager:
       Visual Enabled: true
     - Acceleration_Scaling_Factor: 0.1
       Class: moveit_rviz_plugin/MotionPlanning
-      Enabled: false
+      Enabled: true
       Move Group Namespace: ""
       MoveIt_Allow_Approximate_IK: false
       MoveIt_Allow_External_Program: false
@@ -221,116 +111,6 @@ Visualization Manager:
           Expand Link Details: false
           Expand Tree: false
           Link Tree Style: Links in Alphabetic Order
-          arm_link0:
-            Alpha: 1
-            Show Axes: false
-            Show Trail: false
-            Value: true
-          arm_link1:
-            Alpha: 1
-            Show Axes: false
-            Show Trail: false
-            Value: true
-          arm_link2:
-            Alpha: 1
-            Show Axes: false
-            Show Trail: false
-            Value: true
-          arm_link3:
-            Alpha: 1
-            Show Axes: false
-            Show Trail: false
-            Value: true
-          arm_link4:
-            Alpha: 1
-            Show Axes: false
-            Show Trail: false
-            Value: true
-          base_footprint:
-            Alpha: 1
-            Show Axes: false
-            Show Trail: false
-          base_link:
-            Alpha: 1
-            Show Axes: false
-            Show Trail: false
-            Value: true
-          camera_bracket:
-            Alpha: 1
-            Show Axes: false
-            Show Trail: false
-            Value: true
-          camera_link:
-            Alpha: 1
-            Show Axes: false
-            Show Trail: false
-            Value: true
-          camera_optical_link:
-            Alpha: 1
-            Show Axes: false
-            Show Trail: false
-          front_left_wheel:
-            Alpha: 1
-            Show Axes: false
-            Show Trail: false
-            Value: true
-          front_right_wheel:
-            Alpha: 1
-            Show Axes: false
-            Show Trail: false
-            Value: true
-          left_barrel:
-            Alpha: 1
-            Show Axes: false
-            Show Trail: false
-            Value: true
-          left_gripper_finger:
-            Alpha: 1
-            Show Axes: false
-            Show Trail: false
-            Value: true
-          lidar_bracket:
-            Alpha: 1
-            Show Axes: false
-            Show Trail: false
-            Value: true
-          lidar_link:
-            Alpha: 1
-            Show Axes: false
-            Show Trail: false
-            Value: true
-          rear_left_wheel:
-            Alpha: 1
-            Show Axes: false
-            Show Trail: false
-            Value: true
-          rear_right_wheel:
-            Alpha: 1
-            Show Axes: false
-            Show Trail: false
-            Value: true
-          right_barrel:
-            Alpha: 1
-            Show Axes: false
-            Show Trail: false
-            Value: true
-          right_gripper_finger:
-            Alpha: 1
-            Show Axes: false
-            Show Trail: false
-            Value: true
-          tool0:
-            Alpha: 1
-            Show Axes: false
-            Show Trail: false
-          tool_pitch_link:
-            Alpha: 1
-            Show Axes: false
-            Show Trail: false
-          tool_roll_link:
-            Alpha: 1
-            Show Axes: false
-            Show Trail: false
         Loop Animation: true
         Robot Alpha: 0.5
         Robot Color: 150; 50; 150
@@ -377,120 +157,10 @@ Visualization Manager:
           Expand Link Details: false
           Expand Tree: false
           Link Tree Style: Links in Alphabetic Order
-          arm_link0:
-            Alpha: 1
-            Show Axes: false
-            Show Trail: false
-            Value: true
-          arm_link1:
-            Alpha: 1
-            Show Axes: false
-            Show Trail: false
-            Value: true
-          arm_link2:
-            Alpha: 1
-            Show Axes: false
-            Show Trail: false
-            Value: true
-          arm_link3:
-            Alpha: 1
-            Show Axes: false
-            Show Trail: false
-            Value: true
-          arm_link4:
-            Alpha: 1
-            Show Axes: false
-            Show Trail: false
-            Value: true
-          base_footprint:
-            Alpha: 1
-            Show Axes: false
-            Show Trail: false
-          base_link:
-            Alpha: 1
-            Show Axes: false
-            Show Trail: false
-            Value: true
-          camera_bracket:
-            Alpha: 1
-            Show Axes: false
-            Show Trail: false
-            Value: true
-          camera_link:
-            Alpha: 1
-            Show Axes: false
-            Show Trail: false
-            Value: true
-          camera_optical_link:
-            Alpha: 1
-            Show Axes: false
-            Show Trail: false
-          front_left_wheel:
-            Alpha: 1
-            Show Axes: false
-            Show Trail: false
-            Value: true
-          front_right_wheel:
-            Alpha: 1
-            Show Axes: false
-            Show Trail: false
-            Value: true
-          left_barrel:
-            Alpha: 1
-            Show Axes: false
-            Show Trail: false
-            Value: true
-          left_gripper_finger:
-            Alpha: 1
-            Show Axes: false
-            Show Trail: false
-            Value: true
-          lidar_bracket:
-            Alpha: 1
-            Show Axes: false
-            Show Trail: false
-            Value: true
-          lidar_link:
-            Alpha: 1
-            Show Axes: false
-            Show Trail: false
-            Value: true
-          rear_left_wheel:
-            Alpha: 1
-            Show Axes: false
-            Show Trail: false
-            Value: true
-          rear_right_wheel:
-            Alpha: 1
-            Show Axes: false
-            Show Trail: false
-            Value: true
-          right_barrel:
-            Alpha: 1
-            Show Axes: false
-            Show Trail: false
-            Value: true
-          right_gripper_finger:
-            Alpha: 1
-            Show Axes: false
-            Show Trail: false
-            Value: true
-          tool0:
-            Alpha: 1
-            Show Axes: false
-            Show Trail: false
-          tool_pitch_link:
-            Alpha: 1
-            Show Axes: false
-            Show Trail: false
-          tool_roll_link:
-            Alpha: 1
-            Show Axes: false
-            Show Trail: false
         Robot Alpha: 0.44999998807907104
         Show Robot Collision: false
         Show Robot Visual: true
-      Value: false
+      Value: true
       Velocity_Scaling_Factor: 0.1
     - Class: rviz_default_plugins/TF
       Enabled: true
@@ -513,6 +183,14 @@ Visualization Manager:
           Value: true
         camera_bracket:
           Value: true
+        camera_color_frame:
+          Value: true
+        camera_color_optical_frame:
+          Value: true
+        camera_depth_frame:
+          Value: true
+        camera_depth_optical_frame:
+          Value: true
         camera_link:
           Value: true
         camera_optical_link:
@@ -520,6 +198,8 @@ Visualization Manager:
         front_left_wheel:
           Value: true
         front_right_wheel:
+          Value: true
+        imu_link:
           Value: true
         left_barrel:
           Value: true
@@ -530,6 +210,8 @@ Visualization Manager:
         lidar_link:
           Value: true
         odom:
+          Value: true
+        real_camera_link:
           Value: true
         rear_left_wheel:
           Value: true
@@ -559,10 +241,6 @@ Visualization Manager:
                   arm_link2:
                     arm_link3:
                       arm_link4:
-                        camera_bracket:
-                          camera_link:
-                            camera_optical_link:
-                              {}
                         left_gripper_finger:
                           {}
                         right_gripper_finger:
@@ -571,15 +249,29 @@ Visualization Manager:
                           tool_pitch_link:
                             tool0:
                               {}
+                      camera_bracket:
+                        camera_link:
+                          camera_color_frame:
+                            camera_color_optical_frame:
+                              {}
+                          camera_depth_frame:
+                            camera_depth_optical_frame:
+                              {}
+                          camera_optical_link:
+                            {}
               front_left_wheel:
                 {}
               front_right_wheel:
+                {}
+              imu_link:
                 {}
               left_barrel:
                 {}
               lidar_bracket:
                 lidar_link:
                   {}
+              real_camera_link:
+                {}
               rear_left_wheel:
                 {}
               rear_right_wheel:
@@ -634,7 +326,7 @@ Visualization Manager:
       Color: 255; 255; 255
       Color Transformer: RGB8
       Decay Time: 0
-      Enabled: true
+      Enabled: false
       Invert Rainbow: false
       Max Color: 255; 255; 255
       Max Intensity: 4096
@@ -652,10 +344,10 @@ Visualization Manager:
         Filter size: 10
         History Policy: Keep Last
         Reliability Policy: Reliable
-        Value: /camera/camera/depth/color/points
+        Value: /camera/real_camera/depth/color/points
       Use Fixed Frame: true
       Use rainbow: true
-      Value: true
+      Value: false
   Enabled: true
   Global Options:
     Background Color: 48; 48; 48
@@ -725,14 +417,14 @@ Visualization Manager:
 Window Geometry:
   Displays:
     collapsed: false
-  Height: 1045
+  Height: 1021
   Hide Left Dock: false
   Hide Right Dock: false
   MotionPlanning:
     collapsed: false
   MotionPlanning - Trajectory Slider:
     collapsed: false
-  QMainWindow State: 000000ff00000000fd0000000400000000000002c800000346fc020000000afb0000001200530065006c0065006300740069006f006e00000001e10000009b0000008600fffffffb0000001e0054006f006f006c002000500072006f007000650072007400690065007302000001ed000001df00000185000000a3fb000000120056006900650077007300200054006f006f02000001df000002110000018500000122fb000000200054006f006f006c002000500072006f0070006500720074006900650073003203000002880000011d000002210000017afb000000100044006900730070006c0061007900730100000056000003460000012600fffffffb0000002000730065006c0065006300740069006f006e00200062007500660066006500720200000138000000aa0000023a00000294fb00000014005700690064006500530074006500720065006f02000000e6000000d2000003ee0000030bfb0000000c004b0069006e0065006300740200000186000001060000030c00000261fb00000044004d006f00740069006f006e0050006c0061006e006e0069006e00670020002d0020005400720061006a006500630074006f0072007900200053006c00690064006500720000000000ffffffff0000001e0000001efb0000001c004d006f00740069006f006e0050006c0061006e006e0069006e00670000000185000002170000021700ffffff000000010000011f00000346fc0200000003fb0000001e0054006f006f006c002000500072006f00700065007200740069006500730100000041000000780000000000000000fb0000000a00560069006500770073010000005600000346000000ec00fffffffb0000001200530065006c0065006300740069006f006e010000025a000000b200000000000000000000000200000490000000a9fc0100000001fb0000000a00560069006500770073030000004e00000080000002e100000197000000030000069c0000004afc0100000002fb0000000800540069006d006501000000000000069c0000043b00fffffffb0000000800540069006d00650100000000000004500000000000000000000002a30000034600000004000000040000000800000008fc0000000100000002000000010000000a0054006f006f006c00730100000000ffffffff0000000000000000
+  QMainWindow State: 000000ff00000000fd0000000400000000000002c800000353fc020000000afb0000001200530065006c0065006300740069006f006e00000001e10000009b0000005c00fffffffb0000001e0054006f006f006c002000500072006f007000650072007400690065007302000001ed000001df00000185000000a3fb000000120056006900650077007300200054006f006f02000001df000002110000018500000122fb000000200054006f006f006c002000500072006f0070006500720074006900650073003203000002880000011d000002210000017afb000000100044006900730070006c006100790073010000003d00000353000000c900fffffffb0000002000730065006c0065006300740069006f006e00200062007500660066006500720200000138000000aa0000023a00000294fb00000014005700690064006500530074006500720065006f02000000e6000000d2000003ee0000030bfb0000000c004b0069006e0065006300740200000186000001060000030c00000261fb00000044004d006f00740069006f006e0050006c0061006e006e0069006e00670020002d0020005400720061006a006500630074006f0072007900200053006c00690064006500720000000000ffffffff0000004100fffffffb0000001c004d006f00740069006f006e0050006c0061006e006e0069006e00670000000185000002170000017d00ffffff000000010000011f00000353fc0200000003fb0000001e0054006f006f006c002000500072006f00700065007200740069006500730100000041000000780000000000000000fb0000000a00560069006500770073010000003d00000353000000a400fffffffb0000001200530065006c0065006300740069006f006e010000025a000000b200000000000000000000000200000490000000a9fc0100000001fb0000000a00560069006500770073030000004e00000080000002e100000197000000030000069c0000004afc0100000002fb0000000800540069006d006501000000000000069c000002fb00fffffffb0000000800540069006d00650100000000000004500000000000000000000002a90000035300000004000000040000000800000008fc0000000100000002000000010000000a0054006f006f006c00730100000000ffffffff0000000000000000
   Selection:
     collapsed: false
   Time:
@@ -742,5 +434,5 @@ Window Geometry:
   Views:
     collapsed: false
   Width: 1692
-  X: 282
-  Y: 161
+  X: 228
+  Y: 269

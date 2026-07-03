@@ -3,6 +3,7 @@ import math
 import pytest
 
 from robot_manipulation.arm_presets import ACTION_ARM_CENTER
+from robot_manipulation.arm_presets import ACTION_ARM_MAPPING
 from robot_manipulation.arm_presets import preset_to_joint_positions
 from robot_manipulation.arm_presets import servo_raw_to_joint_positions
 
@@ -15,6 +16,18 @@ def test_center_preset_is_a_valid_joint_target():
     joints = preset_to_joint_positions(ACTION_ARM_CENTER)
 
     assert len(joints) == 5
+
+
+def test_mapping_preset_matches_default_initial_joint_positions():
+    joints = preset_to_joint_positions(ACTION_ARM_MAPPING)
+
+    assert joints == [
+        pytest.approx(0.0, abs=1e-4),
+        pytest.approx(-0.4155, abs=1e-4),
+        pytest.approx(0.9526, abs=1e-4),
+        pytest.approx(1.4134, abs=1e-4),
+        pytest.approx(0.0, abs=1e-4),
+    ]
 
 
 def test_servo_raw_values_convert_with_hardware_mapping():
@@ -37,4 +50,3 @@ def test_servo_raw_values_reject_out_of_range_value():
 def test_unknown_preset_action_is_rejected():
     with pytest.raises(ValueError, match='unknown action_type: 99'):
         preset_to_joint_positions(99)
-

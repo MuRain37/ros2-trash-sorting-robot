@@ -38,6 +38,7 @@ def generate_launch_description():
             ]),
         ]),
         launch_arguments={
+            'camera_name': 'real_camera',
             'pointcloud.enable': 'true',
             'enable_gyro': 'true',
             'enable_accel': 'true',
@@ -62,7 +63,7 @@ def generate_launch_description():
         name='pointcloud_to_laserscan',
         output='screen',
         remappings=[
-            ('cloud_in', '/camera/camera/depth/color/points'),
+            ('cloud_in', '/camera/real_camera/depth/color/points'),
             ('scan', '/scan_camera'),
         ],
         parameters=[{
