@@ -22,6 +22,13 @@ def generate_launch_description():
         description='YDLidar parameter file path',
     )
 
+    real_camera_static_tf = Node(
+        package='robot_manipulation',
+        executable='real_camera_static_tf',
+        name='real_camera_static_tf',
+        output='screen',
+    )
+
     realsense = IncludeLaunchDescription(
         PythonLaunchDescriptionSource([
             PathJoinSubstitution([
@@ -84,6 +91,7 @@ def generate_launch_description():
 
     return LaunchDescription([
         declare_params_file,
+        real_camera_static_tf,
         realsense,
         pointcloud_to_laserscan,
         imu_device,

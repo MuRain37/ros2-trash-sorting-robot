@@ -25,6 +25,7 @@ setup(
     entry_points={
         'console_scripts': [
             'arm_preset_action = robot_manipulation.arm_preset_action:main',
+            'real_camera_static_tf = robot_manipulation.real_camera_static_tf:main',
         ],
     },
 )

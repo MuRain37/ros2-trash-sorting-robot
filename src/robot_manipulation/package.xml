@@ -8,8 +8,10 @@
   <license>TODO: License declaration</license>
 
   <depend>rclpy</depend>
+  <depend>geometry_msgs</depend>
   <depend>robot_arm</depend>
   <depend>robot_interfaces</depend>
+  <depend>tf2_ros</depend>
 
   <test_depend>python3-pytest</test_depend>
 
