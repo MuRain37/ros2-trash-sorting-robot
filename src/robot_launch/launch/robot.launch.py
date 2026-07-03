@@ -155,6 +155,10 @@ def launch_setup(context):
             joint_state_broadcaster,
             start_controllers,
             hardware_node,
+            _include_module(
+                'localization',
+                {'use_sim_time': use_sim_time},
+            ),
         ])
         if _as_bool(LaunchConfiguration('use_drive').perform(context)):
             actions.append(_include_module('sensors_custom'))

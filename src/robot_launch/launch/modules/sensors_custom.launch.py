@@ -16,11 +16,17 @@ def generate_launch_description():
         get_package_share_directory('imu_ros2_device')
         + '/config/imu_filter_param.yaml'
     )
-
     declare_params_file = DeclareLaunchArgument(
         'params_file',
         default_value=ydlidar_pkg + '/params/ydlidar.yaml',
         description='YDLidar parameter file path',
+    )
+
+    real_camera_static_tf = Node(
+        package='robot_manipulation',
+        executable='real_camera_static_tf',
+        name='real_camera_static_tf',
+        output='screen',
     )
 
     realsense = IncludeLaunchDescription(
@@ -32,10 +38,12 @@ def generate_launch_description():
             ]),
         ]),
         launch_arguments={
+            'camera_name': 'real_camera',
             'pointcloud.enable': 'true',
             'align_depth.enable': 'true',
             'enable_gyro': 'true',
             'enable_accel': 'true',
+            'align_depth.enable': 'true',
         }.items(),
     )
 
@@ -56,7 +64,7 @@ def generate_launch_description():
         name='pointcloud_to_laserscan',
         output='screen',
         remappings=[
-            ('cloud_in', '/camera/camera/depth/color/points'),
+            ('cloud_in', '/camera/real_camera/depth/color/points'),
             ('scan', '/scan_camera'),
         ],
         parameters=[{
@@ -85,6 +93,7 @@ def generate_launch_description():
 
     return LaunchDescription([
         declare_params_file,
+        real_camera_static_tf,
         realsense,
         pointcloud_to_laserscan,
         imu_device,

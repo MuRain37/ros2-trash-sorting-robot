@@ -10,7 +10,6 @@ import yaml
 ACTION_ARM_CENTER = 0
 ACTION_LEFT_BUCKET = 1
 ACTION_RIGHT_BUCKET = 2
-
 ACTION_NAMES = {
     ACTION_ARM_CENTER: 'arm_center',
     ACTION_LEFT_BUCKET: 'left_bucket',

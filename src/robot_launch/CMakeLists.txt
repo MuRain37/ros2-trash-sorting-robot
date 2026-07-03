@@ -8,8 +8,8 @@ endif()
 # find dependencies
 find_package(ament_cmake REQUIRED)
 
-# 安装 launch 和 RViz 配置文件
-install(DIRECTORY launch rviz
+# 安装 launch、RViz 和参数配置文件
+install(DIRECTORY launch rviz config
   DESTINATION share/${PROJECT_NAME})
 
 if(BUILD_TESTING)

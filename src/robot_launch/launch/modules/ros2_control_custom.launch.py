@@ -39,6 +39,8 @@ def custom_control_actions():
         ],
         remappings=[
             ('/robot_diff_drive_controller/cmd_vel_unstamped', '/cmd_vel'),
+            ('/robot_diff_drive_controller/odom', '/wheel/odom'),
+            ('/odom', '/wheel/odom'),
         ],
         output='both',
     )
