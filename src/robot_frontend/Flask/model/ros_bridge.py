@@ -1,5 +1,8 @@
 import math
 import os
+import signal
+import shlex
+import subprocess
 import threading
 import time
 
@@ -10,7 +13,7 @@ try:
     import rclpy
     from cv_bridge import CvBridge
     from geometry_msgs.msg import PoseWithCovarianceStamped, PoseStamped, Twist
-    from nav2_msgs.action import NavigateToPose
+    from nav2_msgs.action import NavigateThroughPoses, NavigateToPose
     from nav_msgs.msg import OccupancyGrid
     from rclpy.action import ActionClient
     from rclpy.executors import SingleThreadedExecutor
@@ -75,6 +78,11 @@ class FlaskRosNode(Node):
             NavigateToPose,
             config["navigate_to_pose_action"],
         )
+        self.navigate_through_poses_client = ActionClient(
+            self,
+            NavigateThroughPoses,
+            config["navigate_through_poses_action"],
+        )
         self.cmd_vel_pub = self.create_publisher(Twist, config["cmd_vel_topic"], 10)
         self.coverage_task_client = None
         if AddCoverageRectangle is not None:
@@ -133,7 +141,7 @@ class FlaskRosNode(Node):
 
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
-        self.create_timer(0.25, self.update_tf_pose)
+        self.create_timer(0.06, self.update_tf_pose)
 
         self.get_logger().info(
             "Flask ROS bridge ready: "
@@ -221,8 +229,33 @@ class FlaskRosNode(Node):
         goal.pose.pose.orientation.w = quat["w"]
         return self.navigate_client.send_goal_async(goal)
 
+    def send_through_poses_goal(self, waypoints):
+        goal = NavigateThroughPoses.Goal()
+        goal.poses = []
+        now = self.get_clock().now().to_msg()
+        for waypoint in waypoints:
+            pose = PoseStamped()
+            pose.header.frame_id = self.map_frame
+            pose.header.stamp = now
+            pose.pose.position.x = float(waypoint["x"])
+            pose.pose.position.y = float(waypoint["y"])
+            pose.pose.position.z = 0.0
+            quat = _quaternion_from_yaw(float(waypoint.get("theta", 0.0)))
+            pose.pose.orientation.x = quat["x"]
+            pose.pose.orientation.y = quat["y"]
+            pose.pose.orientation.z = quat["z"]
+            pose.pose.orientation.w = quat["w"]
+            goal.poses.append(pose)
+        return self.navigate_through_poses_client.send_goal_async(goal)
+
     def publish_stop(self):
         self.cmd_vel_pub.publish(Twist())
+
+    def publish_velocity(self, linear_x, angular_z):
+        msg = Twist()
+        msg.linear.x = float(linear_x)
+        msg.angular.z = float(angular_z)
+        self.cmd_vel_pub.publish(msg)
 
     def call_grasp_service(self, action):
         client = self._grasp_start_client if action == "start" else self._grasp_stop_client
@@ -270,6 +303,7 @@ class RosBridge:
         self.node = None
         self.executor = None
         self.thread = None
+        self.mapping_process = None
         self.started = False
         self.start_error = None
 
@@ -327,7 +361,6 @@ class RosBridge:
 
             height, width = image.shape[:2]
             color = cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
-            color = np.flipud(color)
             ok, buffer = cv2.imencode(".png", color)
             if not ok:
                 return
@@ -382,6 +415,7 @@ class RosBridge:
             return False
 
     def shutdown(self):
+        self.stop_mapping_process()
         if self.executor:
             self.executor.shutdown()
         if self.node:
@@ -528,14 +562,165 @@ class RosBridge:
                 info["width_m"] = info["width"] * info["resolution"]
                 info["height_m"] = info["height"] * info["resolution"]
                 info["image_version"] = self.map_version
+                info["age_sec"] = round(time.time() - info["received_at"], 3) if info.get("received_at") else None
+
+            robot_position = dict(self.robot_pose) if self.robot_pose else None
+            if robot_position:
+                robot_position["age_sec"] = (
+                    round(time.time() - robot_position["received_at"], 3)
+                    if robot_position.get("received_at")
+                    else None
+                )
+
+            scan = dict(self.last_scan) if self.last_scan else None
+            if scan:
+                scan["age_sec"] = round(time.time() - scan["received_at"], 3) if scan.get("received_at") else None
             return {
                 "has_map": self.map is not None,
                 "map": info,
-                "robot_position": dict(self.robot_pose) if self.robot_pose else None,
+                "robot_position": robot_position,
                 "target_point": dict(self.target_point) if self.target_point else None,
                 "nav_status": dict(self.nav_status),
-                "scan": dict(self.last_scan) if self.last_scan else None,
+                "scan": scan,
             }
+
+    def get_robot_pose_data(self):
+        with self.lock:
+            robot_position = dict(self.robot_pose) if self.robot_pose else None
+            if robot_position:
+                robot_position["age_sec"] = (
+                    round(time.time() - robot_position["received_at"], 3)
+                    if robot_position.get("received_at")
+                    else None
+                )
+            return {
+                "has_pose": robot_position is not None,
+                "robot_position": robot_position,
+            }
+
+    def reset_mapping(self):
+        process_result = self.start_mapping_process()
+        with self.lock:
+            self.map = None
+            self.map_png = None
+            self.map_version += 1
+            self.target_point = None
+            self.nav_status = {
+                "state": "mapping",
+                "message": process_result["message"],
+                "updated_at": _now_iso(),
+            }
+            self.errors.pop("static_map", None)
+        return {
+            "success": process_result["success"],
+            "message": process_result["message"],
+            "command": process_result.get("command"),
+        }
+
+    def finish_mapping(self, save=False):
+        if save:
+            try:
+                result = self.save_current_map()
+            finally:
+                self.stop_mapping_process()
+            if result.get("success"):
+                self.load_static_map()
+            return result
+
+        self.stop_mapping_process()
+        self.load_static_map()
+        with self.lock:
+            self.nav_status = {
+                "state": "mapping_discarded",
+                "message": "已放弃本次建图，恢复使用原保存地图",
+                "updated_at": _now_iso(),
+            }
+        return {"success": True, "message": "已放弃本次建图，未保存新地图"}
+
+    def start_mapping_process(self):
+        command = (self.config.get("slam_rebuild_command") or "").strip()
+        if not command:
+            return {
+                "success": True,
+                "message": "已清空前端静态地图缓存，等待外部 SLAM 节点发布新的 /map",
+            }
+
+        try:
+            self.stop_mapping_process()
+
+            log_path = "/tmp/robot_frontend_slam_rebuild.log"
+            log_file = open(log_path, "ab")
+            self.mapping_process = subprocess.Popen(
+                shlex.split(command),
+                stdout=log_file,
+                stderr=subprocess.STDOUT,
+                start_new_session=True,
+            )
+            return {
+                "success": True,
+                "message": "已启动重新建图，前端不再使用原静态地图，等待 SLAM 从激光雷达生成新的 /map",
+                "command": command,
+            }
+        except Exception as exc:
+            return {
+                "success": False,
+                "message": f"重新建图命令启动失败: {exc}",
+                "command": command,
+            }
+
+    def stop_mapping_process(self):
+        if self.mapping_process and self.mapping_process.poll() is None:
+            try:
+                os.killpg(self.mapping_process.pid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+            try:
+                self.mapping_process.wait(timeout=2.0)
+            except subprocess.TimeoutExpired:
+                try:
+                    os.killpg(self.mapping_process.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                self.mapping_process.wait(timeout=1.0)
+        self.mapping_process = None
+
+    def save_current_map(self):
+        prefix = (self.config.get("map_save_prefix") or "").strip()
+        command_template = (self.config.get("map_save_command") or "").strip()
+        if not prefix or not command_template:
+            return {"success": False, "message": "地图保存命令未配置"}
+
+        command = command_template.format(map_prefix=prefix)
+        try:
+            completed = subprocess.run(
+                shlex.split(command),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                timeout=float(self.config.get("map_save_timeout_sec", 20.0)),
+            )
+        except Exception as exc:
+            return {
+                "success": False,
+                "message": f"地图保存失败: {exc}",
+                "command": command,
+            }
+
+        success = completed.returncode == 0
+        if success:
+            with self.lock:
+                self.nav_status = {
+                    "state": "mapping_saved",
+                    "message": f"地图已保存到 {prefix}.yaml / {prefix}.pgm",
+                    "updated_at": _now_iso(),
+                }
+        return {
+            "success": success,
+            "message": "地图已保存" if success else "地图保存失败",
+            "command": command,
+            "output": (completed.stdout or "")[-2000:],
+            "map_prefix": prefix,
+        }
 
     def send_navigation_goal(self, x, y, yaw=0.0):
         if not self.started or not self.node:
@@ -597,6 +782,107 @@ class RosBridge:
         with self.lock:
             self.target_point = {"x": float(x), "y": float(y), "theta": float(yaw)}
         return result
+
+    def send_navigation_path(self, waypoints):
+        if not self.started or not self.node:
+            return {"success": False, "error": self.start_error or "ROS bridge 未启动"}
+
+        parsed = []
+        for waypoint in waypoints:
+            try:
+                raw_theta = waypoint.get("theta")
+                parsed.append(
+                    {
+                        "x": float(waypoint["x"]),
+                        "y": float(waypoint["y"]),
+                        "theta": float(raw_theta) if raw_theta is not None else None,
+                    }
+                )
+            except (KeyError, TypeError, ValueError):
+                return {"success": False, "error": "路径点坐标无效"}
+
+        if not parsed:
+            return {"success": False, "error": "路径至少需要 1 个目标点"}
+
+        for index, point in enumerate(parsed):
+            if point["theta"] is not None:
+                continue
+            if index < len(parsed) - 1:
+                next_point = parsed[index + 1]
+                point["theta"] = math.atan2(next_point["y"] - point["y"], next_point["x"] - point["x"])
+            elif len(parsed) > 1:
+                prev_point = parsed[index - 1]
+                point["theta"] = math.atan2(point["y"] - prev_point["y"], point["x"] - prev_point["x"])
+            else:
+                point["theta"] = 0.0
+
+        timeout_sec = float(self.config.get("goal_timeout_sec", 3.0))
+        if not self.node.navigate_through_poses_client.wait_for_server(timeout_sec=timeout_sec):
+            return {
+                "success": False,
+                "error": f"Nav2 穿越路径 Action 不可用: {self.config['navigate_through_poses_action']}",
+            }
+
+        response_event = threading.Event()
+        result = {}
+        via_count = max(0, len(parsed) - 1)
+        final_goal = parsed[-1]
+        path_summary = (
+            f"{via_count} 个途经点，最终目标点 "
+            f"({final_goal['x']:.3f}, {final_goal['y']:.3f})"
+        )
+        future = self.node.send_through_poses_goal(parsed)
+
+        def on_goal_response(done):
+            try:
+                goal_handle = done.result()
+                if not goal_handle.accepted:
+                    result.update({"success": False, "error": "Nav2 拒绝路径"})
+                    with self.lock:
+                        self.nav_status = {
+                            "state": "rejected",
+                            "message": "Nav2 拒绝路径",
+                            "updated_at": _now_iso(),
+                        }
+                    return
+
+                result.update({"success": True, "accepted": True})
+                with self.lock:
+                    self.nav_status = {
+                        "state": "accepted",
+                        "message": f"路径已接受：{path_summary}",
+                        "updated_at": _now_iso(),
+                    }
+                goal_handle.get_result_async().add_done_callback(self._handle_nav_result)
+            except Exception as exc:
+                result.update({"success": False, "error": str(exc)})
+                with self.lock:
+                    self.nav_status = {
+                        "state": "error",
+                        "message": str(exc),
+                        "updated_at": _now_iso(),
+                    }
+            finally:
+                response_event.set()
+
+        future.add_done_callback(on_goal_response)
+        if not response_event.wait(timeout_sec):
+            with self.lock:
+                self.nav_status = {
+                    "state": "pending",
+                    "message": f"路径已发送，等待 Nav2 响应：{path_summary}",
+                    "updated_at": _now_iso(),
+                }
+            result.update({"success": True, "accepted": None, "pending": True})
+
+        with self.lock:
+            self.target_point = dict(parsed[-1])
+        return {
+            **result,
+            "waypoint_count": len(parsed),
+            "via_count": via_count,
+            "target_point": dict(parsed[-1]),
+        }
 
     def add_coverage_rectangle(self, min_x, min_y, max_x, max_y, frame_id=None):
         if not self.started or not self.node:
@@ -730,6 +1016,16 @@ class RosBridge:
     def publish_stop(self):
         if self.started and self.node:
             self.node.publish_stop()
+
+    def publish_velocity(self, linear_x, angular_z):
+        if not self.started or not self.node:
+            return {"success": False, "error": self.start_error or "ROS bridge 未启动"}
+        self.node.publish_velocity(linear_x, angular_z)
+        return {
+            "success": True,
+            "linear_x": float(linear_x),
+            "angular_z": float(angular_z),
+        }
 
     def call_grasp_service(self, action):
         if not self.started or not self.node:

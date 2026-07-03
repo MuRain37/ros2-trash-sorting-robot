@@ -117,8 +117,25 @@ ROS_CONFIG = {
     'map_frame': os.getenv('ROS_MAP_FRAME', 'map'),
     'robot_base_frame': os.getenv('ROS_ROBOT_BASE_FRAME', 'base_footprint'),
     'navigate_to_pose_action': os.getenv('ROS_NAVIGATE_TO_POSE_ACTION', 'navigate_to_pose'),
+    'navigate_through_poses_action': os.getenv(
+        'ROS_NAVIGATE_THROUGH_POSES_ACTION',
+        'navigate_through_poses',
+    ),
     'coverage_task_service': os.getenv('ROS_COVERAGE_TASK_SERVICE', 'add_coverage_rectangle'),
     'dump_trash_service': os.getenv('ROS_DUMP_TRASH_SERVICE', 'dump_trash'),
+    'slam_rebuild_command': os.getenv(
+        'ROS_SLAM_REBUILD_COMMAND',
+        'ros2 launch slam_toolbox online_async_launch.py use_sim_time:=true',
+    ),
+    'map_save_prefix': os.getenv(
+        'ROS_MAP_SAVE_PREFIX',
+        '/home/xjw/ros2_robot/src/robot_nav2/maps/room',
+    ),
+    'map_save_command': os.getenv(
+        'ROS_MAP_SAVE_COMMAND',
+        'ros2 run nav2_map_server map_saver_cli -f {map_prefix}',
+    ),
+    'map_save_timeout_sec': float(os.getenv('ROS_MAP_SAVE_TIMEOUT_SEC', '20.0')),
     'depth_visual_max_m': float(os.getenv('ROS_DEPTH_VISUAL_MAX_M', '8.0')),
     'goal_timeout_sec': float(os.getenv('ROS_GOAL_TIMEOUT_SEC', '3.0')),
     'dump_timeout_sec': float(os.getenv('ROS_DUMP_TIMEOUT_SEC', '60.0')),

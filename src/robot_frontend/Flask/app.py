@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta
+import atexit
 import math
 import time
 
@@ -17,6 +18,7 @@ CORS(app)
 
 START_TIME = datetime.now()
 ROS_BRIDGE = RosBridge(ROS_CONFIG)
+atexit.register(ROS_BRIDGE.shutdown)
 DATABASE_READY = False
 MEMORY_LOGS = []
 REGIONS = []
@@ -198,13 +200,14 @@ def map_page():
     )
 
 
-@app.route("/chat")
-def chat_page():
+@app.route("/mapping")
+def mapping_page():
     return render_template(
-        "chat.html",
-        command_history=RuntimeData.command_history(),
-        voice_config=VOICE_CONFIG,
+        "mapping.html",
+        map_data=ROS_BRIDGE.get_map_data(),
+        map_config=MAP_CONFIG,
         robot_config=ROBOT_CONFIG,
+        ros_config=ROS_CONFIG,
     )
 
 
@@ -380,6 +383,58 @@ def map_data():
     return jsonify(ROS_BRIDGE.get_map_data())
 
 
+@app.route("/api/robot/pose", methods=["GET"])
+def robot_pose():
+    return jsonify(ROS_BRIDGE.get_robot_pose_data())
+
+
+@app.route("/api/map/rebuild", methods=["POST"])
+def rebuild_map():
+    result = ROS_BRIDGE.reset_mapping()
+    success = bool(result.get("success"))
+    add_log(
+        "重新建图",
+        result.get("message", "重新建图"),
+        status="进行中" if success else "失败",
+        success=success,
+        metadata={"map_result": result},
+    )
+    return jsonify(result), 200 if success else 503
+
+
+@app.route("/api/map/finish", methods=["POST"])
+def finish_map():
+    data = request.get_json(silent=True) or {}
+    save = bool(data.get("save"))
+    result = ROS_BRIDGE.finish_mapping(save=save)
+    success = bool(result.get("success"))
+    add_log(
+        "保存建图" if save else "放弃建图",
+        result.get("message", "建图收尾"),
+        status="完成" if success else "失败",
+        success=success,
+        metadata={"save": save, "map_result": result},
+    )
+    return jsonify(result), 200 if success else 503
+
+
+@app.route("/api/robot/velocity", methods=["POST"])
+def robot_velocity():
+    data = request.get_json(silent=True) or {}
+    try:
+        linear_x = float(data.get("linear_x", 0.0))
+        angular_z = float(data.get("angular_z", 0.0))
+    except (TypeError, ValueError):
+        return jsonify({"success": False, "error": "速度参数无效"}), 400
+
+    max_linear = float(data.get("max_linear", 1.2) or 1.2)
+    max_angular = float(data.get("max_angular", 2.4) or 2.4)
+    linear_x = max(-max_linear, min(max_linear, linear_x))
+    angular_z = max(-max_angular, min(max_angular, angular_z))
+    result = ROS_BRIDGE.publish_velocity(linear_x, angular_z)
+    return jsonify(result), 200 if result.get("success") else 503
+
+
 @app.route("/api/map/image", methods=["GET"])
 def map_image():
     png = ROS_BRIDGE.get_map_png() or placeholder_png("No map received")
@@ -417,6 +472,34 @@ def set_target():
             "nav_status": ROS_BRIDGE.get_map_data().get("nav_status"),
         }
     ), status_code
+
+
+@app.route("/api/map/path", methods=["POST"])
+def set_path():
+    data = request.get_json(silent=True) or {}
+    waypoints = data.get("waypoints") or []
+    if not isinstance(waypoints, list):
+        return jsonify({"success": False, "error": "waypoints 必须是数组"}), 400
+    if not waypoints:
+        return jsonify({"success": False, "error": "请先在地图上点击至少一个目标点"}), 400
+
+    result = ROS_BRIDGE.send_navigation_path(waypoints)
+    success = bool(result.get("success"))
+    via_count = max(0, len(waypoints) - 1)
+    add_log(
+        "导航路径",
+        f"发送导航路径：{via_count} 个途经点，1 个最终目标点",
+        status="进行中" if success else "失败",
+        success=success,
+        metadata={"waypoints": waypoints, "nav_result": result},
+    )
+    return jsonify(
+        {
+            **result,
+            "target_point": waypoints[-1] if waypoints else None,
+            "nav_status": ROS_BRIDGE.get_map_data().get("nav_status"),
+        }
+    ), 200 if success else 503
 
 
 @app.route("/api/map/regions", methods=["GET", "POST", "DELETE"])

@@ -1,0 +1,702 @@
+{% extends "base.html" %}
+
+{% block title %}建图 - 机器人控制系统{% endblock %}
+
+{% block page_title %}建图{% endblock %}
+{% block page_subtitle %}查看机器人保存的地图，重新建图后由激光雷达与 SLAM 节点发布的新 /map 更新画面。{% endblock %}
+
+{% block content %}
+<div class="mapping-layout">
+    <section class="card mapping-map-card">
+        <div class="card-header map-toolbar">
+            <span><i class="fas fa-draw-polygon me-2"></i>建图地图</span>
+            <div class="tool-row">
+                <span class="status-pill warn" id="map-mode-label">等待地图</span>
+                <button class="btn btn-sm btn-warning" type="button" onclick="rebuildMap()">
+                    <i class="fas fa-rotate me-1"></i>重新建图
+                </button>
+                <button class="btn btn-sm btn-success" type="button" onclick="finishMapping(true)">
+                    <i class="fas fa-floppy-disk me-1"></i>保存地图
+                </button>
+                <button class="btn btn-sm btn-outline-secondary" type="button" onclick="finishMapping(false)">
+                    <i class="fas fa-ban me-1"></i>不保存
+                </button>
+                <button class="btn btn-sm btn-primary" type="button" id="control-mode-btn" onclick="toggleControlMode()">
+                    <i class="fas fa-keyboard me-1"></i>启动控制模式
+                </button>
+            </div>
+        </div>
+        <div class="card-body p-0">
+            <div class="map-stage" id="map-stage" tabindex="0">
+                <canvas id="map-canvas"></canvas>
+            </div>
+        </div>
+    </section>
+
+    <aside class="card control-card">
+        <div class="card-header">
+            <span><i class="fas fa-gamepad me-2"></i>键盘控制</span>
+        </div>
+        <div class="card-body">
+            <div class="control-status">
+                <span>模式</span>
+                <span class="status-pill dark" id="control-state-label">未启动</span>
+            </div>
+            <div class="key-pad" aria-label="WASD 控制提示">
+                <span></span>
+                <kbd id="key-w">W</kbd>
+                <span></span>
+                <kbd id="key-a">A</kbd>
+                <kbd id="key-s">S</kbd>
+                <kbd id="key-d">D</kbd>
+            </div>
+            <p class="control-hint">W/A/S/D 对应 teleop_twist_keyboard 的 I/J/,/L；组合键按 U/O/M/. 方向发布速度。</p>
+
+            <label class="slider-label" for="speed-slider">
+                <span>加速 speed</span>
+                <strong id="speed-value">0.50 m/s</strong>
+            </label>
+            <input class="form-range" id="speed-slider" type="range" min="0.05" max="1.20" step="0.05" value="0.50">
+
+            <label class="slider-label" for="turn-slider">
+                <span>转弯速度 turn</span>
+                <strong id="turn-value">1.00 rad/s</strong>
+            </label>
+            <input class="form-range" id="turn-slider" type="range" min="0.10" max="2.40" step="0.10" value="1.00">
+
+            <button class="btn btn-outline-danger w-100 mt-3" type="button" onclick="stopRobot()">
+                <i class="fas fa-stop me-1"></i>停止
+            </button>
+
+            <div class="scan-box">
+                <p>激光雷达</p>
+                <strong id="scan-state">等待 /scan</strong>
+            </div>
+        </div>
+    </aside>
+</div>
+{% endblock %}
+
+{% block extra_css %}
+<style>
+    .mapping-layout {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 320px;
+        gap: 18px;
+        align-items: start;
+    }
+
+    .mapping-map-card {
+        min-height: 720px;
+    }
+
+    .map-toolbar,
+    .tool-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        align-items: center;
+        justify-content: space-between;
+    }
+
+    .tool-row {
+        justify-content: flex-end;
+    }
+
+    .map-stage {
+        position: relative;
+        height: 666px;
+        overflow: hidden;
+        background: #101615;
+        cursor: grab;
+        outline: none;
+        user-select: none;
+        touch-action: none;
+    }
+
+    .map-stage.dragging {
+        cursor: grabbing;
+    }
+
+    #map-canvas {
+        display: block;
+        width: 100%;
+        height: 100%;
+    }
+
+    .control-card {
+        position: sticky;
+        top: 18px;
+    }
+
+    .control-status,
+    .slider-label {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 12px;
+    }
+
+    .control-status {
+        margin-bottom: 18px;
+        font-weight: 800;
+    }
+
+    .key-pad {
+        display: grid;
+        grid-template-columns: repeat(3, 54px);
+        gap: 8px;
+        justify-content: center;
+        margin: 18px 0 12px;
+    }
+
+    .key-pad kbd {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 54px;
+        height: 46px;
+        color: #1f2328;
+        background: #f1f4f8;
+        border: 1px solid #d7dde5;
+        border-bottom-width: 3px;
+        border-radius: 8px;
+        font: 900 16px/1 "Microsoft YaHei", sans-serif;
+    }
+
+    .key-pad kbd.active {
+        color: #ffffff;
+        background: #2f80ed;
+        border-color: #1d63bd;
+    }
+
+    .control-hint {
+        margin: 0 0 18px;
+        color: #667085;
+        font-size: 13px;
+        line-height: 1.6;
+    }
+
+    .slider-label {
+        margin-top: 14px;
+        color: #344054;
+        font-weight: 800;
+    }
+
+    .slider-label strong {
+        color: #2f80ed;
+        font-size: 13px;
+    }
+
+    .scan-box {
+        margin-top: 18px;
+        padding: 14px;
+        background: #f8fafc;
+        border: 1px solid #e4e7ec;
+        border-radius: 10px;
+    }
+
+    .scan-box p {
+        margin: 0 0 6px;
+        color: #667085;
+        font-weight: 800;
+    }
+
+    .scan-box strong {
+        color: #1f2328;
+    }
+
+    @media (max-width: 980px) {
+        .mapping-layout {
+            grid-template-columns: 1fr;
+        }
+
+        .control-card {
+            position: static;
+        }
+    }
+
+    @media (max-width: 720px) {
+        .map-stage {
+            height: 520px;
+        }
+    }
+</style>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    let mapData = {{ map_data|tojson }};
+    let currentImageVersion = null;
+    let controlMode = false;
+    let smoothPose = null;
+    let lastPoseStamp = null;
+    let lastVelocityErrorAt = 0;
+    let velocityRequestInFlight = false;
+    let mapRequestInFlight = false;
+    let poseRequestInFlight = false;
+    let isDraggingView = false;
+    let lastPointer = null;
+    const viewTransform = { scale: 1, offsetX: 0, offsetY: 0, rotation: 0 };
+    const pressedKeys = new Set();
+    const mapImage = new Image();
+
+    const canvas = document.getElementById('map-canvas');
+    const ctx = canvas.getContext('2d');
+    const stage = document.getElementById('map-stage');
+    const speedSlider = document.getElementById('speed-slider');
+    const turnSlider = document.getElementById('turn-slider');
+
+    mapImage.onload = () => drawMap();
+
+    function clamp(value, min, max) {
+        return Math.min(max, Math.max(min, value));
+    }
+
+    function lerp(a, b, t) {
+        return a + (b - a) * t;
+    }
+
+    function angleLerp(a, b, t) {
+        const diff = Math.atan2(Math.sin(b - a), Math.cos(b - a));
+        return a + diff * t;
+    }
+
+    function currentPose() {
+        const pose = mapData.robot_position;
+        if (!pose) return smoothPose;
+        if (pose.age_sec !== null && pose.age_sec !== undefined && pose.age_sec > 2.0) {
+            return smoothPose;
+        }
+        const stamp = pose.stamp ?? pose.received_at ?? Date.now();
+        if (!smoothPose || stamp !== lastPoseStamp) {
+            const jump = smoothPose ? Math.hypot(pose.x - smoothPose.x, pose.y - smoothPose.y) : 0;
+            const alpha = jump > 1.2 ? 1.0 : 0.35;
+            smoothPose = {
+                ...pose,
+                x: smoothPose ? lerp(smoothPose.x, pose.x, alpha) : pose.x,
+                y: smoothPose ? lerp(smoothPose.y, pose.y, alpha) : pose.y,
+                theta: smoothPose ? angleLerp(smoothPose.theta || 0, pose.theta || 0, alpha) : (pose.theta || 0),
+            };
+            lastPoseStamp = stamp;
+        }
+        return smoothPose;
+    }
+
+    function mapMeta() {
+        return mapData && mapData.has_map ? mapData.map : null;
+    }
+
+    function resizeCanvas() {
+        const rect = stage.getBoundingClientRect();
+        const ratio = window.devicePixelRatio || 1;
+        canvas.width = Math.floor(rect.width * ratio);
+        canvas.height = Math.floor(rect.height * ratio);
+        canvas.style.width = `${rect.width}px`;
+        canvas.style.height = `${rect.height}px`;
+        ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+        drawMap();
+    }
+
+    function viewport() {
+        const rect = canvas.getBoundingClientRect();
+        const meta = mapMeta();
+        if (!meta) return { x: 0, y: 0, width: rect.width, height: rect.height };
+        const mapAspect = meta.width / meta.height;
+        const canvasAspect = rect.width / rect.height;
+        if (canvasAspect > mapAspect) {
+            const height = rect.height;
+            const width = height * mapAspect;
+            return { x: (rect.width - width) / 2, y: 0, width, height };
+        }
+        const width = rect.width;
+        const height = width / mapAspect;
+        return { x: 0, y: (rect.height - height) / 2, width, height };
+    }
+
+    function transformPoint(point) {
+        const rect = canvas.getBoundingClientRect();
+        const cx = rect.width / 2;
+        const cy = rect.height / 2;
+        const cos = Math.cos(viewTransform.rotation);
+        const sin = Math.sin(viewTransform.rotation);
+        const dx = point.x - cx;
+        const dy = point.y - cy;
+        return {
+            x: cx + viewTransform.offsetX + (dx * cos - dy * sin) * viewTransform.scale,
+            y: cy + viewTransform.offsetY + (dx * sin + dy * cos) * viewTransform.scale,
+        };
+    }
+
+    function transformedViewport() {
+        const view = viewport();
+        const topLeft = transformPoint({ x: view.x, y: view.y });
+        const topRight = transformPoint({ x: view.x + view.width, y: view.y });
+        const bottomRight = transformPoint({ x: view.x + view.width, y: view.y + view.height });
+        const bottomLeft = transformPoint({ x: view.x, y: view.y + view.height });
+        return { base: view, points: [topLeft, topRight, bottomRight, bottomLeft] };
+    }
+
+    function worldToCanvas(point) {
+        const meta = mapMeta();
+        if (!meta || !point) return null;
+        const view = viewport();
+        const widthM = meta.width * meta.resolution;
+        const heightM = meta.height * meta.resolution;
+        return transformPoint({
+            x: view.x + ((point.x - meta.origin.x) / widthM) * view.width,
+            y: view.y + (1 - ((point.y - meta.origin.y) / heightM)) * view.height
+        });
+    }
+
+    function drawMap() {
+        const rect = canvas.getBoundingClientRect();
+        ctx.clearRect(0, 0, rect.width, rect.height);
+        ctx.fillStyle = '#101615';
+        ctx.fillRect(0, 0, rect.width, rect.height);
+
+        const view = viewport();
+        const transformed = transformedViewport();
+        if (mapImage.complete && mapImage.naturalWidth) {
+            ctx.save();
+            ctx.beginPath();
+            ctx.moveTo(transformed.points[0].x, transformed.points[0].y);
+            transformed.points.slice(1).forEach(point => ctx.lineTo(point.x, point.y));
+            ctx.closePath();
+            ctx.clip();
+            ctx.translate(canvas.getBoundingClientRect().width / 2 + viewTransform.offsetX, canvas.getBoundingClientRect().height / 2 + viewTransform.offsetY);
+            ctx.rotate(viewTransform.rotation);
+            ctx.scale(viewTransform.scale, viewTransform.scale);
+            ctx.translate(-canvas.getBoundingClientRect().width / 2, -canvas.getBoundingClientRect().height / 2);
+            ctx.drawImage(mapImage, view.x, view.y, view.width, view.height);
+            ctx.restore();
+        }
+        drawGrid(transformed);
+        drawRobot();
+        drawMapState();
+    }
+
+    function drawGrid(view) {
+        const base = view.base;
+        ctx.save();
+        ctx.strokeStyle = 'rgba(47, 128, 237, 0.16)';
+        ctx.lineWidth = 1;
+        for (let i = 0; i <= 10; i++) {
+            const x = base.x + (base.width / 10) * i;
+            const fromV = transformPoint({ x, y: base.y });
+            const toV = transformPoint({ x, y: base.y + base.height });
+            ctx.beginPath();
+            ctx.moveTo(fromV.x, fromV.y);
+            ctx.lineTo(toV.x, toV.y);
+            ctx.stroke();
+            const y = base.y + (base.height / 10) * i;
+            const fromH = transformPoint({ x: base.x, y });
+            const toH = transformPoint({ x: base.x + base.width, y });
+            ctx.beginPath();
+            ctx.moveTo(fromH.x, fromH.y);
+            ctx.lineTo(toH.x, toH.y);
+            ctx.stroke();
+        }
+        ctx.restore();
+    }
+
+    function drawRobot() {
+        const pose = currentPose();
+        const pos = worldToCanvas(pose);
+        if (!pose || !pos) return;
+        const isStale = pose.age_sec !== null && pose.age_sec !== undefined && pose.age_sec > 1.0;
+        ctx.save();
+        ctx.translate(pos.x, pos.y);
+        ctx.rotate(-(pose.theta || 0) + viewTransform.rotation);
+        ctx.fillStyle = isStale ? '#f5a524' : '#2f80ed';
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(18, 0);
+        ctx.lineTo(-13, 11);
+        ctx.lineTo(-13, -11);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+        ctx.restore();
+    }
+
+    function drawMapState() {
+        if (mapData.has_map) return;
+        const rect = canvas.getBoundingClientRect();
+        ctx.save();
+        ctx.fillStyle = 'rgba(16, 22, 21, 0.72)';
+        ctx.fillRect(0, 0, rect.width, rect.height);
+        ctx.fillStyle = '#ffffff';
+        ctx.font = '800 22px Microsoft YaHei';
+        ctx.textAlign = 'center';
+        ctx.fillText('等待新地图', rect.width / 2, rect.height / 2 - 12);
+        ctx.font = '600 14px Microsoft YaHei';
+        ctx.fillStyle = '#c9d2dc';
+        ctx.fillText('请确认激光雷达和 SLAM 建图节点正在发布 /map', rect.width / 2, rect.height / 2 + 22);
+        ctx.restore();
+    }
+
+    function updateMapImage() {
+        const meta = mapMeta();
+        const version = meta ? meta.image_version : `empty-${Date.now()}`;
+        if (version === currentImageVersion && mapImage.complete) return;
+        currentImageVersion = version;
+        mapImage.src = `/api/map/image?v=${encodeURIComponent(version)}`;
+    }
+
+    function updateStatus() {
+        const label = document.getElementById('map-mode-label');
+        if (mapData.has_map) {
+            const source = mapData.map && mapData.map.source === 'static_file' ? '已加载保存地图' : '接收实时地图';
+            label.textContent = source;
+            label.className = 'status-pill ok';
+        } else {
+            label.textContent = '等待新地图';
+            label.className = 'status-pill warn';
+        }
+
+        const scan = mapData.scan;
+        document.getElementById('scan-state').textContent = scan
+            ? `${scan.valid_count}/${scan.count} 点，${scan.range_min.toFixed(2)}-${scan.range_max.toFixed(2)} m，${(scan.age_sec ?? 0).toFixed(2)}s`
+            : '等待 /scan';
+    }
+
+    async function refreshMapData(showMessage = false) {
+        if (mapRequestInFlight) return;
+        mapRequestInFlight = true;
+        try {
+            const response = await fetch('/api/map/data');
+            mapData = await response.json();
+            updateStatus();
+            updateMapImage();
+            drawMap();
+            if (showMessage) {
+                showToast(mapData.has_map ? '地图已刷新' : '尚未收到地图', mapData.has_map ? 'success' : 'warning');
+            }
+        } catch (error) {
+            showToast('地图刷新失败', 'error');
+        } finally {
+            mapRequestInFlight = false;
+        }
+    }
+
+    async function refreshRobotPose() {
+        if (poseRequestInFlight) return;
+        poseRequestInFlight = true;
+        try {
+            const response = await fetch('/api/robot/pose');
+            const data = await response.json();
+            if (response.ok && data.robot_position) {
+                mapData.robot_position = data.robot_position;
+            }
+        } catch (error) {
+            // High-frequency pose polling is best-effort; map refresh still reports failures.
+        } finally {
+            poseRequestInFlight = false;
+        }
+    }
+
+    async function rebuildMap() {
+        const response = await fetch('/api/map/rebuild', { method: 'POST' });
+        const data = await response.json();
+        if (!response.ok || !data.success) {
+            showToast(data.error || '重新建图启动失败', 'error');
+            return;
+        }
+        mapData.has_map = false;
+        mapData.map = null;
+        updateStatus();
+        updateMapImage();
+        drawMap();
+        showToast(data.message || '已进入重新建图模式', 'success');
+    }
+
+    async function finishMapping(save) {
+        stopRobot();
+        const response = await fetch('/api/map/finish', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ save })
+        });
+        const data = await response.json();
+        if (!response.ok || !data.success) {
+            showToast(data.message || data.error || '建图收尾失败', 'error');
+            return;
+        }
+        await refreshMapData();
+        showToast(data.message || (save ? '地图已保存' : '已放弃本次建图'), 'success');
+    }
+
+    function toggleControlMode() {
+        setControlMode(!controlMode);
+    }
+
+    function setControlMode(enabled) {
+        controlMode = enabled;
+        const button = document.getElementById('control-mode-btn');
+        const label = document.getElementById('control-state-label');
+        if (enabled) {
+            button.className = 'btn btn-sm btn-danger';
+            button.innerHTML = '<i class="fas fa-keyboard me-1"></i>停止控制模式';
+            label.textContent = '控制中';
+            label.className = 'status-pill ok';
+            stage.focus();
+        } else {
+            button.className = 'btn btn-sm btn-primary';
+            button.innerHTML = '<i class="fas fa-keyboard me-1"></i>启动控制模式';
+            label.textContent = '未启动';
+            label.className = 'status-pill dark';
+            pressedKeys.clear();
+            updateKeyDisplay();
+            publishVelocity({ linear_x: 0, angular_z: 0 }, true);
+        }
+    }
+
+    function currentTwist() {
+        const forward = pressedKeys.has('w');
+        const backward = pressedKeys.has('s');
+        const left = pressedKeys.has('a');
+        const right = pressedKeys.has('d');
+        let linearSign = 0;
+        let angularSign = 0;
+        if (forward !== backward) linearSign = forward ? 1 : -1;
+        if (left !== right) angularSign = left ? 1 : -1;
+        if (linearSign < 0) angularSign *= -1;
+        return {
+            linear_x: linearSign * parseFloat(speedSlider.value),
+            angular_z: angularSign * parseFloat(turnSlider.value)
+        };
+    }
+
+    async function publishVelocity(twist, force = false) {
+        if (!controlMode && !force) return;
+        if (velocityRequestInFlight && !force) return;
+        velocityRequestInFlight = true;
+        try {
+            const response = await fetch('/api/robot/velocity', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    ...twist,
+                    max_linear: parseFloat(speedSlider.max),
+                    max_angular: parseFloat(turnSlider.max)
+                })
+            });
+            const data = await response.json();
+            if (!response.ok || !data.success) throw new Error(data.error || '速度发布失败');
+        } catch (error) {
+            const now = Date.now();
+            if (now - lastVelocityErrorAt > 2500) {
+                showToast(error.message || '速度发布失败', 'error');
+                lastVelocityErrorAt = now;
+            }
+        } finally {
+            velocityRequestInFlight = false;
+        }
+    }
+
+    function publishCurrentVelocity() {
+        publishVelocity(currentTwist());
+    }
+
+    function stopRobot() {
+        pressedKeys.clear();
+        updateKeyDisplay();
+        publishVelocity({ linear_x: 0, angular_z: 0 }, true);
+    }
+
+    function updateKeyDisplay() {
+        ['w', 'a', 's', 'd'].forEach(key => {
+            document.getElementById(`key-${key}`).classList.toggle('active', pressedKeys.has(key));
+        });
+    }
+
+    function updateSliderLabels() {
+        document.getElementById('speed-value').textContent = `${parseFloat(speedSlider.value).toFixed(2)} m/s`;
+        document.getElementById('turn-value').textContent = `${parseFloat(turnSlider.value).toFixed(2)} rad/s`;
+        publishCurrentVelocity();
+    }
+
+    document.addEventListener('keydown', event => {
+        const key = event.key.toLowerCase();
+        if (!controlMode || !['w', 'a', 's', 'd'].includes(key)) return;
+        event.preventDefault();
+        pressedKeys.add(key);
+        updateKeyDisplay();
+        publishCurrentVelocity();
+    });
+
+    document.addEventListener('keyup', event => {
+        const key = event.key.toLowerCase();
+        if (!['w', 'a', 's', 'd'].includes(key)) return;
+        pressedKeys.delete(key);
+        updateKeyDisplay();
+        publishCurrentVelocity();
+    });
+
+    stage.addEventListener('wheel', event => {
+        event.preventDefault();
+        if (event.shiftKey) {
+            viewTransform.rotation += event.deltaY * -0.0025;
+        } else {
+            const prevScale = viewTransform.scale;
+            const nextScale = clamp(prevScale * Math.exp(-event.deltaY * 0.0012), 0.35, 6.0);
+            const rect = canvas.getBoundingClientRect();
+            const mx = event.clientX - rect.left - rect.width / 2 - viewTransform.offsetX;
+            const my = event.clientY - rect.top - rect.height / 2 - viewTransform.offsetY;
+            const ratio = nextScale / prevScale;
+            viewTransform.offsetX -= mx * (ratio - 1);
+            viewTransform.offsetY -= my * (ratio - 1);
+            viewTransform.scale = nextScale;
+        }
+        drawMap();
+    }, { passive: false });
+
+    stage.addEventListener('pointerdown', event => {
+        if (event.button !== 0) return;
+        isDraggingView = true;
+        lastPointer = { x: event.clientX, y: event.clientY };
+        stage.classList.add('dragging');
+        stage.setPointerCapture(event.pointerId);
+    });
+
+    stage.addEventListener('pointermove', event => {
+        if (!isDraggingView || !lastPointer) return;
+        viewTransform.offsetX += event.clientX - lastPointer.x;
+        viewTransform.offsetY += event.clientY - lastPointer.y;
+        lastPointer = { x: event.clientX, y: event.clientY };
+        drawMap();
+    });
+
+    function endViewDrag(event) {
+        isDraggingView = false;
+        lastPointer = null;
+        stage.classList.remove('dragging');
+        if (event && event.pointerId !== undefined) {
+            try {
+                stage.releasePointerCapture(event.pointerId);
+            } catch (error) {
+                // Pointer capture may already be released by the browser.
+            }
+        }
+    }
+
+    stage.addEventListener('pointerup', endViewDrag);
+    stage.addEventListener('pointercancel', endViewDrag);
+
+    window.addEventListener('blur', stopRobot);
+    window.addEventListener('resize', resizeCanvas);
+    speedSlider.addEventListener('input', updateSliderLabels);
+    turnSlider.addEventListener('input', updateSliderLabels);
+
+    resizeCanvas();
+    updateStatus();
+    updateSliderLabels();
+    updateMapImage();
+    setInterval(refreshMapData, 1000);
+    setInterval(refreshRobotPose, 60);
+    setInterval(() => drawMap(), 60);
+    setInterval(publishCurrentVelocity, 60);
+</script>
+{% endblock %}

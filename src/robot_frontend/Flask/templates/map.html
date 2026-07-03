@@ -1,22 +1,23 @@
 {% extends "base.html" %}
 
-{% block title %}地图 - 机器人控制系统{% endblock %}
+{% block title %}导航 - 机器人控制系统{% endblock %}
 
-{% block page_title %}地图导航{% endblock %}
-{% block page_subtitle %}点击地图设定导航目标，或框选矩形区域后提交区域清扫。{% endblock %}
+{% block page_title %}导航{% endblock %}
+{% block page_subtitle %}按下并拖拽地图设置路径点位置和方向，最后一个点为最终目标。{% endblock %}
 
 {% block content %}
 <section class="card map-card">
     <div class="card-header map-toolbar">
-        <span><i class="fas fa-map-location-dot me-2"></i>地图</span>
+        <span><i class="fas fa-route me-2"></i>导航地图</span>
         <div class="tool-row">
             <span class="status-pill warn" id="map-mode-label">等待地图</span>
-            <button class="btn btn-sm btn-primary" type="button" onclick="setMode('target')" id="target-mode-btn">
-                <i class="fas fa-location-dot me-1"></i>目标点
+            <button class="btn btn-sm btn-primary" type="button" onclick="handleTargetButton()" id="target-mode-btn">
+                <i class="fas fa-location-dot me-1"></i><span id="target-mode-text">设定目标点</span>
             </button>
             <button class="btn btn-sm btn-outline-primary" type="button" onclick="setMode('region')" id="region-mode-btn">
                 <i class="fas fa-vector-square me-1"></i>框选区域
             </button>
+            <select class="form-select form-select-sm region-select" id="region-select" onchange="selectRegionFromDropdown()"></select>
             <button class="btn btn-sm btn-success" type="button" onclick="cleanSelectedRegion()">
                 <i class="fas fa-broom me-1"></i>清扫区域
             </button>
@@ -50,6 +51,12 @@
         gap: 8px;
         align-items: center;
         justify-content: flex-end;
+    }
+
+    .region-select {
+        width: 168px;
+        min-height: 32px;
+        font-weight: 700;
     }
 
     .map-stage {
@@ -121,6 +128,10 @@
     let regions = {{ regions|tojson }};
     let selectedRegionId = regions[0]?.region_id || null;
     let mode = 'target';
+    let pathEditing = false;
+    let stagedWaypoints = [];
+    let waypointDragStart = null;
+    let waypointDragCurrent = null;
     let isDragging = false;
     let dragStart = null;
     let dragCurrent = null;
@@ -220,6 +231,8 @@
 
         drawGrid(view);
         regions.forEach(drawRegion);
+        drawStagedPath();
+        drawWaypointDraft();
         drawTargetPath();
         drawRobot();
         drawDraftRect();
@@ -275,7 +288,7 @@
     }
 
     function drawTargetPath() {
-        if (!mapData.target_point) return;
+        if (!mapData.target_point || pathEditing || stagedWaypoints.length) return;
         const target = worldToCanvas(mapData.target_point);
         const robot = worldToCanvas(mapData.robot_position);
         if (!target) return;
@@ -297,6 +310,84 @@
         ctx.arc(target.x, target.y, 9, 0, Math.PI * 2);
         ctx.fill();
         ctx.stroke();
+        ctx.restore();
+    }
+
+    function drawDirectionArrow(point, length = 28, color = '#101615') {
+        const endX = point.x + Math.cos(point.theta || 0) * length;
+        const endY = point.y - Math.sin(point.theta || 0) * length;
+        const head = 8;
+        const headAngle = Math.atan2(point.y - endY, endX - point.x);
+        ctx.strokeStyle = color;
+        ctx.fillStyle = color;
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.moveTo(point.x, point.y);
+        ctx.lineTo(endX, endY);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(endX, endY);
+        ctx.lineTo(
+            endX - head * Math.cos(headAngle - Math.PI / 6),
+            endY + head * Math.sin(headAngle - Math.PI / 6)
+        );
+        ctx.lineTo(
+            endX - head * Math.cos(headAngle + Math.PI / 6),
+            endY + head * Math.sin(headAngle + Math.PI / 6)
+        );
+        ctx.closePath();
+        ctx.fill();
+    }
+
+    function drawStagedPath() {
+        if (!stagedWaypoints.length) return;
+        const points = stagedWaypoints.map(worldToCanvas).filter(Boolean);
+        if (!points.length) return;
+        ctx.save();
+        ctx.strokeStyle = '#f5a524';
+        ctx.lineWidth = 3;
+        if (points.length > 1) {
+            ctx.beginPath();
+            ctx.moveTo(points[0].x, points[0].y);
+            points.slice(1).forEach(point => ctx.lineTo(point.x, point.y));
+            ctx.stroke();
+        }
+        points.forEach((point, index) => {
+            const waypoint = stagedWaypoints[index];
+            const isGoal = index === points.length - 1;
+            const radius = isGoal ? 13 : 9;
+            ctx.fillStyle = isGoal ? '#f5a524' : '#2f80ed';
+            ctx.strokeStyle = '#101615';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.arc(point.x, point.y, radius, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.stroke();
+            drawDirectionArrow({ ...point, theta: waypoint.theta }, isGoal ? 34 : 28);
+            ctx.fillStyle = '#101615';
+            ctx.font = isGoal ? '800 10px Microsoft YaHei' : '800 12px Microsoft YaHei';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(isGoal ? '目标' : String(index + 1), point.x, point.y);
+        });
+        ctx.restore();
+    }
+
+    function drawWaypointDraft() {
+        if (!waypointDragStart || !waypointDragCurrent) return;
+        const startWorld = canvasToWorld(waypointDragStart);
+        const currentWorld = canvasToWorld(waypointDragCurrent);
+        if (!startWorld || !currentWorld) return;
+        const theta = Math.atan2(currentWorld.y - startWorld.y, currentWorld.x - startWorld.x);
+        ctx.save();
+        ctx.fillStyle = '#f5a524';
+        ctx.strokeStyle = '#101615';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(waypointDragStart.x, waypointDragStart.y, 12, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+        drawDirectionArrow({ ...waypointDragStart, theta }, 38);
         ctx.restore();
     }
 
@@ -340,12 +431,79 @@
         mode = nextMode;
         dragStart = null;
         dragCurrent = null;
+        if (mode !== 'target') {
+            pathEditing = false;
+            stagedWaypoints = [];
+            waypointDragStart = null;
+            waypointDragCurrent = null;
+        }
         document.getElementById('target-mode-btn').className =
-            mode === 'target' ? 'btn btn-sm btn-primary' : 'btn btn-sm btn-outline-primary';
+            pathEditing ? 'btn btn-sm btn-warning' : (mode === 'target' ? 'btn btn-sm btn-primary' : 'btn btn-sm btn-outline-primary');
         document.getElementById('region-mode-btn').className =
             mode === 'region' ? 'btn btn-sm btn-primary' : 'btn btn-sm btn-outline-primary';
+        updateTargetButton();
         updateModeLabel();
         drawMap();
+    }
+
+    async function handleTargetButton() {
+        if (!pathEditing) {
+            mode = 'target';
+            pathEditing = true;
+            stagedWaypoints = [];
+            waypointDragStart = null;
+            waypointDragCurrent = null;
+            updateTargetButton();
+            updateModeLabel();
+            drawMap();
+            showToast('按下并拖拽地图设置路径点方向，最后一个为目标点', 'info');
+            return;
+        }
+        await submitStagedPath();
+    }
+
+    function resetWaypointDraft() {
+        waypointDragStart = null;
+        waypointDragCurrent = null;
+    }
+
+    function addDraggedWaypoint() {
+        const startWorld = canvasToWorld(waypointDragStart);
+        const currentWorld = canvasToWorld(waypointDragCurrent);
+        if (!startWorld || !currentWorld) {
+            showToast('请在地图有效区域内拖拽设置方向', 'warning');
+            resetWaypointDraft();
+            drawMap();
+            return;
+        }
+        const dx = waypointDragCurrent.x - waypointDragStart.x;
+        const dy = waypointDragCurrent.y - waypointDragStart.y;
+        if (Math.hypot(dx, dy) < 8) {
+            showToast('请拖拽一小段距离来设置目标方向', 'warning');
+            resetWaypointDraft();
+            drawMap();
+            return;
+        }
+        startWorld.theta = Math.atan2(currentWorld.y - startWorld.y, currentWorld.x - startWorld.x);
+        stagedWaypoints.push(startWorld);
+        mapData.target_point = startWorld;
+        resetWaypointDraft();
+        updateTargetButton();
+        updateModeLabel();
+        drawMap();
+    }
+
+    function updateTargetButton() {
+        const button = document.getElementById('target-mode-btn');
+        const text = document.getElementById('target-mode-text');
+        if (!button || !text) return;
+        if (pathEditing) {
+            button.className = 'btn btn-sm btn-warning';
+            text.textContent = '导航至目标点';
+        } else {
+            button.className = mode === 'target' ? 'btn btn-sm btn-primary' : 'btn btn-sm btn-outline-primary';
+            text.textContent = '设定目标点';
+        }
     }
 
     function updateModeLabel() {
@@ -355,7 +513,20 @@
             label.className = 'status-pill warn';
             return;
         }
-        label.textContent = mode === 'region' ? '拖拽框选区域' : '点击设定目标点';
+        if (mode === 'region') {
+            label.textContent = '拖拽框选区域';
+        } else if (pathEditing) {
+            if (stagedWaypoints.length) {
+                const viaCount = Math.max(0, stagedWaypoints.length - 1);
+                label.textContent = viaCount
+                    ? `${viaCount} 个途经点，1 个最终目标点；继续拖拽可追加`
+                    : '已设置最终目标点；继续拖拽可追加途经点';
+            } else {
+                label.textContent = '按下并拖拽地图设置路径点方向';
+            }
+        } else {
+            label.textContent = '按按钮后设置路径';
+        }
         label.className = 'status-pill ok';
     }
 
@@ -367,25 +538,29 @@
         mapImage.src = `/api/map/image?v=${encodeURIComponent(version)}`;
     }
 
-    async function setTarget(point) {
-        const world = canvasToWorld(point);
-        if (!world) {
-            showToast('请点击地图有效区域', 'warning');
+    async function submitStagedPath() {
+        if (!stagedWaypoints.length) {
+            showToast('请先拖拽设置至少一个目标点', 'warning');
             return;
         }
-        const response = await fetch('/api/map/target', {
+        const response = await fetch('/api/map/path', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(world)
+            body: JSON.stringify({ waypoints: stagedWaypoints })
         });
         const data = await response.json();
         if (!response.ok || !data.success) {
-            throw new Error(data.error || '目标点设置失败');
+            throw new Error(data.error || '路径导航提交失败');
         }
         mapData.target_point = data.target_point;
         mapData.nav_status = data.nav_status;
+        stagedWaypoints = [];
+        pathEditing = false;
+        resetWaypointDraft();
+        updateTargetButton();
+        updateModeLabel();
         drawMap();
-        showToast('导航目标已发送', 'success');
+        showToast(data.message || '导航路径已发送', 'success');
     }
 
     async function createRegionFromDrag() {
@@ -442,6 +617,7 @@
         selectedRegionId = data.region.region_id;
         setMode('target');
         renderRegionStrip();
+        renderRegionSelect();
         drawMap();
         showToast('区域已框选', 'success');
     }
@@ -478,12 +654,21 @@
         regions = regions.filter(region => region.region_id !== selectedRegionId);
         selectedRegionId = regions[0]?.region_id || null;
         renderRegionStrip();
+        renderRegionSelect();
         drawMap();
         showToast('区域已删除', 'success');
     }
 
     function selectRegion(regionId) {
         selectedRegionId = regionId;
+        renderRegionStrip();
+        renderRegionSelect();
+        drawMap();
+    }
+
+    function selectRegionFromDropdown() {
+        const value = document.getElementById('region-select').value;
+        selectedRegionId = value ? Number(value) : null;
         renderRegionStrip();
         drawMap();
     }
@@ -496,6 +681,22 @@
                 ${region.region_name}
             </button>
         `).join('');
+    }
+
+    function renderRegionSelect() {
+        const select = document.getElementById('region-select');
+        if (!regions.length) {
+            select.innerHTML = '<option value="">暂无区域</option>';
+            select.value = '';
+            return;
+        }
+        select.innerHTML = regions.map(region => `
+            <option value="${region.region_id}">${region.region_name}</option>
+        `).join('');
+        if (!regions.some(region => region.region_id === selectedRegionId)) {
+            selectedRegionId = regions[0].region_id;
+        }
+        select.value = String(selectedRegionId);
     }
 
     async function refreshMapData(showMessage = false) {
@@ -514,6 +715,12 @@
     }
 
     canvas.addEventListener('mousedown', event => {
+        if (mode === 'target' && pathEditing) {
+            waypointDragStart = eventPoint(event);
+            waypointDragCurrent = waypointDragStart;
+            drawMap();
+            return;
+        }
         if (mode !== 'region') return;
         isDragging = true;
         dragStart = eventPoint(event);
@@ -522,12 +729,22 @@
     });
 
     canvas.addEventListener('mousemove', event => {
+        if (mode === 'target' && pathEditing && waypointDragStart) {
+            waypointDragCurrent = eventPoint(event);
+            drawMap();
+            return;
+        }
         if (!isDragging || mode !== 'region') return;
         dragCurrent = eventPoint(event);
         drawMap();
     });
 
     canvas.addEventListener('mouseup', async event => {
+        if (mode === 'target' && pathEditing && waypointDragStart) {
+            waypointDragCurrent = eventPoint(event);
+            addDraggedWaypoint();
+            return;
+        }
         if (mode !== 'region') return;
         isDragging = false;
         dragCurrent = eventPoint(event);
@@ -542,19 +759,12 @@
         }
     });
 
-    canvas.addEventListener('click', async event => {
-        if (mode !== 'target') return;
-        try {
-            await setTarget(eventPoint(event));
-        } catch (error) {
-            showToast(error.message || '目标点设置失败', 'error');
-        }
-    });
-
     window.addEventListener('resize', resizeCanvas);
     renderRegionStrip();
+    renderRegionSelect();
     resizeCanvas();
     updateModeLabel();
+    updateTargetButton();
     updateMapImage();
     setInterval(refreshMapData, 1500);
 </script>
