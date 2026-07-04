@@ -1,6 +1,8 @@
 from datetime import datetime, timedelta
 import atexit
+import json
 import math
+from pathlib import Path
 import time
 
 from flask import Flask, Response, has_request_context, jsonify, render_template, request
@@ -22,6 +24,47 @@ atexit.register(ROS_BRIDGE.shutdown)
 DATABASE_READY = False
 MEMORY_LOGS = []
 REGIONS = []
+DUMP_BUCKET_POSE_STORE = Path(ROS_CONFIG["dump_pose_store_path"])
+
+
+def load_dump_bucket_poses():
+    if not DUMP_BUCKET_POSE_STORE.exists():
+        return {}
+    try:
+        raw = json.loads(DUMP_BUCKET_POSE_STORE.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    poses = raw.get("dump_bucket_poses", raw)
+    loaded = {}
+    for key, item in poses.items():
+        try:
+            bucket_id = int(item.get("bucket_id", key))
+            if bucket_id not in (1, 2):
+                continue
+            yaw = float(item.get("yaw", item.get("theta", 0.0)))
+            loaded[str(bucket_id)] = {
+                "bucket_id": bucket_id,
+                "x": float(item["x"]),
+                "y": float(item["y"]),
+                "theta": yaw,
+                "yaw": yaw,
+                "frame_id": item.get("frame_id") or ROS_CONFIG["map_frame"],
+            }
+        except (KeyError, TypeError, ValueError):
+            continue
+    return loaded
+
+
+def save_dump_bucket_poses():
+    DUMP_BUCKET_POSE_STORE.parent.mkdir(parents=True, exist_ok=True)
+    payload = {"dump_bucket_poses": DUMP_BUCKET_POSES}
+    DUMP_BUCKET_POSE_STORE.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+
+DUMP_BUCKET_POSES = load_dump_bucket_poses()
 
 
 def client_ip():
@@ -125,6 +168,38 @@ def submit_region_clean(region_id):
     return {"region_id": region_id, **result}, status_code
 
 
+def submit_dump_bucket(bucket_id):
+    try:
+        bucket_id = int(bucket_id)
+    except (TypeError, ValueError):
+        return {"success": False, "error": "bucket_id 必须是 0、1 或 2"}, 400
+
+    if bucket_id not in (0, 1, 2):
+        return {"success": False, "error": "bucket_id 必须是 0、1 或 2"}, 400
+
+    required = (1, 2) if bucket_id == 0 else (bucket_id,)
+    missing = [item for item in required if str(item) not in DUMP_BUCKET_POSES]
+    if missing:
+        names = "、".join(f"卸载桶{item}" for item in missing)
+        return {"success": False, "error": f"请先在导航地图设定{names}位置"}, 400
+
+    result = ROS_BRIDGE.dump_trash(bucket_id)
+    success = bool(result.get("success"))
+    description = "执行卸载桶 1 和 2" if bucket_id == 0 else f"执行卸载桶 {bucket_id}"
+    add_log(
+        "卸载垃圾桶",
+        description,
+        status="完成" if success else "失败",
+        success=success,
+        metadata={
+            "bucket_id": bucket_id,
+            "poses": DUMP_BUCKET_POSES,
+            "service_result": result,
+        },
+    )
+    return result, 200 if success else 503
+
+
 class RuntimeData:
     @staticmethod
     def battery_level():
@@ -194,6 +269,7 @@ def map_page():
         "map.html",
         map_data=ROS_BRIDGE.get_map_data(),
         regions=REGIONS,
+        dump_bucket_poses=DUMP_BUCKET_POSES,
         map_config=MAP_CONFIG,
         robot_config=ROBOT_CONFIG,
         ros_config=ROS_CONFIG,
@@ -273,21 +349,7 @@ def control_robot():
 @app.route("/api/robot/dump_bucket", methods=["POST"])
 def dump_bucket():
     data = request.get_json(silent=True) or {}
-    try:
-        bucket_id = int(data.get("bucket_id"))
-    except (TypeError, ValueError):
-        return jsonify({"success": False, "error": "bucket_id 必须是 1 或 2"}), 400
-
-    result = ROS_BRIDGE.dump_trash(bucket_id)
-    success = bool(result.get("success"))
-    add_log(
-        "卸载垃圾桶",
-        f"执行卸载桶 {bucket_id}",
-        status="完成" if success else "失败",
-        success=success,
-        metadata={"bucket_id": bucket_id, "service_result": result},
-    )
-    status_code = 200 if success else 503
+    result, status_code = submit_dump_bucket(data.get("bucket_id"))
     return jsonify(result), status_code
 
 
@@ -338,6 +400,10 @@ def text_command():
         clean_result, _ = submit_region_clean(command_data["region_id"])
         response["clean_result"] = clean_result
         response["success"] = bool(clean_result.get("success"))
+    elif command_type == "unload":
+        dump_result, _ = submit_dump_bucket(0)
+        response["dump_result"] = dump_result
+        response["success"] = bool(dump_result.get("success"))
     return jsonify(response)
 
 
@@ -349,8 +415,15 @@ def voice_command():
     if not command_text:
         return jsonify({"success": False, "error": "语音文本为空"}), 400
 
-    command_type = "clean_region" if ("清扫" in command_text or "打扫" in command_text) else "start"
-    command_data = {"region_id": 1} if command_type == "clean_region" else {}
+    if "卸载" in command_text or "倒垃圾" in command_text:
+        command_type = "unload"
+        command_data = {}
+    elif "清扫" in command_text or "打扫" in command_text:
+        command_type = "clean_region"
+        command_data = {"region_id": 1}
+    else:
+        command_type = "start"
+        command_data = {}
     add_log(
         "语音指令",
         f"收到语音指令：{command_text}",
@@ -375,12 +448,18 @@ def voice_command():
         clean_result, _ = submit_region_clean(command_data["region_id"])
         response["clean_result"] = clean_result
         response["success"] = bool(clean_result.get("success"))
+    elif command_type == "unload":
+        dump_result, _ = submit_dump_bucket(0)
+        response["dump_result"] = dump_result
+        response["success"] = bool(dump_result.get("success"))
     return jsonify(response)
 
 
 @app.route("/api/map/data", methods=["GET"])
 def map_data():
-    return jsonify(ROS_BRIDGE.get_map_data())
+    data = ROS_BRIDGE.get_map_data()
+    data["dump_bucket_poses"] = DUMP_BUCKET_POSES
+    return jsonify(data)
 
 
 @app.route("/api/robot/pose", methods=["GET"])
@@ -498,6 +577,53 @@ def set_path():
             **result,
             "target_point": waypoints[-1] if waypoints else None,
             "nav_status": ROS_BRIDGE.get_map_data().get("nav_status"),
+        }
+    ), 200 if success else 503
+
+
+@app.route("/api/map/dump_bucket_pose", methods=["GET", "POST"])
+def dump_bucket_pose():
+    if request.method == "GET":
+        return jsonify({"success": True, "poses": DUMP_BUCKET_POSES})
+
+    data = request.get_json(silent=True) or {}
+    try:
+        bucket_id = int(data.get("bucket_id"))
+        x = float(data.get("x"))
+        y = float(data.get("y"))
+        yaw = float(data.get("yaw", data.get("theta", 0.0)))
+    except (TypeError, ValueError):
+        return jsonify({"success": False, "error": "卸载桶坐标无效"}), 400
+
+    if bucket_id not in (1, 2):
+        return jsonify({"success": False, "error": "卸载桶编号必须是 1 或 2"}), 400
+
+    frame_id = data.get("frame_id") or ROS_CONFIG["map_frame"]
+    result = ROS_BRIDGE.set_dump_bucket_pose(bucket_id, x, y, yaw, frame_id)
+    success = bool(result.get("success"))
+    if success:
+        DUMP_BUCKET_POSES[str(bucket_id)] = {
+            "bucket_id": bucket_id,
+            "x": x,
+            "y": y,
+            "theta": yaw,
+            "yaw": yaw,
+            "frame_id": frame_id,
+        }
+        save_dump_bucket_poses()
+
+    add_log(
+        "设定卸载桶位置",
+        f"设定卸载桶 {bucket_id}：({x:.3f}, {y:.3f}, theta={yaw:.3f})",
+        status="完成" if success else "失败",
+        success=success,
+        metadata={"pose": DUMP_BUCKET_POSES.get(str(bucket_id)), "task_result": result},
+    )
+    return jsonify(
+        {
+            **result,
+            "pose": DUMP_BUCKET_POSES.get(str(bucket_id)),
+            "poses": DUMP_BUCKET_POSES,
         }
     ), 200 if success else 503
 

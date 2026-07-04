@@ -13,9 +13,10 @@
   <depend>robot_interfaces</depend>
   <depend>python3-yaml</depend>
   <depend>geometry_msgs</depend>
-  <depend>robot_arm</depend>
-  <depend>robot_interfaces</depend>
+  <depend>sensor_msgs</depend>
+  <depend>std_srvs</depend>
   <depend>tf2_ros</depend>
+  <exec_depend>python3-numpy</exec_depend>
 
   <test_depend>python3-pytest</test_depend>
 

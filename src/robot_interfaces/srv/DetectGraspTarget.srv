@@ -1,0 +1,13 @@
+bool force_refresh
+---
+bool success
+string message
+string class_name
+float64 confidence
+float64 target_x_cm
+float64 target_y_cm
+float64 target_z_cm
+float64 end_angle
+float64 gripper_rotation
+float64 gripper_close_ratio
+uint8 bucket_id

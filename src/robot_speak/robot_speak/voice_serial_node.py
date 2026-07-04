@@ -9,14 +9,14 @@ import time
 from ament_index_python.packages import PackageNotFoundError
 from ament_index_python.packages import get_package_share_directory
 import rclpy
+from rclpy.action import ActionClient
 from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from std_msgs.msg import String
 from std_msgs.msg import UInt16
-from std_srvs.srv import Trigger
 
-from robot_interfaces.srv import DumpTrash
+from robot_interfaces.action import RobotTask
 
 from robot_speak.command_map import load_command_map
 from robot_speak.protocol import (
@@ -126,6 +126,7 @@ class VoiceSerialNode(Node):
         self.declare_parameter('command_detail_topic', 'voice/command_detail')
         self.declare_parameter('speak_command_topic', 'voice/speak_command')
         self.declare_parameter('speak_frame_topic', 'voice/speak_frame')
+        self.declare_parameter('robot_task_action', '/robot_task')
 
         self._debug = bool(self.get_parameter('debug').value)
         self._speak_on_recognition = bool(
@@ -190,16 +191,13 @@ class VoiceSerialNode(Node):
             10,
         )
 
-        # 服务客户端：清扫垃圾 / 倒垃圾
+        # 高层任务入口：所有语音命令只发给行为树。
         cb_group = ReentrantCallbackGroup()
-        self._grasp_start_client = self.create_client(
-            Trigger, 'vision_grasp/start', callback_group=cb_group,
-        )
-        self._grasp_stop_client = self.create_client(
-            Trigger, 'vision_grasp/stop', callback_group=cb_group,
-        )
-        self._dump_trash_client = self.create_client(
-            DumpTrash, 'dump_trash', callback_group=cb_group,
+        self._robot_task_client = ActionClient(
+            self,
+            RobotTask,
+            self.get_parameter('robot_task_action').value,
+            callback_group=cb_group,
         )
 
         self._timer = self.create_timer(
@@ -304,35 +302,62 @@ class VoiceSerialNode(Node):
         self._on_voice_command(command)
 
     def _on_voice_command(self, command):
-        """根据语音指令调用对应 ROS 服务."""
+        """根据语音指令发送高层行为树任务。"""
         name = command.name
         if name == 'clean_trash':
-            self._call_service(self._grasp_start_client, Trigger.Request(), 'Grasp start')
+            self._send_task(RobotTask.Goal.TASK_CLEAN_TRASH, 'clean_trash')
         elif name == 'stop':
-            self._call_service(self._grasp_stop_client, Trigger.Request(), 'Grasp stop')
+            self._send_task(RobotTask.Goal.TASK_STOP, 'stop')
         elif name == 'dump_trash':
-            req = DumpTrash.Request()
-            req.bucket_id = 1
-            self._call_service(self._dump_trash_client, req, 'Dump trash')
+            self._send_task(
+                RobotTask.Goal.TASK_DUMP_TRASH,
+                'dump_trash',
+                bucket_id=0,
+            )
 
-    def _call_service(self, client, request, label):
-        """异步调用服务，结果通过日志反馈。"""
-        if not client.wait_for_service(timeout_sec=1.0):
-            self.get_logger().warning(f'{label} service not available')
+    def _send_task(self, task_type, command, bucket_id=0):
+        """异步发送行为树任务，结果通过日志反馈。"""
+        if not self._robot_task_client.wait_for_server(timeout_sec=1.0):
+            self.get_logger().warning('RobotTask action server not available')
             return
 
-        def _do_call():
-            future = client.call_async(request)
-            rclpy.spin_until_future_complete(self, future, timeout_sec=120.0)
-            if future.done() and future.result() is not None:
-                resp = future.result()
-                if resp.success:
-                    self.get_logger().info(f'{label} succeeded: {resp.message}')
-                else:
-                    self.get_logger().warning(f'{label} failed: {resp.message}')
-            else:
-                self.get_logger().warning(f'{label} service call timed out')
-        threading.Thread(target=_do_call, daemon=True).start()
+        goal = RobotTask.Goal()
+        goal.task_type = int(task_type)
+        goal.command = str(command)
+        goal.bucket_id = int(bucket_id)
+
+        future = self._robot_task_client.send_goal_async(goal)
+        future.add_done_callback(
+            lambda done: self._handle_task_goal(done, command)
+        )
+
+    def _handle_task_goal(self, future, command):
+        try:
+            goal_handle = future.result()
+        except Exception as exc:
+            self.get_logger().warning(f'{command} task send failed: {exc}')
+            return
+
+        if not goal_handle.accepted:
+            self.get_logger().warning(f'{command} task rejected')
+            return
+
+        self.get_logger().info(f'{command} task accepted')
+        goal_handle.get_result_async().add_done_callback(
+            lambda done: self._handle_task_result(done, command)
+        )
+
+    def _handle_task_result(self, future, command):
+        try:
+            result = future.result().result
+        except Exception as exc:
+            self.get_logger().warning(f'{command} task failed: {exc}')
+            return
+
+        if result.success:
+            self.get_logger().info(f'{command} task succeeded: {result.message}')
+        else:
+            self.get_logger().warning(f'{command} task failed: {result.message}')
 
     def _publish_unknown(self, frame_hex):
         self._publish_string(self._command_pub, 'unknown')

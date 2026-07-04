@@ -13,15 +13,13 @@ try:
     import rclpy
     from cv_bridge import CvBridge
     from geometry_msgs.msg import PoseWithCovarianceStamped, PoseStamped, Twist
-    from nav2_msgs.action import NavigateThroughPoses, NavigateToPose
-    from nav_msgs.msg import OccupancyGrid
+    from nav_msgs.msg import OccupancyGrid, Path
     from rclpy.action import ActionClient
     from rclpy.executors import SingleThreadedExecutor
     from rclpy.node import Node
     from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy, qos_profile_sensor_data
     from rclpy.time import Time
     from sensor_msgs.msg import Image, LaserScan
-    from std_srvs.srv import Trigger
     from tf2_ros import Buffer, TransformListener
 except Exception as exc:
     rclpy = None
@@ -31,14 +29,12 @@ else:
     ROS_IMPORT_ERROR = None
 
 try:
-    from robot_interfaces.srv import AddCoverageRectangle, DumpTrash
+    from robot_interfaces.action import RobotTask
 except Exception as exc:
-    AddCoverageRectangle = None
-    DumpTrash = None
-    ROBOT_INTERFACES_IMPORT_ERROR = exc
+    RobotTask = None
+    ROBOT_TASK_IMPORT_ERROR = exc
 else:
-    ROBOT_INTERFACES_IMPORT_ERROR = None
-
+    ROBOT_TASK_IMPORT_ERROR = None
 
 def _yaw_from_quaternion(q):
     siny_cosp = 2.0 * (q.w * q.z + q.x * q.y)
@@ -73,31 +69,14 @@ class FlaskRosNode(Node):
         self.map_frame = config["map_frame"]
         self.robot_base_frame = config["robot_base_frame"]
 
-        self.navigate_client = ActionClient(
-            self,
-            NavigateToPose,
-            config["navigate_to_pose_action"],
-        )
-        self.navigate_through_poses_client = ActionClient(
-            self,
-            NavigateThroughPoses,
-            config["navigate_through_poses_action"],
-        )
+        self.robot_task_client = None
+        if RobotTask is not None:
+            self.robot_task_client = ActionClient(
+                self,
+                RobotTask,
+                config["robot_task_action"],
+            )
         self.cmd_vel_pub = self.create_publisher(Twist, config["cmd_vel_topic"], 10)
-        self.coverage_task_client = None
-        if AddCoverageRectangle is not None:
-            self.coverage_task_client = self.create_client(
-                AddCoverageRectangle,
-                config["coverage_task_service"],
-            )
-        self.dump_trash_client = None
-        if DumpTrash is not None:
-            self.dump_trash_client = self.create_client(
-                DumpTrash,
-                config["dump_trash_service"],
-            )
-        self._grasp_start_client = self.create_client(Trigger, "vision_grasp/start")
-        self._grasp_stop_client = self.create_client(Trigger, "vision_grasp/stop")
 
         self.depth_topics = list(dict.fromkeys(config["depth_camera_topics"]))
         self.color_topics = list(dict.fromkeys(config["color_camera_topics"]))
@@ -147,8 +126,7 @@ class FlaskRosNode(Node):
             "Flask ROS bridge ready: "
             f"depth={self.depth_topics}, "
             f"color={self.color_topics}, map={config['map_topic']}, "
-            f"coverage_service={config['coverage_task_service']}, "
-            f"dump_service={config['dump_trash_service']}"
+            f"robot_task={config['robot_task_action']}"
         )
 
     def handle_depth_image(self, msg, topic):
@@ -214,40 +192,6 @@ class FlaskRosNode(Node):
             stamp=_stamp_to_float(transform.header.stamp),
         )
 
-    def send_nav_goal(self, x, y, yaw):
-        goal = NavigateToPose.Goal()
-        goal.pose = PoseStamped()
-        goal.pose.header.frame_id = self.map_frame
-        goal.pose.header.stamp = self.get_clock().now().to_msg()
-        goal.pose.pose.position.x = float(x)
-        goal.pose.pose.position.y = float(y)
-        goal.pose.pose.position.z = 0.0
-        quat = _quaternion_from_yaw(float(yaw))
-        goal.pose.pose.orientation.x = quat["x"]
-        goal.pose.pose.orientation.y = quat["y"]
-        goal.pose.pose.orientation.z = quat["z"]
-        goal.pose.pose.orientation.w = quat["w"]
-        return self.navigate_client.send_goal_async(goal)
-
-    def send_through_poses_goal(self, waypoints):
-        goal = NavigateThroughPoses.Goal()
-        goal.poses = []
-        now = self.get_clock().now().to_msg()
-        for waypoint in waypoints:
-            pose = PoseStamped()
-            pose.header.frame_id = self.map_frame
-            pose.header.stamp = now
-            pose.pose.position.x = float(waypoint["x"])
-            pose.pose.position.y = float(waypoint["y"])
-            pose.pose.position.z = 0.0
-            quat = _quaternion_from_yaw(float(waypoint.get("theta", 0.0)))
-            pose.pose.orientation.x = quat["x"]
-            pose.pose.orientation.y = quat["y"]
-            pose.pose.orientation.z = quat["z"]
-            pose.pose.orientation.w = quat["w"]
-            goal.poses.append(pose)
-        return self.navigate_through_poses_client.send_goal_async(goal)
-
     def publish_stop(self):
         self.cmd_vel_pub.publish(Twist())
 
@@ -257,43 +201,24 @@ class FlaskRosNode(Node):
         msg.angular.z = float(angular_z)
         self.cmd_vel_pub.publish(msg)
 
-    def call_grasp_service(self, action):
-        client = self._grasp_start_client if action == "start" else self._grasp_stop_client
-        if not client.wait_for_service(timeout_sec=2.0):
-            return {"success": False, "message": f"vision_grasp/{action} service not available"}
-        response_event = threading.Event()
-        result = {}
-        future = client.call_async(Trigger.Request())
-        def on_response(done):
-            try:
-                resp = done.result()
-                result.update({"success": resp.success, "message": resp.message})
-            except Exception as exc:
-                result.update({"success": False, "message": str(exc)})
-            finally:
-                response_event.set()
-        future.add_done_callback(on_response)
-        if not response_event.wait(timeout=3.0):
-            return {"success": False, "message": f"vision_grasp/{action} service response timeout"}
-        return result
-
-    def call_dump_trash(self, bucket_id):
-        if DumpTrash is None or self.dump_trash_client is None:
-            raise RuntimeError(f"robot_interfaces 未加载: {ROBOT_INTERFACES_IMPORT_ERROR}")
-        request = DumpTrash.Request()
-        request.bucket_id = int(bucket_id)
-        return self.dump_trash_client.call_async(request)
-
-    def call_coverage_task(self, min_x, min_y, max_x, max_y, frame_id):
-        if AddCoverageRectangle is None or self.coverage_task_client is None:
-            raise RuntimeError(f"robot_interfaces 未加载: {ROBOT_INTERFACES_IMPORT_ERROR}")
-        request = AddCoverageRectangle.Request()
-        request.min_x = float(min_x)
-        request.min_y = float(min_y)
-        request.max_x = float(max_x)
-        request.max_y = float(max_y)
-        request.frame_id = frame_id or self.map_frame
-        return self.coverage_task_client.call_async(request)
+    def send_robot_task_goal(self, task_type, **kwargs):
+        if RobotTask is None or self.robot_task_client is None:
+            raise RuntimeError(f"RobotTask 接口未加载: {ROBOT_TASK_IMPORT_ERROR}")
+        goal = RobotTask.Goal()
+        goal.task_type = int(task_type)
+        goal.command = str(kwargs.get("command", ""))
+        goal.bucket_id = int(kwargs.get("bucket_id", 0) or 0)
+        goal.x = float(kwargs.get("x", 0.0) or 0.0)
+        goal.y = float(kwargs.get("y", 0.0) or 0.0)
+        goal.yaw = float(kwargs.get("yaw", 0.0) or 0.0)
+        goal.min_x = float(kwargs.get("min_x", 0.0) or 0.0)
+        goal.min_y = float(kwargs.get("min_y", 0.0) or 0.0)
+        goal.max_x = float(kwargs.get("max_x", 0.0) or 0.0)
+        goal.max_y = float(kwargs.get("max_y", 0.0) or 0.0)
+        goal.frame_id = kwargs.get("frame_id") or self.map_frame
+        if kwargs.get("path") is not None:
+            goal.path = kwargs["path"]
+        return self.robot_task_client.send_goal_async(goal)
 
 
 class RosBridge:
@@ -320,6 +245,11 @@ class RosBridge:
         self.nav_status = {
             "state": "idle",
             "message": "未发送导航目标",
+            "updated_at": _now_iso(),
+        }
+        self.robot_task_status = {
+            "state": "idle",
+            "message": "未发送行为树任务",
             "updated_at": _now_iso(),
         }
         self.errors = {}
@@ -726,58 +656,21 @@ class RosBridge:
         if not self.started or not self.node:
             return {"success": False, "error": self.start_error or "ROS bridge 未启动"}
 
-        timeout_sec = float(self.config.get("goal_timeout_sec", 3.0))
-        if not self.node.navigate_client.wait_for_server(timeout_sec=timeout_sec):
+        if RobotTask is None:
             return {
                 "success": False,
-                "error": f"Nav2 action 不可用: {self.config['navigate_to_pose_action']}",
+                "error": f"RobotTask 接口未加载: {ROBOT_TASK_IMPORT_ERROR}",
             }
 
-        response_event = threading.Event()
-        result = {}
-        future = self.node.send_nav_goal(x, y, yaw)
-
-        def on_goal_response(done):
-            try:
-                goal_handle = done.result()
-                if not goal_handle.accepted:
-                    result.update({"success": False, "error": "Nav2 拒绝目标点"})
-                    with self.lock:
-                        self.nav_status = {
-                            "state": "rejected",
-                            "message": "Nav2 拒绝目标点",
-                            "updated_at": _now_iso(),
-                        }
-                    return
-
-                result.update({"success": True, "accepted": True})
-                with self.lock:
-                    self.nav_status = {
-                        "state": "accepted",
-                        "message": f"目标点已接受: ({x:.3f}, {y:.3f})",
-                        "updated_at": _now_iso(),
-                    }
-                goal_handle.get_result_async().add_done_callback(self._handle_nav_result)
-            except Exception as exc:
-                result.update({"success": False, "error": str(exc)})
-                with self.lock:
-                    self.nav_status = {
-                        "state": "error",
-                        "message": str(exc),
-                        "updated_at": _now_iso(),
-                    }
-            finally:
-                response_event.set()
-
-        future.add_done_callback(on_goal_response)
-        if not response_event.wait(timeout_sec):
-            with self.lock:
-                self.nav_status = {
-                    "state": "pending",
-                    "message": f"目标点已发送，等待 Nav2 响应: ({x:.3f}, {y:.3f})",
-                    "updated_at": _now_iso(),
-                }
-            result.update({"success": True, "accepted": None, "pending": True})
+        result = self.send_robot_task(
+            RobotTask.Goal.TASK_NAVIGATE_TO,
+            wait_result=False,
+            x=x,
+            y=y,
+            yaw=yaw,
+            frame_id=self.config["map_frame"],
+            command="navigate_to",
+        )
 
         with self.lock:
             self.target_point = {"x": float(x), "y": float(y), "theta": float(yaw)}
@@ -816,64 +709,48 @@ class RosBridge:
             else:
                 point["theta"] = 0.0
 
-        timeout_sec = float(self.config.get("goal_timeout_sec", 3.0))
-        if not self.node.navigate_through_poses_client.wait_for_server(timeout_sec=timeout_sec):
-            return {
-                "success": False,
-                "error": f"Nav2 穿越路径 Action 不可用: {self.config['navigate_through_poses_action']}",
-            }
-
-        response_event = threading.Event()
-        result = {}
         via_count = max(0, len(parsed) - 1)
         final_goal = parsed[-1]
         path_summary = (
             f"{via_count} 个途经点，最终目标点 "
             f"({final_goal['x']:.3f}, {final_goal['y']:.3f})"
         )
-        future = self.node.send_through_poses_goal(parsed)
 
-        def on_goal_response(done):
-            try:
-                goal_handle = done.result()
-                if not goal_handle.accepted:
-                    result.update({"success": False, "error": "Nav2 拒绝路径"})
-                    with self.lock:
-                        self.nav_status = {
-                            "state": "rejected",
-                            "message": "Nav2 拒绝路径",
-                            "updated_at": _now_iso(),
-                        }
-                    return
+        if RobotTask is None:
+            return {
+                "success": False,
+                "error": f"RobotTask 接口未加载: {ROBOT_TASK_IMPORT_ERROR}",
+            }
 
-                result.update({"success": True, "accepted": True})
-                with self.lock:
-                    self.nav_status = {
-                        "state": "accepted",
-                        "message": f"路径已接受：{path_summary}",
-                        "updated_at": _now_iso(),
-                    }
-                goal_handle.get_result_async().add_done_callback(self._handle_nav_result)
-            except Exception as exc:
-                result.update({"success": False, "error": str(exc)})
-                with self.lock:
-                    self.nav_status = {
-                        "state": "error",
-                        "message": str(exc),
-                        "updated_at": _now_iso(),
-                    }
-            finally:
-                response_event.set()
+        path = Path()
+        path.header.frame_id = self.config["map_frame"]
+        path.header.stamp = self.node.get_clock().now().to_msg()
+        for waypoint in parsed:
+            pose = PoseStamped()
+            pose.header = path.header
+            pose.pose.position.x = float(waypoint["x"])
+            pose.pose.position.y = float(waypoint["y"])
+            pose.pose.position.z = 0.0
+            quat = _quaternion_from_yaw(float(waypoint.get("theta", 0.0)))
+            pose.pose.orientation.x = quat["x"]
+            pose.pose.orientation.y = quat["y"]
+            pose.pose.orientation.z = quat["z"]
+            pose.pose.orientation.w = quat["w"]
+            path.poses.append(pose)
 
-        future.add_done_callback(on_goal_response)
-        if not response_event.wait(timeout_sec):
+        result = self.send_robot_task(
+            RobotTask.Goal.TASK_NAVIGATE_PATH,
+            wait_result=False,
+            path=path,
+            command="navigate_path",
+        )
+        if result.get("success"):
             with self.lock:
                 self.nav_status = {
-                    "state": "pending",
-                    "message": f"路径已发送，等待 Nav2 响应：{path_summary}",
+                    "state": "accepted",
+                    "message": f"路径已提交行为树：{path_summary}",
                     "updated_at": _now_iso(),
                 }
-            result.update({"success": True, "accepted": None, "pending": True})
 
         with self.lock:
             self.target_point = dict(parsed[-1])
@@ -884,6 +761,114 @@ class RosBridge:
             "target_point": dict(parsed[-1]),
         }
 
+    def send_robot_task(self, task_type, wait_result=False, **kwargs):
+        if not self.started or not self.node:
+            return {"success": False, "error": self.start_error or "ROS bridge 未启动"}
+
+        if RobotTask is None or self.node.robot_task_client is None:
+            return {
+                "success": False,
+                "error": f"RobotTask 接口未加载: {ROBOT_TASK_IMPORT_ERROR}",
+            }
+
+        service_timeout = float(self.config.get("goal_timeout_sec", 3.0))
+        if not self.node.robot_task_client.wait_for_server(timeout_sec=service_timeout):
+            return {
+                "success": False,
+                "error": f"行为树 Action 不可用: {self.config['robot_task_action']}",
+            }
+
+        response_event = threading.Event()
+        result = {}
+
+        def update_status(state, message):
+            with self.lock:
+                self.robot_task_status = {
+                    "state": state,
+                    "message": message,
+                    "updated_at": _now_iso(),
+                }
+
+        def on_task_result(done):
+            try:
+                wrapped = done.result()
+                task_result = wrapped.result
+                success = bool(task_result.success)
+                message = task_result.message
+                result.update(
+                    {
+                        "success": success,
+                        "message": message,
+                        "accepted": True,
+                        "task_type": int(task_type),
+                    }
+                )
+                update_status("succeeded" if success else "failed", message)
+            except Exception as exc:
+                result.update({"success": False, "error": str(exc)})
+                update_status("error", str(exc))
+            finally:
+                response_event.set()
+
+        def on_goal_response(done):
+            try:
+                goal_handle = done.result()
+                if not goal_handle.accepted:
+                    result.update(
+                        {
+                            "success": False,
+                            "accepted": False,
+                            "error": "行为树拒绝任务",
+                            "task_type": int(task_type),
+                        }
+                    )
+                    update_status("rejected", "行为树拒绝任务")
+                    response_event.set()
+                    return
+
+                result.update(
+                    {
+                        "success": True,
+                        "accepted": True,
+                        "pending": not wait_result,
+                        "task_type": int(task_type),
+                    }
+                )
+                update_status("accepted", f"行为树任务已接受: {task_type}")
+                result_future = goal_handle.get_result_async()
+                if wait_result:
+                    result_future.add_done_callback(on_task_result)
+                else:
+                    result_future.add_done_callback(self._handle_robot_task_result)
+                    response_event.set()
+            except Exception as exc:
+                result.update({"success": False, "error": str(exc)})
+                update_status("error", str(exc))
+                response_event.set()
+
+        future = self.node.send_robot_task_goal(task_type, **kwargs)
+        future.add_done_callback(on_goal_response)
+
+        timeout = (
+            float(self.config.get("task_timeout_sec", 90.0))
+            if wait_result
+            else service_timeout
+        )
+        if not response_event.wait(timeout):
+            if wait_result:
+                return {
+                    "success": False,
+                    "error": "行为树任务响应超时",
+                    "task_type": int(task_type),
+                }
+            return {
+                "success": True,
+                "accepted": None,
+                "pending": True,
+                "task_type": int(task_type),
+            }
+        return result
+
     def add_coverage_rectangle(self, min_x, min_y, max_x, max_y, frame_id=None):
         if not self.started or not self.node:
             return {"success": False, "error": self.start_error or "ROS bridge 未启动"}
@@ -891,56 +876,67 @@ class RosBridge:
         if min_x >= max_x or min_y >= max_y:
             return {"success": False, "error": "区域宽度和高度必须大于 0"}
 
-        if AddCoverageRectangle is None or self.node.coverage_task_client is None:
+        if RobotTask is None:
             return {
                 "success": False,
-                "error": (
-                    "区域清扫接口未加载，请先执行 "
-                    "source /home/xjw/ros2_robot/install/setup.bash"
-                ),
+                "error": f"RobotTask 接口未加载: {ROBOT_TASK_IMPORT_ERROR}",
             }
 
-        timeout_sec = float(self.config.get("goal_timeout_sec", 3.0))
-        if not self.node.coverage_task_client.wait_for_service(timeout_sec=timeout_sec):
-            return {
-                "success": False,
-                "error": f"覆盖清扫服务不可用: {self.config['coverage_task_service']}",
-            }
-
-        response_event = threading.Event()
-        result = {}
-        future = self.node.call_coverage_task(
-            min_x,
-            min_y,
-            max_x,
-            max_y,
-            frame_id or self.config["map_frame"],
+        return self.send_robot_task(
+            RobotTask.Goal.TASK_CLEAN_REGION,
+            wait_result=True,
+            min_x=min_x,
+            min_y=min_y,
+            max_x=max_x,
+            max_y=max_y,
+            frame_id=frame_id or self.config["map_frame"],
+            command="clean_region",
         )
 
-        def on_response(done):
-            try:
-                response = done.result()
-                result.update(
-                    {
-                        "success": bool(response.success),
-                        "message": response.message,
-                        "queued_count": int(response.queued_count),
-                    }
-                )
-                with self.lock:
-                    self.nav_status = {
-                        "state": "coverage_queued" if response.success else "coverage_rejected",
-                        "message": response.message,
-                        "updated_at": _now_iso(),
-                    }
-            except Exception as exc:
-                result.update({"success": False, "error": str(exc)})
-            finally:
-                response_event.set()
+    def set_dump_bucket_pose(self, bucket_id, x, y, yaw=0.0, frame_id=None):
+        if not self.started or not self.node:
+            return {"success": False, "error": self.start_error or "ROS bridge 未启动"}
 
-        future.add_done_callback(on_response)
-        if not response_event.wait(timeout_sec):
-            return {"success": False, "error": "覆盖清扫服务响应超时"}
+        try:
+            bucket_id = int(bucket_id)
+            x = float(x)
+            y = float(y)
+            yaw = float(yaw)
+        except (TypeError, ValueError):
+            return {"success": False, "error": "卸载桶坐标无效"}
+
+        if bucket_id not in (1, 2):
+            return {"success": False, "error": "卸载桶编号必须是 1 或 2"}
+
+        if RobotTask is None:
+            return {
+                "success": False,
+                "error": f"RobotTask 接口未加载: {ROBOT_TASK_IMPORT_ERROR}",
+                "bucket_id": bucket_id,
+            }
+
+        result = self.send_robot_task(
+            RobotTask.Goal.TASK_SET_DUMP_POSE,
+            wait_result=True,
+            bucket_id=bucket_id,
+            x=x,
+            y=y,
+            yaw=yaw,
+            frame_id=frame_id or self.config["map_frame"],
+            command="set_dump_pose",
+        )
+        result.setdefault("bucket_id", bucket_id)
+        result.setdefault(
+            "pose",
+            {
+                "bucket_id": bucket_id,
+                "x": x,
+                "y": y,
+                "theta": yaw,
+                "yaw": yaw,
+                "frame_id": frame_id or self.config["map_frame"],
+            },
+        )
         return result
 
     def dump_trash(self, bucket_id):
@@ -952,62 +948,38 @@ class RosBridge:
         except (TypeError, ValueError):
             return {"success": False, "error": "垃圾桶编号无效"}
 
-        if bucket_id not in (1, 2):
-            return {"success": False, "error": "垃圾桶编号必须是 1 或 2"}
+        if bucket_id not in (0, 1, 2):
+            return {"success": False, "error": "垃圾桶编号必须是 0、1 或 2"}
 
-        if DumpTrash is None or self.node.dump_trash_client is None:
+        if RobotTask is None:
             return {
                 "success": False,
-                "error": (
-                    "卸载垃圾接口未加载，请先执行 "
-                    "source /home/xjw/ros2_robot/install/setup.bash"
-                ),
+                "error": f"RobotTask 接口未加载: {ROBOT_TASK_IMPORT_ERROR}",
+                "bucket_id": bucket_id,
             }
 
-        service_timeout_sec = float(self.config.get("goal_timeout_sec", 3.0))
-        if not self.node.dump_trash_client.wait_for_service(timeout_sec=service_timeout_sec):
-            return {
-                "success": False,
-                "error": f"卸载垃圾服务不可用: {self.config['dump_trash_service']}",
-            }
-
-        timeout_sec = float(self.config.get("dump_timeout_sec", 60.0))
-        response_event = threading.Event()
-        result = {}
-        future = self.node.call_dump_trash(bucket_id)
-
-        def on_response(done):
-            try:
-                response = done.result()
-                result.update(
-                    {
-                        "success": bool(response.success),
-                        "message": response.message,
-                        "bucket_id": bucket_id,
-                    }
-                )
-            except Exception as exc:
-                result.update({"success": False, "error": str(exc), "bucket_id": bucket_id})
-            finally:
-                response_event.set()
-
-        future.add_done_callback(on_response)
-        if not response_event.wait(timeout=timeout_sec):
-            return {"success": False, "error": "卸载垃圾服务响应超时", "bucket_id": bucket_id}
+        result = self.send_robot_task(
+            RobotTask.Goal.TASK_DUMP_TRASH,
+            wait_result=True,
+            bucket_id=bucket_id,
+            command="dump_trash",
+        )
+        result.setdefault("bucket_id", bucket_id)
         return result
 
-    def _handle_nav_result(self, done):
+    def _handle_robot_task_result(self, done):
         try:
-            result = done.result()
-            status = getattr(result, "status", None)
-            state = "succeeded" if status == 4 else "finished"
-            message = f"Nav2 目标结束，状态码: {status}"
+            wrapped = done.result()
+            task_result = wrapped.result
+            success = bool(task_result.success)
+            state = "succeeded" if success else "failed"
+            message = task_result.message
         except Exception as exc:
             state = "error"
             message = str(exc)
 
         with self.lock:
-            self.nav_status = {
+            self.robot_task_status = {
                 "state": state,
                 "message": message,
                 "updated_at": _now_iso(),
@@ -1030,7 +1002,33 @@ class RosBridge:
     def call_grasp_service(self, action):
         if not self.started or not self.node:
             return {"success": False, "message": self.start_error or "ROS bridge not started"}
-        return self.node.call_grasp_service(action)
+        if RobotTask is None:
+            return {
+                "success": False,
+                "message": f"RobotTask 接口未加载: {ROBOT_TASK_IMPORT_ERROR}",
+            }
+        if action == "start":
+            task_result = self.send_robot_task(
+                RobotTask.Goal.TASK_CLEAN_TRASH,
+                wait_result=False,
+                command="clean_trash",
+            )
+            return {
+                "success": task_result.get("success", False),
+                "message": task_result.get("message", "行为树清扫任务已发送"),
+            }
+        if action == "stop":
+            self.publish_stop()
+            task_result = self.send_robot_task(
+                RobotTask.Goal.TASK_STOP,
+                wait_result=False,
+                command="stop",
+            )
+            return {
+                "success": task_result.get("success", False),
+                "message": task_result.get("message", "行为树停止任务已发送"),
+            }
+        return {"success": False, "message": f"unknown grasp action: {action}"}
 
     def status(self):
         with self.lock:
@@ -1046,16 +1044,15 @@ class RosBridge:
                     "map": self.config["map_topic"],
                     "amcl_pose": self.config["amcl_pose_topic"],
                     "scan": self.config["scan_topic"],
-                    "coverage_task_service": self.config["coverage_task_service"],
-                    "dump_trash_service": self.config["dump_trash_service"],
+                    "robot_task_action": self.config["robot_task_action"],
                 },
                 "camera": self.get_camera_info(),
                 "has_map": self.map is not None,
                 "has_robot_pose": self.robot_pose is not None,
-                "coverage_interface_loaded": AddCoverageRectangle is not None,
-                "dump_interface_loaded": DumpTrash is not None,
-                "coverage_interface_error": str(ROBOT_INTERFACES_IMPORT_ERROR) if ROBOT_INTERFACES_IMPORT_ERROR else None,
+                "robot_task_interface_loaded": RobotTask is not None,
+                "robot_task_interface_error": str(ROBOT_TASK_IMPORT_ERROR) if ROBOT_TASK_IMPORT_ERROR else None,
                 "nav_status": dict(self.nav_status),
+                "robot_task_status": dict(self.robot_task_status),
                 "errors": dict(self.errors),
             }
 

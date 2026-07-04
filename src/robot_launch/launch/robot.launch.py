@@ -208,6 +208,19 @@ def launch_setup(context):
             )
         )
 
+    if _as_bool(LaunchConfiguration('use_behavior_tree').perform(context)):
+        actions.append(
+            IncludeLaunchDescription(
+                PythonLaunchDescriptionSource([
+                    get_package_share_directory('robot_behavior_tree'),
+                    '/launch/behavior_tree.launch.py',
+                ]),
+                launch_arguments={
+                    'use_sim_time': use_sim_time,
+                }.items(),
+            )
+        )
+
     if _as_bool(LaunchConfiguration('use_frontend').perform(context)):
         workspace = os.path.dirname(
             os.path.dirname(
@@ -284,8 +297,13 @@ def generate_launch_description():
         ),
         DeclareLaunchArgument(
             'use_vision_grasp',
-            default_value='false',
+            default_value='true',
             description='Start vision grasp node',
+        ),
+        DeclareLaunchArgument(
+            'use_behavior_tree',
+            default_value='true',
+            description='Start high-level robot behavior tree orchestrator',
         ),
         DeclareLaunchArgument(
             'use_frontend',

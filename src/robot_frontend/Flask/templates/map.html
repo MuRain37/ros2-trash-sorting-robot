@@ -14,6 +14,12 @@
             <button class="btn btn-sm btn-primary" type="button" onclick="handleTargetButton()" id="target-mode-btn">
                 <i class="fas fa-location-dot me-1"></i><span id="target-mode-text">设定目标点</span>
             </button>
+            <button class="btn btn-sm btn-outline-warning" type="button" onclick="setDumpBucketPoseMode(1)" id="dump-bucket-1-btn">
+                <i class="fas fa-dumpster me-1"></i>设定卸载桶1位置
+            </button>
+            <button class="btn btn-sm btn-outline-warning" type="button" onclick="setDumpBucketPoseMode(2)" id="dump-bucket-2-btn">
+                <i class="fas fa-dumpster-fire me-1"></i>设定卸载桶2位置
+            </button>
             <button class="btn btn-sm btn-outline-primary" type="button" onclick="setMode('region')" id="region-mode-btn">
                 <i class="fas fa-vector-square me-1"></i>框选区域
             </button>
@@ -126,8 +132,12 @@
 <script>
     let mapData = {{ map_data|tojson }};
     let regions = {{ regions|tojson }};
+    let dumpBucketPoses = {{ dump_bucket_poses|tojson }};
     let selectedRegionId = regions[0]?.region_id || null;
     let mode = 'target';
+    let dumpPoseBucketId = null;
+    let dumpPoseDragStart = null;
+    let dumpPoseDragCurrent = null;
     let pathEditing = false;
     let stagedWaypoints = [];
     let waypointDragStart = null;
@@ -231,8 +241,10 @@
 
         drawGrid(view);
         regions.forEach(drawRegion);
+        drawDumpBucketMarkers();
         drawStagedPath();
         drawWaypointDraft();
+        drawDumpPoseDraft();
         drawTargetPath();
         drawRobot();
         drawDraftRect();
@@ -391,6 +403,52 @@
         ctx.restore();
     }
 
+    function drawDumpBucketMarkers() {
+        Object.entries(dumpBucketPoses || {}).forEach(([key, pose]) => {
+            const point = worldToCanvas(pose);
+            if (!point) return;
+            const bucketId = Number(pose.bucket_id || key);
+            ctx.save();
+            ctx.fillStyle = bucketId === 1 ? '#f59e0b' : '#ef4444';
+            ctx.strokeStyle = '#101615';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.arc(point.x, point.y, 13, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.stroke();
+            drawDirectionArrow({ ...point, theta: pose.theta || pose.yaw || 0 }, 36, '#101615');
+            ctx.fillStyle = '#101615';
+            ctx.font = '800 11px Microsoft YaHei';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(`桶${bucketId}`, point.x, point.y);
+            ctx.restore();
+        });
+    }
+
+    function drawDumpPoseDraft() {
+        if (!dumpPoseDragStart || !dumpPoseDragCurrent || !dumpPoseBucketId) return;
+        const startWorld = canvasToWorld(dumpPoseDragStart);
+        const currentWorld = canvasToWorld(dumpPoseDragCurrent);
+        if (!startWorld || !currentWorld) return;
+        const theta = Math.atan2(currentWorld.y - startWorld.y, currentWorld.x - startWorld.x);
+        ctx.save();
+        ctx.fillStyle = dumpPoseBucketId === 1 ? '#f59e0b' : '#ef4444';
+        ctx.strokeStyle = '#101615';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(dumpPoseDragStart.x, dumpPoseDragStart.y, 13, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+        drawDirectionArrow({ ...dumpPoseDragStart, theta }, 40);
+        ctx.fillStyle = '#101615';
+        ctx.font = '800 11px Microsoft YaHei';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(`桶${dumpPoseBucketId}`, dumpPoseDragStart.x, dumpPoseDragStart.y);
+        ctx.restore();
+    }
+
     function drawRobot() {
         const pose = mapData.robot_position;
         const pos = worldToCanvas(pose);
@@ -431,6 +489,9 @@
         mode = nextMode;
         dragStart = null;
         dragCurrent = null;
+        dumpPoseBucketId = null;
+        dumpPoseDragStart = null;
+        dumpPoseDragCurrent = null;
         if (mode !== 'target') {
             pathEditing = false;
             stagedWaypoints = [];
@@ -441,6 +502,7 @@
             pathEditing ? 'btn btn-sm btn-warning' : (mode === 'target' ? 'btn btn-sm btn-primary' : 'btn btn-sm btn-outline-primary');
         document.getElementById('region-mode-btn').className =
             mode === 'region' ? 'btn btn-sm btn-primary' : 'btn btn-sm btn-outline-primary';
+        updateDumpBucketButtons();
         updateTargetButton();
         updateModeLabel();
         drawMap();
@@ -462,9 +524,32 @@
         await submitStagedPath();
     }
 
+    function setDumpBucketPoseMode(bucketId) {
+        mode = 'dump_pose';
+        pathEditing = false;
+        stagedWaypoints = [];
+        waypointDragStart = null;
+        waypointDragCurrent = null;
+        dragStart = null;
+        dragCurrent = null;
+        dumpPoseBucketId = bucketId;
+        dumpPoseDragStart = null;
+        dumpPoseDragCurrent = null;
+        updateDumpBucketButtons();
+        updateTargetButton();
+        updateModeLabel();
+        drawMap();
+        showToast(`按下并拖拽地图设定卸载桶${bucketId}位置和朝向`, 'info');
+    }
+
     function resetWaypointDraft() {
         waypointDragStart = null;
         waypointDragCurrent = null;
+    }
+
+    function resetDumpPoseDraft() {
+        dumpPoseDragStart = null;
+        dumpPoseDragCurrent = null;
     }
 
     function addDraggedWaypoint() {
@@ -506,6 +591,16 @@
         }
     }
 
+    function updateDumpBucketButtons() {
+        [1, 2].forEach(bucketId => {
+            const button = document.getElementById(`dump-bucket-${bucketId}-btn`);
+            if (!button) return;
+            button.className = mode === 'dump_pose' && dumpPoseBucketId === bucketId
+                ? 'btn btn-sm btn-warning'
+                : 'btn btn-sm btn-outline-warning';
+        });
+    }
+
     function updateModeLabel() {
         const label = document.getElementById('map-mode-label');
         if (!mapData.has_map) {
@@ -515,6 +610,8 @@
         }
         if (mode === 'region') {
             label.textContent = '拖拽框选区域';
+        } else if (mode === 'dump_pose' && dumpPoseBucketId) {
+            label.textContent = `拖拽设定卸载桶${dumpPoseBucketId}位置和方向`;
         } else if (pathEditing) {
             if (stagedWaypoints.length) {
                 const viaCount = Math.max(0, stagedWaypoints.length - 1);
@@ -561,6 +658,49 @@
         updateModeLabel();
         drawMap();
         showToast(data.message || '导航路径已发送', 'success');
+    }
+
+    async function submitDumpBucketPose() {
+        const startWorld = canvasToWorld(dumpPoseDragStart);
+        const currentWorld = canvasToWorld(dumpPoseDragCurrent);
+        if (!startWorld || !currentWorld) {
+            showToast('请在地图有效区域内拖拽设置桶位方向', 'warning');
+            resetDumpPoseDraft();
+            drawMap();
+            return;
+        }
+        const dx = dumpPoseDragCurrent.x - dumpPoseDragStart.x;
+        const dy = dumpPoseDragCurrent.y - dumpPoseDragStart.y;
+        if (Math.hypot(dx, dy) < 8) {
+            showToast('请拖拽一小段距离来设置卸载桶朝向', 'warning');
+            resetDumpPoseDraft();
+            drawMap();
+            return;
+        }
+
+        startWorld.theta = Math.atan2(currentWorld.y - startWorld.y, currentWorld.x - startWorld.x);
+        startWorld.yaw = startWorld.theta;
+        startWorld.bucket_id = dumpPoseBucketId;
+        startWorld.frame_id = 'map';
+
+        const response = await fetch('/api/map/dump_bucket_pose', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(startWorld)
+        });
+        const data = await response.json();
+        if (!response.ok || !data.success) {
+            throw new Error(data.error || data.message || '卸载桶位置保存失败');
+        }
+        dumpBucketPoses = data.poses || dumpBucketPoses;
+        mode = 'target';
+        dumpPoseBucketId = null;
+        resetDumpPoseDraft();
+        updateDumpBucketButtons();
+        updateTargetButton();
+        updateModeLabel();
+        drawMap();
+        showToast(data.message || '卸载桶位置已保存', 'success');
     }
 
     async function createRegionFromDrag() {
@@ -703,6 +843,9 @@
         try {
             const response = await fetch('/api/map/data');
             mapData = await response.json();
+            if (mapData.dump_bucket_poses) {
+                dumpBucketPoses = mapData.dump_bucket_poses;
+            }
             updateModeLabel();
             updateMapImage();
             drawMap();
@@ -715,6 +858,12 @@
     }
 
     canvas.addEventListener('mousedown', event => {
+        if (mode === 'dump_pose' && dumpPoseBucketId) {
+            dumpPoseDragStart = eventPoint(event);
+            dumpPoseDragCurrent = dumpPoseDragStart;
+            drawMap();
+            return;
+        }
         if (mode === 'target' && pathEditing) {
             waypointDragStart = eventPoint(event);
             waypointDragCurrent = waypointDragStart;
@@ -729,6 +878,11 @@
     });
 
     canvas.addEventListener('mousemove', event => {
+        if (mode === 'dump_pose' && dumpPoseBucketId && dumpPoseDragStart) {
+            dumpPoseDragCurrent = eventPoint(event);
+            drawMap();
+            return;
+        }
         if (mode === 'target' && pathEditing && waypointDragStart) {
             waypointDragCurrent = eventPoint(event);
             drawMap();
@@ -740,6 +894,17 @@
     });
 
     canvas.addEventListener('mouseup', async event => {
+        if (mode === 'dump_pose' && dumpPoseBucketId && dumpPoseDragStart) {
+            dumpPoseDragCurrent = eventPoint(event);
+            try {
+                await submitDumpBucketPose();
+            } catch (error) {
+                showToast(error.message || '卸载桶位置保存失败', 'error');
+                resetDumpPoseDraft();
+                drawMap();
+            }
+            return;
+        }
         if (mode === 'target' && pathEditing && waypointDragStart) {
             waypointDragCurrent = eventPoint(event);
             addDraggedWaypoint();
@@ -765,6 +930,7 @@
     resizeCanvas();
     updateModeLabel();
     updateTargetButton();
+    updateDumpBucketButtons();
     updateMapImage();
     setInterval(refreshMapData, 1500);
 </script>

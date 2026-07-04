@@ -116,13 +116,11 @@ ROS_CONFIG = {
     ),
     'map_frame': os.getenv('ROS_MAP_FRAME', 'map'),
     'robot_base_frame': os.getenv('ROS_ROBOT_BASE_FRAME', 'base_footprint'),
-    'navigate_to_pose_action': os.getenv('ROS_NAVIGATE_TO_POSE_ACTION', 'navigate_to_pose'),
-    'navigate_through_poses_action': os.getenv(
-        'ROS_NAVIGATE_THROUGH_POSES_ACTION',
-        'navigate_through_poses',
+    'robot_task_action': os.getenv('ROS_ROBOT_TASK_ACTION', '/robot_task'),
+    'dump_pose_store_path': os.getenv(
+        'ROS_DUMP_POSE_STORE_PATH',
+        '/home/xjw/ros2_robot/src/robot_behavior_tree/config/dump_bucket_poses.json',
     ),
-    'coverage_task_service': os.getenv('ROS_COVERAGE_TASK_SERVICE', 'add_coverage_rectangle'),
-    'dump_trash_service': os.getenv('ROS_DUMP_TRASH_SERVICE', 'dump_trash'),
     'slam_rebuild_command': os.getenv(
         'ROS_SLAM_REBUILD_COMMAND',
         'ros2 launch slam_toolbox online_async_launch.py use_sim_time:=true',
@@ -138,6 +136,7 @@ ROS_CONFIG = {
     'map_save_timeout_sec': float(os.getenv('ROS_MAP_SAVE_TIMEOUT_SEC', '20.0')),
     'depth_visual_max_m': float(os.getenv('ROS_DEPTH_VISUAL_MAX_M', '8.0')),
     'goal_timeout_sec': float(os.getenv('ROS_GOAL_TIMEOUT_SEC', '3.0')),
+    'task_timeout_sec': float(os.getenv('ROS_TASK_TIMEOUT_SEC', '240.0')),
     'dump_timeout_sec': float(os.getenv('ROS_DUMP_TIMEOUT_SEC', '60.0')),
 }
 ROS_CONFIG['depth_camera_topic'] = ROS_CONFIG['depth_camera_topics'][0]

@@ -1,0 +1,28 @@
+uint8 TASK_NONE=0
+uint8 TASK_CLEAN_TRASH=1
+uint8 TASK_DUMP_TRASH=2
+uint8 TASK_CLEAN_REGION=3
+uint8 TASK_NAVIGATE_TO=4
+uint8 TASK_STOP=5
+uint8 TASK_RESUME=6
+uint8 TASK_NAVIGATE_PATH=7
+uint8 TASK_SET_DUMP_POSE=8
+
+uint8 task_type
+string command
+uint8 bucket_id
+float64 x
+float64 y
+float64 yaw
+float64 min_x
+float64 min_y
+float64 max_x
+float64 max_y
+string frame_id
+nav_msgs/Path path
+---
+bool success
+string message
+---
+string state
+float32 progress
