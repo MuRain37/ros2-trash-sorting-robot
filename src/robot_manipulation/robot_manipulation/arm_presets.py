@@ -24,9 +24,9 @@ PRESET_SERVO_RAW = {
     # 对应 robot_description/config/arm_initial_positions.yaml 的默认建图姿态
     ACTION_ARM_MAPPING: [
         500.0,
-        599.1933182820237,
-        272.58350181599076,
-        162.57560515087266,
+        650.0,
+        210.0,
+        160.0,
         500.0,
     ],
 }

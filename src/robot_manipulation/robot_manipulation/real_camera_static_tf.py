@@ -5,6 +5,7 @@ import math
 import rclpy
 from geometry_msgs.msg import TransformStamped
 from rclpy.node import Node
+from rcl_interfaces.msg import SetParametersResult
 from tf2_ros import StaticTransformBroadcaster
 
 from robot_interfaces.srv import SetCameraTfPreset
@@ -23,7 +24,7 @@ PRESET_CAMERA_TF = {
     },
     ACTION_ARM_MAPPING: {
         'parameter_prefix': 'arm_mapping',
-        'values': [0.0, 0.0, 1.0, 0.0, 0.0, 0.0],
+        'values': [0.23, 0.0, 0.28, 0.0, 0.6, 0.0],
     },
 }
 
@@ -62,6 +63,8 @@ class RealCameraStaticTf(Node):
             self._handle_set_preset,
         )
 
+        self.add_on_set_parameters_callback(self._on_parameter_changed)
+
         self._publish_transform('initial')
 
     def _handle_set_preset(self, request, response):
@@ -80,11 +83,33 @@ class RealCameraStaticTf(Node):
         response.message = f'real camera tf set for {parameter_prefix}'
         return response
 
-    def _publish_transform(self, parameter_prefix=None):
+    def _on_parameter_changed(self, params):
+        """参数变更时自动重发 TF（使用回调中的新值，避免读到旧参数）."""
+        # 按 prefix 分组收集回调中的新值
+        prefix_overrides = {}
+        for param in params:
+            name = param.name
+            parts = name.split('.', 1)
+            if len(parts) == 2 and parts[0] in self._preset_parameter_prefixes():
+                prefix = parts[0]
+                if prefix not in prefix_overrides:
+                    prefix_overrides[prefix] = {}
+                prefix_overrides[prefix][name] = param.value
+            elif name in CAMERA_TF_FIELDS:
+                if None not in prefix_overrides:
+                    prefix_overrides[None] = {}
+                prefix_overrides[None][name] = param.value
+
+        for prefix, overrides in prefix_overrides.items():
+            self._publish_transform(prefix, overrides)
+
+        return SetParametersResult(successful=True)
+
+    def _publish_transform(self, parameter_prefix=None, overrides=None):
         parent_frame = str(self.get_parameter('parent_frame').value)
         child_frame = str(self.get_parameter('child_frame').value)
         x, y, z, roll, pitch, yaw = self._read_transform_parameters(
-            parameter_prefix
+            parameter_prefix, overrides
         )
 
         transform = TransformStamped()
@@ -110,7 +135,7 @@ class RealCameraStaticTf(Node):
             f'rpy=({roll:.4f}, {pitch:.4f}, {yaw:.4f})'
         )
 
-    def _read_transform_parameters(self, parameter_prefix):
+    def _read_transform_parameters(self, parameter_prefix, overrides=None):
         """读取默认或指定姿态下的真实相机 TF 参数."""
         if parameter_prefix in self._preset_parameter_prefixes():
             names = [
@@ -119,7 +144,11 @@ class RealCameraStaticTf(Node):
             ]
         else:
             names = list(CAMERA_TF_FIELDS)
-        return tuple(float(self.get_parameter(name).value) for name in names)
+        return tuple(
+            float(overrides[name]) if overrides and name in overrides
+            else float(self.get_parameter(name).value)
+            for name in names
+        )
 
     def _state_name(self, parameter_prefix):
         for action_type, preset in PRESET_CAMERA_TF.items():

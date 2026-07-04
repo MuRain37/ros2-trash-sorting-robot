@@ -13,7 +13,7 @@ from robot_interfaces.srv import AddCoverageRectangle
 DEFAULT_MAP_YAML = os.path.join(
     get_package_share_directory('robot_nav2'),
     'maps',
-    'room.yaml',
+    'gazebo.yaml',
 )
 
 
