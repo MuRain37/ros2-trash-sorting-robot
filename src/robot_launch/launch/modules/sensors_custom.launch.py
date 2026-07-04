@@ -16,8 +16,8 @@ def generate_launch_description():
         get_package_share_directory('imu_ros2_device')
         + '/config/imu_filter_param.yaml'
     )
-    declare_params_file = DeclareLaunchArgument(
-        'params_file',
+    declare_ydlidar_params_file = DeclareLaunchArgument(
+        'ydlidar_params_file',
         default_value=ydlidar_pkg + '/params/ydlidar.yaml',
         description='YDLidar parameter file path',
     )
@@ -87,12 +87,12 @@ def generate_launch_description():
         name='ydlidar_ros2_driver_node',
         output='screen',
         emulate_tty=True,
-        parameters=[LaunchConfiguration('params_file')],
+        parameters=[LaunchConfiguration('ydlidar_params_file')],
         namespace='/',
     )
 
     return LaunchDescription([
-        declare_params_file,
+        declare_ydlidar_params_file,
         real_camera_static_tf,
         realsense,
         pointcloud_to_laserscan,

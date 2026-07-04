@@ -16,15 +16,12 @@ ACTION_NAMES = {
     ACTION_RIGHT_BUCKET: 'right_bucket',
 }
 
+# 舵机 raw 值范围：中位 500，最小 0，最大 1000
 SERVO_CENTER = 500.0
 SERVO_RAW_MIN = 0.0
 SERVO_RAW_MAX = 1000.0
 JOINT_MAX_DEGREES = (180.0, 120.0, 120.0, 120.0, 120.0)
 JOINT_DIRECTIONS = (-1.0, -1.0, -1.0, -1.0, 1.0)
-ARM_CENTER_JOINTS = (
-    'arm_base_joint', 'arm_shoulder_joint', 'arm_elbow_joint',
-    'arm_wrist_joint', 'arm_tool_rotate_joint',
-)
 
 
 def preset_name(action_type):
@@ -41,24 +38,11 @@ def joint_position_to_servo_raw(index, joint_position):
     return max(SERVO_RAW_MIN, min(SERVO_RAW_MAX, raw))
 
 
-def _load_arm_center_raw():
-    """从 robot_description 配置文件加载归中姿态的舵机 raw 值."""
-    config_path = (
-        Path(get_package_share_directory('robot_description'))
-        / 'config'
-        / 'arm_initial_positions.yaml'
-    )
-    positions = yaml.safe_load(config_path.read_text())['initial_positions']
-    return [
-        joint_position_to_servo_raw(index, positions[name])
-        for index, name in enumerate(ARM_CENTER_JOINTS)
-    ]
-
-
 PRESET_SERVO_RAW = {
-    ACTION_ARM_CENTER: _load_arm_center_raw(),
+    ACTION_ARM_CENTER: [500.0, 650.0, 210.0, 160.0, 500.0],
     ACTION_LEFT_BUCKET: [900.0, 650.0, 240.0, 100.0, 500.0],
     ACTION_RIGHT_BUCKET: [100.0, 650.0, 240.0, 100.0, 500.0],
+    ACTION_ARM_MAPPING: [500.0, 650.0, 210.0, 160.0, 500.0],
 }
 
 

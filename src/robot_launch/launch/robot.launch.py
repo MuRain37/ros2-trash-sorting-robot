@@ -181,10 +181,23 @@ def launch_setup(context):
             )
 
     if _as_bool(LaunchConfiguration('use_nav2').perform(context)):
+        nav2_map = os.path.join(
+            get_package_share_directory('robot_nav2'),
+            'maps',
+            'gazebo.yaml' if mode == 'gazebo' else 'custom.yaml',
+        )
+        if mode == 'custom' and not os.path.exists(nav2_map):
+            raise RuntimeError(
+                'custom mode with use_nav2:=true requires '
+                f'{nav2_map}. Please provide custom.yaml/custom.pgm first.'
+            )
         actions.append(
             _include_module(
                 'nav2',
-                {'use_sim_time': use_sim_time},
+                {
+                    'use_sim_time': use_sim_time,
+                    'map': nav2_map,
+                },
             )
         )
 

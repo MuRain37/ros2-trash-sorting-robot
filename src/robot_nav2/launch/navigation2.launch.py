@@ -78,7 +78,7 @@ def generate_launch_description():
     use_sim_time = launch.substitutions.LaunchConfiguration(
         'use_sim_time', default='true')
     map_yaml_path = launch.substitutions.LaunchConfiguration(
-        'map', default=os.path.join(robot_nav2_dir, 'maps', 'room.yaml'))
+        'map', default=os.path.join(robot_nav2_dir, 'maps', 'gazebo.yaml'))
     nav2_param_dir = launch.substitutions.LaunchConfiguration(
         'params_dir', default=os.path.join(robot_nav2_dir, 'config', 'nav2_params'))
     nav2_param_path = launch.substitutions.LaunchConfiguration(

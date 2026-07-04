@@ -14,7 +14,7 @@ def generate_launch_description():
     default_map_yaml = os.path.join(
         get_package_share_directory('robot_nav2'),
         'maps',
-        'room.yaml',
+        'gazebo.yaml',
     )
 
     map_yaml = LaunchConfiguration('map_yaml')
