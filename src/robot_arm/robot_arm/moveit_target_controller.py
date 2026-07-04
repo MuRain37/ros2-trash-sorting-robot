@@ -12,9 +12,6 @@ from robot_arm.arm_moveit_controller import ZERO_ANGLES
 from robot_interfaces.action import ArmTarget
 
 
-ACTION_ANGLE_COUNT = 4
-
-
 class ArmMoveItTargetController(Node):
     """提供 /arm_moveit_target Action 服务。"""
 
@@ -28,9 +25,24 @@ class ArmMoveItTargetController(Node):
         # 对外提供的机械臂目标 Action 名
         self.declare_parameter('action_name', '/arm_moveit_target')
 
-        self._group_name = self.get_parameter('group_name').value
+        self._group_name = (
+            self.get_parameter('group_name')
+            .get_parameter_value()
+            .string_value
+            or 'plan'
+        )
         self._move_action_name = self.get_parameter('move_action_name').value
         self._action_name = self.get_parameter('action_name').value
+        self._feedback_angle_count = self._field_array_length(
+            ArmTarget.Feedback,
+            'current_angles',
+            len(ZERO_ANGLES),
+        )
+        self._result_angle_count = self._field_array_length(
+            ArmTarget.Result,
+            'final_angles',
+            len(ZERO_ANGLES),
+        )
 
         callback_group = ReentrantCallbackGroup()
         self._moveit = ArmMoveItController(
@@ -93,7 +105,10 @@ class ArmMoveItTargetController(Node):
 
         result = ArmTarget.Result()
         result.success = success
-        result.final_angles = self._fixed_angle_array(final_angles)
+        result.final_angles = self._fixed_angle_array(
+            final_angles,
+            self._angle_count('result'),
+        )
 
         if success:
             self._publish_feedback(goal_handle, 1.0, final_angles)
@@ -106,13 +121,56 @@ class ArmMoveItTargetController(Node):
     def _publish_feedback(self, goal_handle, progress, angles):
         feedback = ArmTarget.Feedback()
         feedback.progress = progress
-        feedback.current_angles = self._fixed_angle_array(angles)
+        feedback.current_angles = self._fixed_angle_array(
+            angles,
+            self._angle_count('feedback'),
+        )
         goal_handle.publish_feedback(feedback)
 
-    def _fixed_angle_array(self, angles):
-        if angles is None or len(angles) < ACTION_ANGLE_COUNT:
-            return list(ZERO_ANGLES[:ACTION_ANGLE_COUNT])
-        return [float(angle) for angle in angles[:ACTION_ANGLE_COUNT]]
+    def _angle_count(self, kind):
+        if kind == 'feedback':
+            return getattr(
+                self,
+                '_feedback_angle_count',
+                self._field_array_length(
+                    ArmTarget.Feedback,
+                    'current_angles',
+                    len(ZERO_ANGLES),
+                ),
+            )
+        return getattr(
+            self,
+            '_result_angle_count',
+            self._field_array_length(
+                ArmTarget.Result,
+                'final_angles',
+                len(ZERO_ANGLES),
+            ),
+        )
+
+    def _fixed_angle_array(self, angles, count):
+        try:
+            values = list(angles) if angles is not None else []
+        except TypeError:
+            values = []
+        fixed = [float(angle) for angle in values[:count]]
+        fixed.extend(0.0 for _ in range(count - len(fixed)))
+        return fixed
+
+    @staticmethod
+    def _field_array_length(message_type, field_name, default):
+        try:
+            field_type = message_type.get_fields_and_field_types()[field_name]
+        except (AttributeError, KeyError):
+            return int(default)
+        start = field_type.rfind('[')
+        end = field_type.rfind(']')
+        if start < 0 or end <= start + 1:
+            return int(default)
+        try:
+            return int(field_type[start + 1:end])
+        except ValueError:
+            return int(default)
 
 
 def main(args=None):

@@ -212,12 +212,25 @@ def launch_setup(context):
         )
 
     if _as_bool(LaunchConfiguration('use_vision_grasp').perform(context)):
+        vision_arguments = {}
+        if mode == 'custom':
+            vision_arguments = {
+                'color_topic': '/camera/real_camera/color/image_raw',
+                'depth_topic': (
+                    '/camera/real_camera/aligned_depth_to_color/image_raw'
+                ),
+                'depth_info_topic': (
+                    '/camera/real_camera/aligned_depth_to_color/camera_info'
+                ),
+                'camera_frame': 'real_camera_color_optical_frame',
+            }
         actions.append(
             IncludeLaunchDescription(
                 PythonLaunchDescriptionSource([
                     get_package_share_directory('robot_vision_grasp'),
                     '/launch/vision_grasp.launch.py',
                 ]),
+                launch_arguments=vision_arguments.items(),
             )
         )
 

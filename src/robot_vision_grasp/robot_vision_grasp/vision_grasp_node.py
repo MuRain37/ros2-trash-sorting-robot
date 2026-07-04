@@ -67,7 +67,12 @@ class VisionGraspNode(Node):
             callback_group=callback_group,
         )
         self.get_logger().info(
-            f'Vision grasp detection ready: service={self._detect_service}'
+            'Vision grasp detection ready: '
+            f'service={self._detect_service}, '
+            f'color_topic={self._color_topic}, '
+            f'depth_topic={self._depth_topic}, '
+            f'depth_info_topic={self._depth_info_topic}, '
+            f'tf={self._base_frame}->{self._camera_frame}'
         )
 
     def _param(self, name, default):

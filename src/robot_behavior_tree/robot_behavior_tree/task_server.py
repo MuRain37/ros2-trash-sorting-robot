@@ -107,7 +107,8 @@ class RobotTaskServer(Node):
         self.declare_parameter('service_timeout_sec', 3.0)
         self.declare_parameter('action_timeout_sec', 45.0)
         self.declare_parameter('dump_timeout_sec', 90.0)
-        self.declare_parameter('clean_max_objects', 1)
+        # <= 0 means keep scanning/grasping until TASK_STOP or action cancel.
+        self.declare_parameter('clean_max_objects', 0)
         self.declare_parameter('detect_retry_count', 3)
         self.declare_parameter('approach_max_attempts', 3)
         self.declare_parameter('approach_y_threshold_cm', 30.0)
@@ -288,6 +289,7 @@ class RobotTaskServer(Node):
             message = f'{task_name} failed: {exc}'
         finally:
             self._publish_stop()
+            self._close_gripper_for_cleanup(task_name)
             self._stop_requested = False
             self._active_goal = None
             self._task_lock.release()
@@ -334,21 +336,31 @@ class RobotTaskServer(Node):
         self._send_arm_preset(goal_handle, ArmPreset.Goal.ARM_CENTER)
 
         picked = 0
+        scan_index = 0
         max_objects = int(self.get_parameter('clean_max_objects').value)
-        for index in range(max(1, max_objects)):
+        while max_objects <= 0 or picked < max_objects:
             if self._is_canceling(goal_handle):
                 return False, 'clean trash canceled'
 
+            scan_index += 1
             self._feedback(
                 goal_handle,
-                f'clean_trash: detecting target {index + 1}',
+                f'clean_trash: detecting target {scan_index}',
                 0.10,
             )
             target = self._detect_reachable_target(goal_handle)
             if target is None:
-                if picked == 0:
-                    return False, 'no reachable trash target detected'
-                return True, f'clean trash completed: picked={picked}'
+                if max_objects > 0:
+                    if picked == 0:
+                        return False, 'no reachable trash target detected'
+                    return True, f'clean trash completed: picked={picked}'
+                self._feedback(
+                    goal_handle,
+                    'clean_trash: no target, scanning again',
+                    0.20,
+                )
+                time.sleep(0.5)
+                continue
 
             self._feedback(
                 goal_handle,
@@ -422,6 +434,17 @@ class RobotTaskServer(Node):
                     gripper_rotation=float(response.gripper_rotation),
                     gripper_close_ratio=float(response.gripper_close_ratio),
                     bucket_id=int(response.bucket_id),
+                )
+            if response is None:
+                self.get_logger().warning(
+                    'detect grasp target attempt '
+                    f'{attempt + 1}/{max(1, retries)} returned no response'
+                )
+            else:
+                self.get_logger().warning(
+                    'detect grasp target attempt '
+                    f'{attempt + 1}/{max(1, retries)} failed: '
+                    f'{response.message}'
                 )
             time.sleep(0.15)
             self._feedback(
@@ -1030,6 +1053,36 @@ class RobotTaskServer(Node):
         )
         if response is None or not response.success:
             raise RuntimeError(f'{label} failed')
+
+    def _close_gripper_for_cleanup(self, task_name):
+        request = SetGripper.Request()
+        request.open_ratio = 0.0
+        request.duration_ms = float(self.get_parameter('gripper_duration_ms').value)
+        timeout_sec = float(self.get_parameter('service_timeout_sec').value)
+        label = f'{task_name} cleanup close gripper'
+
+        if not self._gripper_client.wait_for_service(timeout_sec=timeout_sec):
+            self.get_logger().warning(f'{label} service not available')
+            return
+
+        future = self._gripper_client.call_async(request)
+        deadline = time.monotonic() + timeout_sec
+        while rclpy.ok() and not future.done():
+            if time.monotonic() >= deadline:
+                future.cancel()
+                self.get_logger().warning(f'{label} service timed out')
+                return
+            time.sleep(0.02)
+
+        try:
+            response = future.result()
+        except Exception as exc:
+            self.get_logger().warning(f'{label} service failed: {exc}')
+            return
+
+        if response is None or not response.success:
+            message = '' if response is None else f': {response.message}'
+            self.get_logger().warning(f'{label} failed{message}')
 
     def _call_service(self, client, request, timeout_sec, goal_handle, label):
         if self._is_canceling(goal_handle):

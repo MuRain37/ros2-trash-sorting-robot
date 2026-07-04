@@ -70,6 +70,12 @@
         height: 666px;
         overflow: hidden;
         background: #101615;
+        touch-action: none;
+        user-select: none;
+    }
+
+    .map-stage.dragging {
+        cursor: grabbing;
     }
 
     #map-canvas {
@@ -143,9 +149,15 @@
     let waypointDragStart = null;
     let waypointDragCurrent = null;
     let isDragging = false;
+    let isDraggingView = false;
+    let viewDragMode = null;
+    let viewDragStart = null;
+    let viewStartTransform = null;
     let dragStart = null;
     let dragCurrent = null;
     let currentImageVersion = null;
+    const MAP_DEFAULT_ROTATION = Math.PI;
+    const viewTransform = { scale: 1, offsetX: 0, offsetY: 0, rotation: MAP_DEFAULT_ROTATION };
     const mapImage = new Image();
 
     const canvas = document.getElementById('map-canvas');
@@ -153,6 +165,10 @@
     const stage = document.getElementById('map-stage');
 
     mapImage.onload = () => drawMap();
+
+    function clamp(value, min, max) {
+        return Math.min(max, Math.max(min, value));
+    }
 
     function mapMeta() {
         return mapData && mapData.has_map ? mapData.map : null;
@@ -187,33 +203,71 @@
         return { x: 0, y: (rect.height - height) / 2, width, height };
     }
 
+    function transformPoint(point) {
+        const rect = canvas.getBoundingClientRect();
+        const cx = rect.width / 2;
+        const cy = rect.height / 2;
+        const cos = Math.cos(viewTransform.rotation);
+        const sin = Math.sin(viewTransform.rotation);
+        const dx = point.x - cx;
+        const dy = point.y - cy;
+        return {
+            x: cx + viewTransform.offsetX + (dx * cos - dy * sin) * viewTransform.scale,
+            y: cy + viewTransform.offsetY + (dx * sin + dy * cos) * viewTransform.scale,
+        };
+    }
+
+    function inverseTransformPoint(point) {
+        const rect = canvas.getBoundingClientRect();
+        const cx = rect.width / 2;
+        const cy = rect.height / 2;
+        const cos = Math.cos(viewTransform.rotation);
+        const sin = Math.sin(viewTransform.rotation);
+        const dx = (point.x - cx - viewTransform.offsetX) / viewTransform.scale;
+        const dy = (point.y - cy - viewTransform.offsetY) / viewTransform.scale;
+        return {
+            x: cx + dx * cos + dy * sin,
+            y: cy - dx * sin + dy * cos,
+        };
+    }
+
+    function transformedViewport() {
+        const view = viewport();
+        const topLeft = transformPoint({ x: view.x, y: view.y });
+        const topRight = transformPoint({ x: view.x + view.width, y: view.y });
+        const bottomRight = transformPoint({ x: view.x + view.width, y: view.y + view.height });
+        const bottomLeft = transformPoint({ x: view.x, y: view.y + view.height });
+        return { base: view, points: [topLeft, topRight, bottomRight, bottomLeft] };
+    }
+
     function worldToCanvas(point) {
         const meta = mapMeta();
         if (!meta || !point) return null;
         const view = viewport();
         const widthM = meta.width * meta.resolution;
         const heightM = meta.height * meta.resolution;
-        return {
+        return transformPoint({
             x: view.x + ((point.x - meta.origin.x) / widthM) * view.width,
             y: view.y + (1 - ((point.y - meta.origin.y) / heightM)) * view.height
-        };
+        });
     }
 
     function canvasToWorld(point) {
         const meta = mapMeta();
         if (!meta) return null;
         const view = viewport();
+        const basePoint = inverseTransformPoint(point);
         if (
-            point.x < view.x || point.x > view.x + view.width ||
-            point.y < view.y || point.y > view.y + view.height
+            basePoint.x < view.x || basePoint.x > view.x + view.width ||
+            basePoint.y < view.y || basePoint.y > view.y + view.height
         ) {
             return null;
         }
         const widthM = meta.width * meta.resolution;
         const heightM = meta.height * meta.resolution;
         return {
-            x: meta.origin.x + ((point.x - view.x) / view.width) * widthM,
-            y: meta.origin.y + (1 - ((point.y - view.y) / view.height)) * heightM,
+            x: meta.origin.x + ((basePoint.x - view.x) / view.width) * widthM,
+            y: meta.origin.y + (1 - ((basePoint.y - view.y) / view.height)) * heightM,
             theta: 0
         };
     }
@@ -226,6 +280,69 @@
         };
     }
 
+    function viewCenterClient(startTransform = viewTransform) {
+        const rect = canvas.getBoundingClientRect();
+        return {
+            x: rect.left + rect.width / 2 + startTransform.offsetX,
+            y: rect.top + rect.height / 2 + startTransform.offsetY,
+        };
+    }
+
+    function editGestureActive() {
+        return (
+            (mode === 'dump_pose' && dumpPoseBucketId) ||
+            (mode === 'target' && pathEditing) ||
+            mode === 'region'
+        );
+    }
+
+    function startViewDrag(event) {
+        let dragMode = null;
+        if (event.button === 2 || (event.button === 0 && event.shiftKey)) {
+            dragMode = 'rotate';
+        } else if (event.button === 1 || event.altKey || (event.button === 0 && !editGestureActive())) {
+            dragMode = 'pan';
+        }
+        if (!dragMode) return false;
+        event.preventDefault();
+        isDraggingView = true;
+        viewDragMode = dragMode;
+        viewStartTransform = { ...viewTransform };
+        const center = viewCenterClient(viewStartTransform);
+        viewDragStart = {
+            x: event.clientX,
+            y: event.clientY,
+            angle: Math.atan2(event.clientY - center.y, event.clientX - center.x),
+        };
+        stage.classList.add('dragging');
+        return true;
+    }
+
+    function updateViewDrag(event) {
+        if (!isDraggingView || !viewDragStart || !viewStartTransform) return false;
+        event.preventDefault();
+        if (viewDragMode === 'rotate') {
+            const center = viewCenterClient(viewStartTransform);
+            const angle = Math.atan2(event.clientY - center.y, event.clientX - center.x);
+            viewTransform.rotation = viewStartTransform.rotation + angle - viewDragStart.angle;
+        } else {
+            viewTransform.offsetX = viewStartTransform.offsetX + event.clientX - viewDragStart.x;
+            viewTransform.offsetY = viewStartTransform.offsetY + event.clientY - viewDragStart.y;
+        }
+        drawMap();
+        return true;
+    }
+
+    function endViewDrag() {
+        if (!isDraggingView) return false;
+        isDraggingView = false;
+        viewDragMode = null;
+        viewDragStart = null;
+        viewStartTransform = null;
+        stage.classList.remove('dragging');
+        return true;
+    }
+
     function drawMap() {
         const rect = canvas.getBoundingClientRect();
         const width = rect.width;
@@ -235,11 +352,23 @@
         ctx.fillRect(0, 0, width, height);
 
         const view = viewport();
+        const transformed = transformedViewport();
         if (mapImage.complete && mapImage.naturalWidth) {
+            ctx.save();
+            ctx.beginPath();
+            ctx.moveTo(transformed.points[0].x, transformed.points[0].y);
+            transformed.points.slice(1).forEach(point => ctx.lineTo(point.x, point.y));
+            ctx.closePath();
+            ctx.clip();
+            ctx.translate(width / 2 + viewTransform.offsetX, height / 2 + viewTransform.offsetY);
+            ctx.rotate(viewTransform.rotation);
+            ctx.scale(viewTransform.scale, viewTransform.scale);
+            ctx.translate(-width / 2, -height / 2);
             ctx.drawImage(mapImage, view.x, view.y, view.width, view.height);
+            ctx.restore();
         }
 
-        drawGrid(view);
+        drawGrid(transformed);
         regions.forEach(drawRegion);
         drawDumpBucketMarkers();
         drawStagedPath();
@@ -251,21 +380,24 @@
     }
 
     function drawGrid(view) {
+        const base = view.base || view;
         ctx.save();
         ctx.strokeStyle = 'rgba(47, 128, 237, 0.16)';
         ctx.lineWidth = 1;
         for (let i = 0; i <= 10; i++) {
-            const x = view.x + (view.width / 10) * i;
+            const x = base.x + (base.width / 10) * i;
+            const fromV = transformPoint({ x, y: base.y });
+            const toV = transformPoint({ x, y: base.y + base.height });
             ctx.beginPath();
-            ctx.moveTo(x, view.y);
-            ctx.lineTo(x, view.y + view.height);
+            ctx.moveTo(fromV.x, fromV.y);
+            ctx.lineTo(toV.x, toV.y);
             ctx.stroke();
-        }
-        for (let i = 0; i <= 10; i++) {
-            const y = view.y + (view.height / 10) * i;
+            const y = base.y + (base.height / 10) * i;
+            const fromH = transformPoint({ x: base.x, y });
+            const toH = transformPoint({ x: base.x + base.width, y });
             ctx.beginPath();
-            ctx.moveTo(view.x, y);
-            ctx.lineTo(view.x + view.width, y);
+            ctx.moveTo(fromH.x, fromH.y);
+            ctx.lineTo(toH.x, toH.y);
             ctx.stroke();
         }
         ctx.restore();
@@ -326,8 +458,9 @@
     }
 
     function drawDirectionArrow(point, length = 28, color = '#101615') {
-        const endX = point.x + Math.cos(point.theta || 0) * length;
-        const endY = point.y - Math.sin(point.theta || 0) * length;
+        const visualTheta = (point.theta || 0) - viewTransform.rotation;
+        const endX = point.x + Math.cos(visualTheta) * length;
+        const endY = point.y - Math.sin(visualTheta) * length;
         const head = 8;
         const headAngle = Math.atan2(point.y - endY, endX - point.x);
         ctx.strokeStyle = color;
@@ -455,7 +588,7 @@
         if (!pose || !pos) return;
         ctx.save();
         ctx.translate(pos.x, pos.y);
-        ctx.rotate(-(pose.theta || 0));
+        ctx.rotate(-(pose.theta || 0) + viewTransform.rotation);
         ctx.fillStyle = '#2f80ed';
         ctx.strokeStyle = '#ffffff';
         ctx.lineWidth = 2;
@@ -858,6 +991,7 @@
     }
 
     canvas.addEventListener('mousedown', event => {
+        if (startViewDrag(event)) return;
         if (mode === 'dump_pose' && dumpPoseBucketId) {
             dumpPoseDragStart = eventPoint(event);
             dumpPoseDragCurrent = dumpPoseDragStart;
@@ -878,6 +1012,7 @@
     });
 
     canvas.addEventListener('mousemove', event => {
+        if (updateViewDrag(event)) return;
         if (mode === 'dump_pose' && dumpPoseBucketId && dumpPoseDragStart) {
             dumpPoseDragCurrent = eventPoint(event);
             drawMap();
@@ -894,6 +1029,7 @@
     });
 
     canvas.addEventListener('mouseup', async event => {
+        if (endViewDrag()) return;
         if (mode === 'dump_pose' && dumpPoseBucketId && dumpPoseDragStart) {
             dumpPoseDragCurrent = eventPoint(event);
             try {
@@ -910,7 +1046,7 @@
             addDraggedWaypoint();
             return;
         }
-        if (mode !== 'region') return;
+        if (mode !== 'region' || !isDragging) return;
         isDragging = false;
         dragCurrent = eventPoint(event);
         try {
@@ -923,6 +1059,36 @@
             drawMap();
         }
     });
+
+    canvas.addEventListener('mouseleave', () => {
+        if (endViewDrag()) return;
+        if (isDragging) {
+            dragStart = null;
+            dragCurrent = null;
+            drawMap();
+        }
+        isDragging = false;
+    });
+
+    canvas.addEventListener('contextmenu', event => event.preventDefault());
+
+    stage.addEventListener('wheel', event => {
+        event.preventDefault();
+        if (event.shiftKey) {
+            viewTransform.rotation += event.deltaY * -0.0025;
+        } else {
+            const prevScale = viewTransform.scale;
+            const nextScale = clamp(prevScale * Math.exp(-event.deltaY * 0.0012), 0.35, 6.0);
+            const rect = canvas.getBoundingClientRect();
+            const mx = event.clientX - rect.left - rect.width / 2 - viewTransform.offsetX;
+            const my = event.clientY - rect.top - rect.height / 2 - viewTransform.offsetY;
+            const ratio = nextScale / prevScale;
+            viewTransform.offsetX -= mx * (ratio - 1);
+            viewTransform.offsetY -= my * (ratio - 1);
+            viewTransform.scale = nextScale;
+        }
+        drawMap();
+    }, { passive: false });
 
     window.addEventListener('resize', resizeCanvas);
     renderRegionStrip();

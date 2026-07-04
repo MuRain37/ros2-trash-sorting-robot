@@ -92,8 +92,12 @@ ROS_CONFIG = {
     'depth_camera_topics': _env_list(
         'ROS_DEPTH_CAMERA_TOPICS',
         [
+            '/camera/real_camera/aligned_depth_to_color/image_raw',
+            '/camera/real_camera/depth/image_rect_raw',
             '/camera/camera/aligned_depth_to_color/image_raw',
             '/camera/camera/depth/image_rect_raw',
+            '/real_camera/aligned_depth_to_color/image_raw',
+            '/real_camera/depth/image_rect_raw',
             '/camera/depth/image_raw',
             '/camera/depth/image_rect_raw',
         ],
@@ -101,7 +105,9 @@ ROS_CONFIG = {
     'color_camera_topics': _env_list(
         'ROS_COLOR_CAMERA_TOPICS',
         [
+            '/camera/real_camera/color/image_raw',
             '/camera/camera/color/image_raw',
+            '/real_camera/color/image_raw',
             '/camera/color/image_raw',
             '/camera/image_raw',
         ],
@@ -112,7 +118,7 @@ ROS_CONFIG = {
     'cmd_vel_topic': os.getenv('ROS_CMD_VEL_TOPIC', '/cmd_vel'),
     'static_map_yaml': os.getenv(
         'ROS_STATIC_MAP_YAML',
-        '/home/xjw/ros2_robot/src/robot_nav2/maps/room.yaml',
+        '/home/xjw/ros2_robot/src/robot_nav2/maps/custom.yaml',
     ),
     'map_frame': os.getenv('ROS_MAP_FRAME', 'map'),
     'robot_base_frame': os.getenv('ROS_ROBOT_BASE_FRAME', 'base_footprint'),
@@ -123,11 +129,11 @@ ROS_CONFIG = {
     ),
     'slam_rebuild_command': os.getenv(
         'ROS_SLAM_REBUILD_COMMAND',
-        'ros2 launch slam_toolbox online_async_launch.py use_sim_time:=true',
+        'ros2 launch robot_launch slam_toolbox.launch.py use_sim_time:=false',
     ),
     'map_save_prefix': os.getenv(
         'ROS_MAP_SAVE_PREFIX',
-        '/home/xjw/ros2_robot/src/robot_nav2/maps/room',
+        '/home/xjw/ros2_robot/src/robot_nav2/maps/custom',
     ),
     'map_save_command': os.getenv(
         'ROS_MAP_SAVE_COMMAND',

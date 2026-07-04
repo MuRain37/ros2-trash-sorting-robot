@@ -236,8 +236,12 @@
     let mapRequestInFlight = false;
     let poseRequestInFlight = false;
     let isDraggingView = false;
+    let viewDragMode = null;
     let lastPointer = null;
-    const viewTransform = { scale: 1, offsetX: 0, offsetY: 0, rotation: 0 };
+    let viewDragStart = null;
+    let viewStartTransform = null;
+    const MAP_DEFAULT_ROTATION = Math.PI;
+    const viewTransform = { scale: 1, offsetX: 0, offsetY: 0, rotation: MAP_DEFAULT_ROTATION };
     const pressedKeys = new Set();
     const mapImage = new Image();
 
@@ -653,25 +657,52 @@
         drawMap();
     }, { passive: false });
 
+    function viewCenterClient(startTransform = viewTransform) {
+        const rect = canvas.getBoundingClientRect();
+        return {
+            x: rect.left + rect.width / 2 + startTransform.offsetX,
+            y: rect.top + rect.height / 2 + startTransform.offsetY,
+        };
+    }
+
     stage.addEventListener('pointerdown', event => {
-        if (event.button !== 0) return;
+        if (![0, 1, 2].includes(event.button)) return;
+        event.preventDefault();
         isDraggingView = true;
+        viewDragMode = event.button === 2 || (event.button === 0 && event.shiftKey) ? 'rotate' : 'pan';
         lastPointer = { x: event.clientX, y: event.clientY };
+        viewStartTransform = { ...viewTransform };
+        const center = viewCenterClient(viewStartTransform);
+        viewDragStart = {
+            x: event.clientX,
+            y: event.clientY,
+            angle: Math.atan2(event.clientY - center.y, event.clientX - center.x),
+        };
         stage.classList.add('dragging');
         stage.setPointerCapture(event.pointerId);
     });
 
     stage.addEventListener('pointermove', event => {
-        if (!isDraggingView || !lastPointer) return;
-        viewTransform.offsetX += event.clientX - lastPointer.x;
-        viewTransform.offsetY += event.clientY - lastPointer.y;
+        if (!isDraggingView || !lastPointer || !viewStartTransform || !viewDragStart) return;
+        event.preventDefault();
+        if (viewDragMode === 'rotate') {
+            const center = viewCenterClient(viewStartTransform);
+            const angle = Math.atan2(event.clientY - center.y, event.clientX - center.x);
+            viewTransform.rotation = viewStartTransform.rotation + angle - viewDragStart.angle;
+        } else {
+            viewTransform.offsetX = viewStartTransform.offsetX + event.clientX - viewDragStart.x;
+            viewTransform.offsetY = viewStartTransform.offsetY + event.clientY - viewDragStart.y;
+        }
         lastPointer = { x: event.clientX, y: event.clientY };
         drawMap();
     });
 
     function endViewDrag(event) {
         isDraggingView = false;
+        viewDragMode = null;
         lastPointer = null;
+        viewDragStart = null;
+        viewStartTransform = null;
         stage.classList.remove('dragging');
         if (event && event.pointerId !== undefined) {
             try {
@@ -684,6 +715,7 @@
 
     stage.addEventListener('pointerup', endViewDrag);
     stage.addEventListener('pointercancel', endViewDrag);
+    stage.addEventListener('contextmenu', event => event.preventDefault());
 
     window.addEventListener('blur', stopRobot);
     window.addEventListener('resize', resizeCanvas);

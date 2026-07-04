@@ -28,9 +28,24 @@ class ArmPresetActionServer(Node):
         # 对外提供的预设姿态 Action 名
         self.declare_parameter('action_name', '/arm_preset')
 
-        self._group_name = self.get_parameter('group_name').value
+        self._group_name = (
+            self.get_parameter('group_name')
+            .get_parameter_value()
+            .string_value
+            or 'plan'
+        )
         self._move_action_name = self.get_parameter('move_action_name').value
         self._action_name = self.get_parameter('action_name').value
+        self._feedback_angle_count = self._field_array_length(
+            ArmPreset.Feedback,
+            'current_angles',
+            len(ZERO_ANGLES),
+        )
+        self._result_angle_count = self._field_array_length(
+            ArmPreset.Result,
+            'final_angles',
+            len(ZERO_ANGLES),
+        )
 
         callback_group = ReentrantCallbackGroup()
         # 复用 MoveIt 控制器，最终仍通过 /move_action 规划和执行
@@ -122,7 +137,10 @@ class ArmPresetActionServer(Node):
         """发布 action 反馈；返回 False 时通知控制器停止等待."""
         feedback = ArmPreset.Feedback()
         feedback.progress = float(progress)
-        feedback.current_angles = self._fixed_angle_array(angles)
+        feedback.current_angles = self._fixed_angle_array(
+            angles,
+            self._angle_count('feedback'),
+        )
         goal_handle.publish_feedback(feedback)
         return not goal_handle.is_cancel_requested
 
@@ -131,14 +149,59 @@ class ArmPresetActionServer(Node):
         result = ArmPreset.Result()
         result.success = bool(success)
         result.message = str(message)
-        result.final_angles = self._fixed_angle_array(final_angles)
+        result.final_angles = self._fixed_angle_array(
+            final_angles,
+            self._angle_count('result'),
+        )
         return result
 
-    def _fixed_angle_array(self, angles):
-        """保证 final_angles/current_angles 总是 5 个浮点数."""
-        if angles is None or len(angles) != 5:
-            return list(ZERO_ANGLES)
-        return [float(angle) for angle in angles]
+    def _angle_count(self, kind):
+        """返回运行时生成接口要求的数组长度。"""
+        if kind == 'feedback':
+            return getattr(
+                self,
+                '_feedback_angle_count',
+                self._field_array_length(
+                    ArmPreset.Feedback,
+                    'current_angles',
+                    len(ZERO_ANGLES),
+                ),
+            )
+        return getattr(
+            self,
+            '_result_angle_count',
+            self._field_array_length(
+                ArmPreset.Result,
+                'final_angles',
+                len(ZERO_ANGLES),
+            ),
+        )
+
+    def _fixed_angle_array(self, angles, count):
+        """按当前生成的 action 字段长度裁剪或补零。"""
+        try:
+            values = list(angles) if angles is not None else []
+        except TypeError:
+            values = []
+        fixed = [float(angle) for angle in values[:count]]
+        fixed.extend(0.0 for _ in range(count - len(fixed)))
+        return fixed
+
+    @staticmethod
+    def _field_array_length(message_type, field_name, default):
+        """从 ROS 生成消息类读取 float64[N] 的 N。"""
+        try:
+            field_type = message_type.get_fields_and_field_types()[field_name]
+        except (AttributeError, KeyError):
+            return int(default)
+        start = field_type.rfind('[')
+        end = field_type.rfind(']')
+        if start < 0 or end <= start + 1:
+            return int(default)
+        try:
+            return int(field_type[start + 1:end])
+        except ValueError:
+            return int(default)
 
     def _is_known_action(self, action_type):
         """通过预设查表和 raw 值校验判断目标是否可执行."""

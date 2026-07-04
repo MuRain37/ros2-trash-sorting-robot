@@ -20,7 +20,7 @@ CAMERA_TF_FIELDS = ('x', 'y', 'z', 'roll', 'pitch', 'yaw')
 PRESET_CAMERA_TF = {
     ACTION_ARM_CENTER: {
         'parameter_prefix': 'arm_center',
-        'values': [0.0, 0.0, 1.0, 0.0, 0.0, 0.0],
+        'values': [0.28, 0.0, 0.28, 0.0, 0.95, 0.0],
     },
     ACTION_ARM_MAPPING: {
         'parameter_prefix': 'arm_mapping',
