@@ -11,6 +11,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "action/RobotTask.action"
   "srv/AddCoverageRectangle.srv"
   "srv/DetectGraspTarget.srv"
+  "srv/DetectDumpBucket.srv"
   "srv/GenerateCoveragePath.srv"
   "srv/DumpTrash.srv"
   "srv/SetLiftSteps.srv"

@@ -7,6 +7,7 @@ uint8 TASK_STOP=5
 uint8 TASK_RESUME=6
 uint8 TASK_NAVIGATE_PATH=7
 uint8 TASK_SET_DUMP_POSE=8
+uint8 TASK_SET_CLEAN_REGION=9
 
 uint8 task_type
 string command

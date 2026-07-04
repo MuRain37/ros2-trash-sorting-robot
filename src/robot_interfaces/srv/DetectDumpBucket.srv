@@ -1,0 +1,16 @@
+bool force_refresh
+---
+bool success
+string message
+bool detected
+uint32 mask_pixels
+float64 mean_depth_m
+float64 center_x_px
+float64 center_y_px
+float64 image_center_x_px
+float64 image_center_y_px
+float64 offset_x_px
+float64 offset_y_px
+float64 offset_x_ratio
+float64 offset_y_ratio
+uint8 signal

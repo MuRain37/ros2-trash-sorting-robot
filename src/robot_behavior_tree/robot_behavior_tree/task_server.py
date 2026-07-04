@@ -10,6 +10,7 @@ import time
 import rclpy
 from action_msgs.msg import GoalStatus
 from geometry_msgs.msg import PoseStamped, Twist
+from nav_msgs.msg import Odometry
 from nav2_msgs.action import NavigateThroughPoses, NavigateToPose
 from rclpy.action import ActionClient, ActionServer
 from rclpy.action import CancelResponse, GoalResponse
@@ -19,11 +20,12 @@ from rclpy.node import Node
 from robot_interfaces.action import ArmPreset, ArmTarget, RobotTask
 from robot_interfaces.srv import (
     AddCoverageRectangle,
+    DetectDumpBucket,
     DetectGraspTarget,
     DumpTrash,
     SetGripper,
 )
-from std_srvs.srv import Trigger
+from sensor_msgs.msg import Imu
 
 
 @dataclass
@@ -52,6 +54,31 @@ class DumpBucketPose:
     frame_id: str
 
 
+@dataclass
+class CleanRegion:
+    """行为树保存的清扫区域。"""
+
+    region_id: int
+    min_x: float
+    min_y: float
+    max_x: float
+    max_y: float
+    frame_id: str
+
+
+@dataclass
+class DumpBucketDetection:
+    """卸载桶视觉检测结果：中心偏移、深度和是否到达倾倒距离。"""
+
+    detected: bool
+    within_depth: bool
+    mask_pixels: int
+    mean_depth_m: float
+    offset_x_px: float
+    offset_x_ratio: float
+    message: str
+
+
 class RobotTaskServer(Node):
     """统一接收用户任务，并调度导航、视觉、机械臂和底层硬件能力。"""
 
@@ -70,6 +97,8 @@ class RobotTaskServer(Node):
         self.declare_parameter('gripper_service', 'arm_gripper')
         self.declare_parameter('cmd_vel_topic', '/cmd_vel')
         self.declare_parameter('map_frame', 'map')
+        self.declare_parameter('odom_topic', '/odom')
+        self.declare_parameter('imu_topic', '/imu/data')
         self.declare_parameter('service_timeout_sec', 3.0)
         self.declare_parameter('action_timeout_sec', 45.0)
         self.declare_parameter('dump_timeout_sec', 90.0)
@@ -88,9 +117,19 @@ class RobotTaskServer(Node):
         self.declare_parameter('dump_align_step_m', 0.03)
         self.declare_parameter('dump_align_linear_speed', 0.05)
         self.declare_parameter('dump_rotate_angular_speed', 0.5)
+        self.declare_parameter('dump_center_tolerance_ratio', 0.04)
+        self.declare_parameter('dump_center_max_attempts', 12)
+        self.declare_parameter('dump_center_angular_speed', 0.18)
+        self.declare_parameter('dump_center_step_sec', 0.18)
+        self.declare_parameter('dump_rotate_tolerance_rad', 0.04)
+        self.declare_parameter('dump_rotate_timeout_sec', 12.0)
         self.declare_parameter(
             'dump_pose_store_path',
             '/home/xjw/ros2_robot/src/robot_behavior_tree/config/dump_bucket_poses.json',
+        )
+        self.declare_parameter(
+            'clean_region_store_path',
+            '/home/xjw/ros2_robot/src/robot_behavior_tree/config/clean_regions.json',
         )
 
         callback_group = ReentrantCallbackGroup()
@@ -98,7 +137,25 @@ class RobotTaskServer(Node):
         self._active_goal = None
         self._stop_requested = False
         self._dump_bucket_poses = {}
+        self._clean_regions = {}
+        self._latest_odom_yaw = None
+        self._latest_imu_yaw = None
         self._load_dump_bucket_poses()
+        self._load_clean_regions()
+        self._odom_sub = self.create_subscription(
+            Odometry,
+            self.get_parameter('odom_topic').value,
+            self._handle_odom,
+            10,
+            callback_group=callback_group,
+        )
+        self._imu_sub = self.create_subscription(
+            Imu,
+            self.get_parameter('imu_topic').value,
+            self._handle_imu,
+            10,
+            callback_group=callback_group,
+        )
 
         self._detect_grasp_client = self.create_client(
             DetectGraspTarget,
@@ -106,7 +163,7 @@ class RobotTaskServer(Node):
             callback_group=callback_group,
         )
         self._detect_dump_client = self.create_client(
-            Trigger,
+            DetectDumpBucket,
             self.get_parameter('detect_dump_service').value,
             callback_group=callback_group,
         )
@@ -168,6 +225,12 @@ class RobotTaskServer(Node):
             'robot behavior tree ready: '
             f'action={self.get_parameter("action_name").value}'
         )
+
+    def _handle_odom(self, msg):
+        self._latest_odom_yaw = self._yaw_from_quaternion(msg.pose.pose.orientation)
+
+    def _handle_imu(self, msg):
+        self._latest_imu_yaw = self._yaw_from_quaternion(msg.orientation)
 
     def _handle_goal(self, goal_request):
         task_type = int(goal_request.task_type)
@@ -245,6 +308,8 @@ class RobotTaskServer(Node):
             return self._run_navigate_path_tree(goal_handle, goal)
         if task_type == RobotTask.Goal.TASK_SET_DUMP_POSE:
             return self._run_set_dump_pose(goal_handle, goal)
+        if task_type == RobotTask.Goal.TASK_SET_CLEAN_REGION:
+            return self._run_set_clean_region(goal_handle, goal)
         if task_type == RobotTask.Goal.TASK_STOP:
             self._stop_requested = True
             self._publish_stop()
@@ -433,10 +498,18 @@ class RobotTaskServer(Node):
         if bool(self.get_parameter('require_dump_bucket_detect').value):
             self._feedback(
                 goal_handle,
-                f'dump_trash: align bucket {bucket_id}',
+                f'dump_trash: center bucket {bucket_id}',
                 base_progress + span * 0.45,
             )
-            if not self._align_to_dump_bucket(goal_handle):
+            if not self._center_dump_bucket(goal_handle):
+                return False, f'dump bucket {bucket_id} visual center align failed'
+
+            self._feedback(
+                goal_handle,
+                f'dump_trash: depth align bucket {bucket_id}',
+                base_progress + span * 0.55,
+            )
+            if not self._align_dump_bucket_depth(goal_handle):
                 return False, f'dump bucket {bucket_id} not detected after align'
 
         self._feedback(
@@ -487,12 +560,16 @@ class RobotTaskServer(Node):
 
     def _run_clean_region_tree(self, goal_handle, goal):
         self._feedback(goal_handle, 'clean_region: queue coverage rectangle', 0.20)
+        region, error = self._resolve_clean_region(goal)
+        if region is None:
+            return False, error
+
         request = AddCoverageRectangle.Request()
-        request.min_x = float(goal.min_x)
-        request.min_y = float(goal.min_y)
-        request.max_x = float(goal.max_x)
-        request.max_y = float(goal.max_y)
-        request.frame_id = goal.frame_id or str(self.get_parameter('map_frame').value)
+        request.min_x = region.min_x
+        request.min_y = region.min_y
+        request.max_x = region.max_x
+        request.max_y = region.max_y
+        request.frame_id = region.frame_id
         response = self._call_service(
             self._coverage_client,
             request,
@@ -503,6 +580,60 @@ class RobotTaskServer(Node):
         if response is None:
             return False, 'coverage task service unavailable or timed out'
         return bool(response.success), response.message
+
+    def _run_set_clean_region(self, goal_handle, goal):
+        region_id = int(goal.bucket_id)
+        if region_id <= 0:
+            return False, 'clean region id must be greater than 0'
+        min_x = float(goal.min_x)
+        min_y = float(goal.min_y)
+        max_x = float(goal.max_x)
+        max_y = float(goal.max_y)
+        if min_x >= max_x or min_y >= max_y:
+            return False, 'clean region bounds invalid'
+        frame_id = goal.frame_id or str(self.get_parameter('map_frame').value)
+        region = CleanRegion(
+            region_id=region_id,
+            min_x=min_x,
+            min_y=min_y,
+            max_x=max_x,
+            max_y=max_y,
+            frame_id=str(frame_id),
+        )
+        self._clean_regions[region_id] = region
+        self._save_clean_regions()
+        self._feedback(goal_handle, f'set_clean_region: region {region_id}', 1.0)
+        return (
+            True,
+            f'clean region {region_id} set: '
+            f'({min_x:.3f}, {min_y:.3f}) -> ({max_x:.3f}, {max_y:.3f})',
+        )
+
+    def _resolve_clean_region(self, goal):
+        min_x = float(goal.min_x)
+        min_y = float(goal.min_y)
+        max_x = float(goal.max_x)
+        max_y = float(goal.max_y)
+        frame_id = goal.frame_id or str(self.get_parameter('map_frame').value)
+
+        if min_x < max_x and min_y < max_y:
+            return CleanRegion(
+                region_id=int(goal.bucket_id) if int(goal.bucket_id) > 0 else 0,
+                min_x=min_x,
+                min_y=min_y,
+                max_x=max_x,
+                max_y=max_y,
+                frame_id=str(frame_id),
+            ), None
+
+        region_id = int(goal.bucket_id)
+        if region_id <= 0:
+            region_id = 1
+        region = self._clean_regions.get(region_id)
+        if region is None:
+            return None, f'clean region {region_id} is not set'
+
+        return region, None
 
     def _run_navigate_tree(self, goal_handle, goal):
         self._feedback(goal_handle, 'navigate_to: sending goal', 0.20)
@@ -587,20 +718,63 @@ class RobotTaskServer(Node):
             )
         return True, f'navigated to dump bucket {pose.bucket_id} front'
 
-    def _align_to_dump_bucket(self, goal_handle):
+    def _detect_dump_bucket(self, goal_handle):
+        request = DetectDumpBucket.Request()
+        request.force_refresh = True
+        response = self._call_service(
+            self._detect_dump_client,
+            request,
+            timeout_sec=float(self.get_parameter('service_timeout_sec').value),
+            goal_handle=goal_handle,
+            label='detect dump bucket',
+        )
+        if response is None:
+            return None
+        return DumpBucketDetection(
+            detected=bool(response.detected),
+            within_depth=int(response.signal) == 1,
+            mask_pixels=int(response.mask_pixels),
+            mean_depth_m=float(response.mean_depth_m),
+            offset_x_px=float(response.offset_x_px),
+            offset_x_ratio=float(response.offset_x_ratio),
+            message=str(response.message),
+        )
+
+    def _center_dump_bucket(self, goal_handle):
+        attempts = max(1, int(self.get_parameter('dump_center_max_attempts').value))
+        tolerance = abs(float(self.get_parameter('dump_center_tolerance_ratio').value))
+        speed = abs(float(self.get_parameter('dump_center_angular_speed').value))
+        step_sec = max(0.05, float(self.get_parameter('dump_center_step_sec').value))
+        if speed <= 0.0:
+            return False
+
+        for _ in range(attempts):
+            if self._is_canceling(goal_handle):
+                return False
+            detection = self._detect_dump_bucket(goal_handle)
+            if detection is None or not detection.detected:
+                self._publish_stop()
+                time.sleep(0.15)
+                continue
+            if not math.isfinite(detection.offset_x_ratio):
+                return False
+            if abs(detection.offset_x_ratio) <= tolerance:
+                return True
+
+            twist = Twist()
+            # 图像中心在左侧时 offset_x 为负，向左旋转；反之向右旋转。
+            twist.angular.z = -speed if detection.offset_x_ratio > 0.0 else speed
+            self._publish_twist_for(goal_handle, twist, step_sec)
+            time.sleep(0.12)
+        return False
+
+    def _align_dump_bucket_depth(self, goal_handle):
         attempts = max(1, int(self.get_parameter('dump_align_max_attempts').value))
         for attempt in range(attempts):
             if self._is_canceling(goal_handle):
                 return False
-            request = Trigger.Request()
-            response = self._call_service(
-                self._detect_dump_client,
-                request,
-                timeout_sec=float(self.get_parameter('service_timeout_sec').value),
-                goal_handle=goal_handle,
-                label='detect dump bucket',
-            )
-            if response is not None and response.success:
+            detection = self._detect_dump_bucket(goal_handle)
+            if detection is not None and detection.detected and detection.within_depth:
                 return True
             if attempt < attempts - 1:
                 self._drive_forward_step(
@@ -615,27 +789,49 @@ class RobotTaskServer(Node):
         distance_m = max(0.0, float(distance_m))
         if speed <= 0.0 or distance_m <= 0.0:
             return
-        deadline = time.monotonic() + distance_m / speed
         msg = Twist()
         msg.linear.x = speed
-        while time.monotonic() < deadline and not self._is_canceling(goal_handle):
-            self._cmd_vel_pub.publish(msg)
-            time.sleep(0.05)
-        self._publish_stop()
+        self._publish_twist_for(goal_handle, msg, distance_m / speed)
         time.sleep(0.15)
 
     def _rotate_in_place_180(self, goal_handle):
         speed = abs(float(self.get_parameter('dump_rotate_angular_speed').value))
         if speed <= 0.0:
             return
-        deadline = time.monotonic() + math.pi / speed
+        start_yaw = self._current_yaw()
+        if start_yaw is None:
+            self.get_logger().warning('no odom/imu yaw available; skip 180deg rotation')
+            return
+        target_yaw = self._normalize_angle(start_yaw + math.pi)
+        tolerance = abs(float(self.get_parameter('dump_rotate_tolerance_rad').value))
+        timeout_sec = max(1.0, float(self.get_parameter('dump_rotate_timeout_sec').value))
+        deadline = time.monotonic() + timeout_sec
+
         msg = Twist()
-        msg.angular.z = speed
         while time.monotonic() < deadline and not self._is_canceling(goal_handle):
+            current_yaw = self._current_yaw()
+            if current_yaw is None:
+                break
+            error = self._normalize_angle(target_yaw - current_yaw)
+            if abs(error) <= tolerance:
+                break
+            msg.angular.z = speed if error > 0.0 else -speed
             self._cmd_vel_pub.publish(msg)
             time.sleep(0.05)
         self._publish_stop()
         time.sleep(0.2)
+
+    def _publish_twist_for(self, goal_handle, msg, duration_sec):
+        deadline = time.monotonic() + max(0.0, float(duration_sec))
+        while time.monotonic() < deadline and not self._is_canceling(goal_handle):
+            self._cmd_vel_pub.publish(msg)
+            time.sleep(0.05)
+        self._publish_stop()
+
+    def _current_yaw(self):
+        if self._latest_odom_yaw is not None:
+            return self._latest_odom_yaw
+        return self._latest_imu_yaw
 
     def _load_dump_bucket_poses(self):
         path = Path(str(self.get_parameter('dump_pose_store_path').value))
@@ -687,6 +883,65 @@ class RobotTaskServer(Node):
             )
         except Exception as exc:
             self.get_logger().warning(f'save dump bucket poses failed: {exc}')
+
+    def _load_clean_regions(self):
+        path = Path(str(self.get_parameter('clean_region_store_path').value))
+        if not path.exists():
+            return
+        try:
+            raw = json.loads(path.read_text(encoding='utf-8'))
+        except Exception as exc:
+            self.get_logger().warning(f'load clean regions failed: {exc}')
+            return
+        regions = raw.get('clean_regions', raw)
+        for key, item in regions.items():
+            try:
+                region_id = int(item.get('region_id', key))
+                if region_id <= 0:
+                    continue
+                min_x = float(item['min_x'])
+                min_y = float(item['min_y'])
+                max_x = float(item['max_x'])
+                max_y = float(item['max_y'])
+                if min_x >= max_x or min_y >= max_y:
+                    continue
+                self._clean_regions[region_id] = CleanRegion(
+                    region_id=region_id,
+                    min_x=min_x,
+                    min_y=min_y,
+                    max_x=max_x,
+                    max_y=max_y,
+                    frame_id=str(
+                        item.get('frame_id')
+                        or self.get_parameter('map_frame').value
+                    ),
+                )
+            except (KeyError, TypeError, ValueError):
+                continue
+
+    def _save_clean_regions(self):
+        path = Path(str(self.get_parameter('clean_region_store_path').value))
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            payload = {
+                'clean_regions': {
+                    str(region_id): {
+                        'region_id': region.region_id,
+                        'min_x': region.min_x,
+                        'min_y': region.min_y,
+                        'max_x': region.max_x,
+                        'max_y': region.max_y,
+                        'frame_id': region.frame_id,
+                    }
+                    for region_id, region in sorted(self._clean_regions.items())
+                }
+            }
+            path.write_text(
+                json.dumps(payload, ensure_ascii=False, indent=2),
+                encoding='utf-8',
+            )
+        except Exception as exc:
+            self.get_logger().warning(f'save clean regions failed: {exc}')
 
     def _send_arm_target(self, goal_handle, target):
         goal = ArmTarget.Goal()
@@ -836,6 +1091,7 @@ class RobotTaskServer(Node):
             RobotTask.Goal.TASK_NAVIGATE_TO,
             RobotTask.Goal.TASK_NAVIGATE_PATH,
             RobotTask.Goal.TASK_SET_DUMP_POSE,
+            RobotTask.Goal.TASK_SET_CLEAN_REGION,
             RobotTask.Goal.TASK_STOP,
             RobotTask.Goal.TASK_RESUME,
         }
@@ -848,6 +1104,7 @@ class RobotTaskServer(Node):
             RobotTask.Goal.TASK_NAVIGATE_TO: 'navigate_to',
             RobotTask.Goal.TASK_NAVIGATE_PATH: 'navigate_path',
             RobotTask.Goal.TASK_SET_DUMP_POSE: 'set_dump_pose',
+            RobotTask.Goal.TASK_SET_CLEAN_REGION: 'set_clean_region',
             RobotTask.Goal.TASK_STOP: 'stop',
             RobotTask.Goal.TASK_RESUME: 'resume',
         }
@@ -857,6 +1114,16 @@ class RobotTaskServer(Node):
     def _yaw_to_quaternion_z_w(yaw):
         half_yaw = float(yaw) * 0.5
         return math.sin(half_yaw), math.cos(half_yaw)
+
+    @staticmethod
+    def _yaw_from_quaternion(q):
+        siny_cosp = 2.0 * (q.w * q.z + q.x * q.y)
+        cosy_cosp = 1.0 - 2.0 * (q.y * q.y + q.z * q.z)
+        return math.atan2(siny_cosp, cosy_cosp)
+
+    @staticmethod
+    def _normalize_angle(angle):
+        return math.atan2(math.sin(angle), math.cos(angle))
 
 
 def main(args=None):

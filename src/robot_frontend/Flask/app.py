@@ -643,9 +643,27 @@ def manage_regions():
             "frame_id": data.get("frame_id") or ROS_CONFIG["map_frame"],
             "color": data.get("color") or "#2f80ed",
         }
+        bounds = region["bounds"] or {}
+        try:
+            task_result = ROS_BRIDGE.set_clean_region(
+                region["region_id"],
+                float(bounds["min_x"]),
+                float(bounds["min_y"]),
+                float(bounds["max_x"]),
+                float(bounds["max_y"]),
+                region["frame_id"],
+            )
+        except (KeyError, TypeError, ValueError):
+            return jsonify({"success": False, "error": "区域坐标无效，请重新框选"}), 400
+        if not task_result.get("success"):
+            return jsonify(task_result), 503
         REGIONS.append(region)
-        add_log("划定区域", f"新增区域：{region['region_name']}", metadata=region)
-        return jsonify({"success": True, "region": region})
+        add_log(
+            "划定区域",
+            f"新增区域：{region['region_name']}",
+            metadata={"region": region, "task_result": task_result},
+        )
+        return jsonify({"success": True, "region": region, "task_result": task_result})
 
     region_id = request.args.get("region_id", type=int)
     if region_id is None:

@@ -893,6 +893,41 @@ class RosBridge:
             command="clean_region",
         )
 
+    def set_clean_region(self, region_id, min_x, min_y, max_x, max_y, frame_id=None):
+        if not self.started or not self.node:
+            return {"success": False, "error": self.start_error or "ROS bridge 未启动"}
+
+        try:
+            region_id = int(region_id)
+            min_x = float(min_x)
+            min_y = float(min_y)
+            max_x = float(max_x)
+            max_y = float(max_y)
+        except (TypeError, ValueError):
+            return {"success": False, "error": "区域坐标无效"}
+
+        if region_id <= 0:
+            return {"success": False, "error": "区域编号必须大于 0"}
+        if min_x >= max_x or min_y >= max_y:
+            return {"success": False, "error": "区域宽度和高度必须大于 0"}
+        if RobotTask is None:
+            return {
+                "success": False,
+                "error": f"RobotTask 接口未加载: {ROBOT_TASK_IMPORT_ERROR}",
+            }
+
+        return self.send_robot_task(
+            RobotTask.Goal.TASK_SET_CLEAN_REGION,
+            wait_result=True,
+            bucket_id=region_id,
+            min_x=min_x,
+            min_y=min_y,
+            max_x=max_x,
+            max_y=max_y,
+            frame_id=frame_id or self.config["map_frame"],
+            command="set_clean_region",
+        )
+
     def set_dump_bucket_pose(self, bucket_id, x, y, yaw=0.0, frame_id=None):
         if not self.started or not self.node:
             return {"success": False, "error": self.start_error or "ROS bridge 未启动"}

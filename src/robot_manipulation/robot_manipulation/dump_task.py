@@ -1,4 +1,4 @@
-"""垃圾桶识别任务服务：只检测并返回信号，不执行机械臂动作."""
+"""垃圾桶识别任务服务：返回桶中心偏移和深度，不执行底盘/机械臂动作."""
 
 import math
 import threading
@@ -6,8 +6,8 @@ import threading
 import numpy as np
 import rclpy
 from rclpy.node import Node
+from robot_interfaces.srv import DetectDumpBucket
 from sensor_msgs.msg import Image
-from std_srvs.srv import Trigger
 
 
 DEFAULT_COLOR_TOPIC = '/camera/camera/color/image_raw'
@@ -19,7 +19,7 @@ NOT_DETECTED_MESSAGE = 'dump bucket not detected within depth threshold'
 
 
 class DumpTaskNode(Node):
-    """订阅 RGB/Depth 图像，并通过服务返回垃圾桶是否在 20cm 内."""
+    """订阅 RGB/Depth 图像，并通过服务返回垃圾桶中心偏移和深度."""
 
     def __init__(self):
         super().__init__('dump_task')
@@ -54,7 +54,7 @@ class DumpTaskNode(Node):
             10,
         )
         self._detect_service = self.create_service(
-            Trigger,
+            DetectDumpBucket,
             service_name,
             self._on_detect_request,
         )
@@ -80,34 +80,53 @@ class DumpTaskNode(Node):
             depth_msg = self._latest_depth
 
         if color_msg is None or depth_msg is None:
-            response.success = False
-            response.message = 'waiting for color and depth images'
+            fill_empty_response(response, False, 'waiting for color and depth images')
             return response
 
         try:
-            detected, mask_pixels, mean_depth_m = self._detect_bucket(
-                color_msg,
-                depth_msg,
-            )
+            result = self._detect_bucket(color_msg, depth_msg)
         except ValueError as e:
-            response.success = False
-            response.message = str(e)
+            fill_empty_response(response, False, str(e))
             return response
 
-        if detected:
-            response.success = True
+        response.success = result['mask_pixels'] > int(
+            self.get_parameter('mask_min_pixels').value
+        )
+        response.detected = response.success
+        response.mask_pixels = int(result['mask_pixels'])
+        response.mean_depth_m = float(result['mean_depth_m'])
+        response.center_x_px = float(result['center_x_px'])
+        response.center_y_px = float(result['center_y_px'])
+        response.image_center_x_px = float(result['image_center_x_px'])
+        response.image_center_y_px = float(result['image_center_y_px'])
+        response.offset_x_px = float(result['offset_x_px'])
+        response.offset_y_px = float(result['offset_y_px'])
+        response.offset_x_ratio = float(result['offset_x_ratio'])
+        response.offset_y_ratio = float(result['offset_y_ratio'])
+
+        if response.success and result['within_depth']:
+            response.signal = 1
             response.message = (
                 f'{DETECTED_MESSAGE}; signal=1; '
-                f'mask_pixels={mask_pixels}; '
-                f'mean_depth_m={mean_depth_m:.3f}'
+                f'mask_pixels={response.mask_pixels}; '
+                f'mean_depth_m={response.mean_depth_m:.3f}; '
+                f'offset_x_px={response.offset_x_px:.1f}; '
+                f'offset_x_ratio={response.offset_x_ratio:.4f}'
             )
             return response
 
-        response.success = False
-        depth_text = 'nan' if math.isnan(mean_depth_m) else f'{mean_depth_m:.3f}'
+        response.signal = 2
+        depth_text = (
+            'nan'
+            if math.isnan(response.mean_depth_m)
+            else f'{response.mean_depth_m:.3f}'
+        )
         response.message = (
             f'{NOT_DETECTED_MESSAGE}; signal=2; '
-            f'mask_pixels={mask_pixels}; mean_depth_m={depth_text}'
+            f'mask_pixels={response.mask_pixels}; '
+            f'mean_depth_m={depth_text}; '
+            f'offset_x_px={response.offset_x_px:.1f}; '
+            f'offset_x_ratio={response.offset_x_ratio:.4f}'
         )
         return response
 
@@ -133,20 +152,118 @@ class DumpTaskNode(Node):
             dtype=np.uint8,
         )
         mask = np.all((color >= lower_rgb) & (color <= upper_rgb), axis=2)
-        mask_pixels = int(np.count_nonzero(mask))
+        component = largest_mask_component(mask)
+        mask_pixels = int(np.count_nonzero(component))
 
         mask_min_pixels = int(self.get_parameter('mask_min_pixels').value)
         if mask_pixels <= mask_min_pixels:
-            return False, mask_pixels, math.nan
+            return detection_result(color.shape, mask_pixels)
 
-        masked_depth = depth_m[mask]
+        ys, xs = np.nonzero(component)
+        center_x_px = float(np.mean(xs))
+        center_y_px = float(np.mean(ys))
+
+        masked_depth = depth_m[component]
         valid_depth = masked_depth[np.isfinite(masked_depth) & (masked_depth > 0.0)]
         if valid_depth.size == 0:
-            return False, mask_pixels, math.nan
+            return detection_result(
+                color.shape,
+                mask_pixels,
+                center_x_px=center_x_px,
+                center_y_px=center_y_px,
+            )
 
         mean_depth_m = float(np.mean(valid_depth))
         depth_threshold_m = float(self.get_parameter('depth_threshold_m').value)
-        return mean_depth_m <= depth_threshold_m, mask_pixels, mean_depth_m
+        return detection_result(
+            color.shape,
+            mask_pixels,
+            center_x_px=center_x_px,
+            center_y_px=center_y_px,
+            mean_depth_m=mean_depth_m,
+            within_depth=mean_depth_m <= depth_threshold_m,
+        )
+
+
+def fill_empty_response(response, success, message):
+    response.success = bool(success)
+    response.message = str(message)
+    response.detected = False
+    response.mask_pixels = 0
+    response.mean_depth_m = math.nan
+    response.center_x_px = math.nan
+    response.center_y_px = math.nan
+    response.image_center_x_px = math.nan
+    response.image_center_y_px = math.nan
+    response.offset_x_px = math.nan
+    response.offset_y_px = math.nan
+    response.offset_x_ratio = math.nan
+    response.offset_y_ratio = math.nan
+    response.signal = 2
+
+
+def detection_result(
+    color_shape,
+    mask_pixels,
+    center_x_px=math.nan,
+    center_y_px=math.nan,
+    mean_depth_m=math.nan,
+    within_depth=False,
+):
+    height, width = color_shape[:2]
+    image_center_x = (float(width) - 1.0) * 0.5
+    image_center_y = (float(height) - 1.0) * 0.5
+    offset_x_px = center_x_px - image_center_x
+    offset_y_px = center_y_px - image_center_y
+    half_width = max(1.0, image_center_x)
+    half_height = max(1.0, image_center_y)
+    return {
+        'mask_pixels': int(mask_pixels),
+        'mean_depth_m': float(mean_depth_m),
+        'center_x_px': float(center_x_px),
+        'center_y_px': float(center_y_px),
+        'image_center_x_px': image_center_x,
+        'image_center_y_px': image_center_y,
+        'offset_x_px': float(offset_x_px),
+        'offset_y_px': float(offset_y_px),
+        'offset_x_ratio': float(offset_x_px / half_width),
+        'offset_y_ratio': float(offset_y_px / half_height),
+        'within_depth': bool(within_depth),
+    }
+
+
+def largest_mask_component(mask):
+    """从 RGB 掩膜中取最大连通区域，避免零散噪声影响中心点."""
+    height, width = mask.shape
+    visited = np.zeros(mask.shape, dtype=bool)
+    best_pixels = []
+
+    for start_y, start_x in zip(*np.nonzero(mask)):
+        if visited[start_y, start_x]:
+            continue
+        stack = [(int(start_y), int(start_x))]
+        visited[start_y, start_x] = True
+        pixels = []
+        while stack:
+            y, x = stack.pop()
+            pixels.append((y, x))
+            for ny, nx in ((y - 1, x), (y + 1, x), (y, x - 1), (y, x + 1)):
+                if (
+                    0 <= ny < height
+                    and 0 <= nx < width
+                    and mask[ny, nx]
+                    and not visited[ny, nx]
+                ):
+                    visited[ny, nx] = True
+                    stack.append((ny, nx))
+        if len(pixels) > len(best_pixels):
+            best_pixels = pixels
+
+    component = np.zeros(mask.shape, dtype=bool)
+    if best_pixels:
+        ys, xs = zip(*best_pixels)
+        component[np.array(ys), np.array(xs)] = True
+    return component
 
 
 def image_to_rgb_array(msg):

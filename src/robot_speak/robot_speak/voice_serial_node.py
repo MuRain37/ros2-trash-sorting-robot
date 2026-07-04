@@ -305,7 +305,11 @@ class VoiceSerialNode(Node):
         """根据语音指令发送高层行为树任务。"""
         name = command.name
         if name == 'clean_trash':
-            self._send_task(RobotTask.Goal.TASK_CLEAN_TRASH, 'clean_trash')
+            self._send_task(
+                RobotTask.Goal.TASK_CLEAN_REGION,
+                'clean_region_1',
+                bucket_id=1,
+            )
         elif name == 'stop':
             self._send_task(RobotTask.Goal.TASK_STOP, 'stop')
         elif name == 'dump_trash':
