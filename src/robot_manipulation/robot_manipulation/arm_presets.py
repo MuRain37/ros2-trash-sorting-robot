@@ -1,19 +1,16 @@
 """机械臂预设姿态配置：用 5 个舵机 raw 值描述一个 MoveIt 关节目标."""
 
 import math
-from pathlib import Path
-
-from ament_index_python.packages import get_package_share_directory
-import yaml
-
 
 ACTION_ARM_CENTER = 0
 ACTION_LEFT_BUCKET = 1
 ACTION_RIGHT_BUCKET = 2
+ACTION_ARM_MAPPING = 3
 ACTION_NAMES = {
     ACTION_ARM_CENTER: 'arm_center',
     ACTION_LEFT_BUCKET: 'left_bucket',
     ACTION_RIGHT_BUCKET: 'right_bucket',
+    ACTION_ARM_MAPPING: 'arm_mapping',  
 }
 
 # 舵机 raw 值范围：中位 500，最小 0，最大 1000
@@ -39,7 +36,7 @@ def joint_position_to_servo_raw(index, joint_position):
 
 
 PRESET_SERVO_RAW = {
-    ACTION_ARM_CENTER: [500.0, 650.0, 210.0, 160.0, 500.0],
+    ACTION_ARM_CENTER: [500.0, 650.0, 210.0, 160.0, 300.0],
     ACTION_LEFT_BUCKET: [900.0, 650.0, 240.0, 100.0, 500.0],
     ACTION_RIGHT_BUCKET: [100.0, 650.0, 240.0, 100.0, 500.0],
     ACTION_ARM_MAPPING: [500.0, 650.0, 210.0, 160.0, 500.0],
