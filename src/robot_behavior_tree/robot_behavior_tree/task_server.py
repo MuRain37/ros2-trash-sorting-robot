@@ -23,6 +23,7 @@ from robot_interfaces.srv import (
     DetectDumpBucket,
     DetectGraspTarget,
     DumpTrash,
+    SetCameraTfPreset,
     SetGripper,
 )
 from sensor_msgs.msg import Imu
@@ -92,6 +93,10 @@ class RobotTaskServer(Node):
         self.declare_parameter('coverage_task_service', 'add_coverage_rectangle')
         self.declare_parameter('arm_target_action', '/arm_target')
         self.declare_parameter('arm_preset_action', '/arm_preset')
+        self.declare_parameter(
+            'camera_tf_preset_service',
+            '/real_camera_static_tf/set_preset',
+        )
         self.declare_parameter('navigate_to_pose_action', 'navigate_to_pose')
         self.declare_parameter('navigate_through_poses_action', 'navigate_through_poses')
         self.declare_parameter('gripper_service', 'arm_gripper')
@@ -180,6 +185,11 @@ class RobotTaskServer(Node):
         self._gripper_client = self.create_client(
             SetGripper,
             self.get_parameter('gripper_service').value,
+            callback_group=callback_group,
+        )
+        self._camera_tf_preset_client = self.create_client(
+            SetCameraTfPreset,
+            self.get_parameter('camera_tf_preset_service').value,
             callback_group=callback_group,
         )
         self._arm_target_client = ActionClient(
@@ -559,6 +569,8 @@ class RobotTaskServer(Node):
         )
 
     def _run_clean_region_tree(self, goal_handle, goal):
+        self._feedback(goal_handle, 'clean_region: arm mapping pose', 0.05)
+        self._send_arm_preset(goal_handle, ArmPreset.Goal.ARM_MAPPING)
         self._feedback(goal_handle, 'clean_region: queue coverage rectangle', 0.20)
         region, error = self._resolve_clean_region(goal)
         if region is None:
@@ -636,6 +648,8 @@ class RobotTaskServer(Node):
         return region, None
 
     def _run_navigate_tree(self, goal_handle, goal):
+        self._feedback(goal_handle, 'navigate_to: arm mapping pose', 0.05)
+        self._send_arm_preset(goal_handle, ArmPreset.Goal.ARM_MAPPING)
         self._feedback(goal_handle, 'navigate_to: sending goal', 0.20)
         nav_goal = NavigateToPose.Goal()
         nav_goal.pose = PoseStamped()
@@ -666,6 +680,8 @@ class RobotTaskServer(Node):
         if not path.poses:
             return False, 'navigate path is empty'
 
+        self._feedback(goal_handle, 'navigate_path: arm mapping pose', 0.05)
+        self._send_arm_preset(goal_handle, ArmPreset.Goal.ARM_MAPPING)
         self._feedback(goal_handle, 'navigate_path: sending path', 0.20)
         nav_goal = NavigateThroughPoses.Goal()
         nav_goal.poses = path.poses
@@ -973,6 +989,33 @@ class RobotTaskServer(Node):
         )
         if result is None or not result.success:
             raise RuntimeError('arm preset failed')
+        if int(action_type) not in (
+            ArmPreset.Goal.ARM_CENTER,
+            ArmPreset.Goal.ARM_MAPPING,
+        ):
+            return
+        self._set_camera_tf_preset(goal_handle, action_type)
+
+    def _set_camera_tf_preset(self, goal_handle, action_type):
+        request = SetCameraTfPreset.Request()
+        request.action_type = int(action_type)
+        response = self._call_service(
+            self._camera_tf_preset_client,
+            request,
+            timeout_sec=float(self.get_parameter('service_timeout_sec').value),
+            goal_handle=goal_handle,
+            label='set camera tf preset',
+        )
+        if response is None:
+            self.get_logger().warning(
+                f'camera tf preset service unavailable: action_type={int(action_type)}'
+            )
+            return
+        if not response.success:
+            self.get_logger().warning(
+                f'camera tf preset rejected: action_type={int(action_type)}, '
+                f'message={response.message}'
+            )
 
     def _set_gripper(self, goal_handle, open_ratio, duration_ms, label):
         request = SetGripper.Request()
