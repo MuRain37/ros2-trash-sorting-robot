@@ -2,19 +2,49 @@
 
 {% block title %}监控 - 机器人控制系统{% endblock %}
 
-{% block page_title %}摄像头监控{% endblock %}
-{% block page_subtitle %}实时查看彩色摄像头画面。{% endblock %}
+{% block page_title %}视觉监控{% endblock %}
+{% block page_subtitle %}实时查看彩色摄像头画面、目标类别、三维距离和旋转角度。{% endblock %}
 
 {% block content %}
 <div class="monitor-layout">
     <section class="card camera-card">
         <div class="card-header">
-            <span><i class="fas fa-camera me-2"></i>彩色摄像头</span>
-            <span class="status-pill warn" id="color-camera-status">等待画面</span>
+            <span><i class="fas fa-camera me-2"></i>物体识别与实例分割</span>
+            <span class="status-pill warn" id="vision-status">等待画面</span>
         </div>
         <div class="card-body p-0">
             <div class="camera-frame">
-                <img src="/api/camera/stream/color" alt="彩色摄像头画面" crossorigin="anonymous">
+                <img src="/api/vision/stream" alt="物体识别与实例分割画面" crossorigin="anonymous">
+            </div>
+        </div>
+    </section>
+
+    <section class="card detection-card">
+        <div class="card-header">
+            <span><i class="fas fa-crosshairs me-2"></i>识别结果</span>
+            <span class="pose-badge" id="vision-target-pose">等待目标</span>
+        </div>
+        <div class="card-body">
+            <div class="detection-summary">
+                <div>
+                    <span class="summary-label">物体类别</span>
+                    <strong id="vision-classes">未识别</strong>
+                </div>
+                <div>
+                    <span class="summary-label">目标坐标</span>
+                    <strong id="vision-position">X - / Y - / Z -</strong>
+                </div>
+                <div>
+                    <span class="summary-label">距离与角度</span>
+                    <strong id="vision-distance-angle">距离 - / 旋转 -</strong>
+                </div>
+                <div>
+                    <span class="summary-label">模型状态</span>
+                    <strong id="vision-message">等待识别结果</strong>
+                </div>
+            </div>
+            <div class="object-list" id="vision-object-list">
+                <div class="empty-state">暂无识别目标</div>
             </div>
         </div>
     </section>
@@ -24,8 +54,11 @@
 {% block extra_css %}
 <style>
     .monitor-layout {
-        max-width: 800px;
+        max-width: 1100px;
         margin: 0 auto;
+        display: grid;
+        grid-template-columns: minmax(0, 2fr) minmax(280px, 1fr);
+        gap: 1rem;
     }
 
     .camera-frame {
@@ -40,27 +73,144 @@
         height: 100%;
         object-fit: contain;
     }
+
+    .detection-card {
+        align-self: start;
+    }
+
+    .pose-badge {
+        padding: 0.25rem 0.55rem;
+        border-radius: 999px;
+        background: rgba(13, 110, 253, 0.12);
+        color: #0d6efd;
+        font-weight: 700;
+        font-size: 0.86rem;
+    }
+
+    .detection-summary {
+        display: grid;
+        gap: 0.85rem;
+        margin-bottom: 1rem;
+    }
+
+    .summary-label {
+        display: block;
+        color: #6c757d;
+        font-size: 0.82rem;
+        margin-bottom: 0.18rem;
+    }
+
+    .object-list {
+        display: grid;
+        gap: 0.65rem;
+    }
+
+    .object-item {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 0.35rem 0.75rem;
+        padding: 0.75rem;
+        border: 1px solid rgba(108, 117, 125, 0.22);
+        border-radius: 0.6rem;
+        background: rgba(248, 249, 250, 0.72);
+    }
+
+    .object-item strong {
+        color: #212529;
+    }
+
+    .object-meta {
+        color: #6c757d;
+        font-size: 0.84rem;
+    }
+
+    .empty-state {
+        color: #6c757d;
+        padding: 0.75rem;
+        border: 1px dashed rgba(108, 117, 125, 0.35);
+        border-radius: 0.6rem;
+        text-align: center;
+    }
+
+    @media (max-width: 992px) {
+        .monitor-layout {
+            grid-template-columns: 1fr;
+        }
+    }
 </style>
 {% endblock %}
 
 {% block extra_js %}
 <script>
-    async function refreshCameraStatus() {
+    function formatConfidence(value) {
+        const numeric = Number(value || 0);
+        return `${Math.round(numeric * 100)}%`;
+    }
+
+    function formatMeters(value) {
+        const numeric = Number(value);
+        return Number.isFinite(numeric) ? `${numeric.toFixed(2)} m` : '-';
+    }
+
+    function formatAngle(value) {
+        const numeric = Number(value);
+        return Number.isFinite(numeric) ? `${numeric.toFixed(1)}°` : '-';
+    }
+
+    function poseSummary(pose) {
+        if (!pose || pose.z_m === null || pose.z_m === undefined) {
+            return '等待深度';
+        }
+        return `X ${formatMeters(pose.x_m)} / Y ${formatMeters(pose.y_m)} / Z ${formatMeters(pose.z_m)}`;
+    }
+
+    function renderObjects(objects) {
+        const list = document.getElementById('vision-object-list');
+        if (!objects.length) {
+            list.innerHTML = '<div class="empty-state">暂无识别目标</div>';
+            return;
+        }
+
+        list.innerHTML = objects.map((item, index) => `
+            <div class="object-item">
+                <strong>${index + 1}. ${item.class_name || '未知类别'}</strong>
+                <span>${formatConfidence(item.confidence)}</span>
+                <span class="object-meta">${poseSummary(item.pose)}</span>
+                <span class="object-meta">距离 ${formatMeters(item.pose && item.pose.distance_m)}</span>
+                <span class="object-meta">偏航 ${formatAngle(item.pose && item.pose.yaw_deg)} / 俯仰 ${formatAngle(item.pose && item.pose.pitch_deg)}</span>
+                <span class="object-meta">旋转 ${formatAngle(item.pose && item.pose.rotation_deg)}</span>
+            </div>
+        `).join('');
+    }
+
+    async function refreshVisionStatus() {
         try {
-            const response = await fetch('/api/camera/info');
+            const response = await fetch('/api/vision/info');
             const data = await response.json();
-            const color = data.color || {};
+            const objects = data.objects || [];
 
-            const colorStatus = document.getElementById('color-camera-status');
+            const status = document.getElementById('vision-status');
+            const classes = [...new Set(objects.map((item) => item.class_name).filter(Boolean))];
+            const primaryPose = objects[0] && objects[0].pose ? objects[0].pose : null;
 
-            colorStatus.textContent = color.connected ? '已连接' : '等待画面';
-            colorStatus.className = color.connected ? 'status-pill ok' : 'status-pill warn';
+            status.textContent = data.connected ? (objects.length ? '识别中' : '已连接') : '等待画面';
+            status.className = data.connected ? 'status-pill ok' : 'status-pill warn';
+            document.getElementById('vision-target-pose').textContent = primaryPose && primaryPose.z_m !== null && primaryPose.z_m !== undefined
+                ? `Z ${formatMeters(primaryPose.z_m)} · 旋转 ${formatAngle(primaryPose.rotation_deg)}`
+                : (objects.length ? '等待深度' : '暂无目标');
+            document.getElementById('vision-classes').textContent = classes.length ? classes.join('、') : '未识别';
+            document.getElementById('vision-position').textContent = poseSummary(primaryPose);
+            document.getElementById('vision-distance-angle').textContent = primaryPose
+                ? `距离 ${formatMeters(primaryPose.distance_m)} / 偏航 ${formatAngle(primaryPose.yaw_deg)} / 旋转 ${formatAngle(primaryPose.rotation_deg)}`
+                : '距离 - / 旋转 -';
+            document.getElementById('vision-message').textContent = data.message || '等待识别结果';
+            renderObjects(objects);
         } catch (error) {
-            showToast('摄像头状态刷新失败', 'error');
+            showToast('视觉识别状态刷新失败', 'error');
         }
     }
 
-    refreshCameraStatus();
-    setInterval(refreshCameraStatus, 2000);
+    refreshVisionStatus();
+    setInterval(refreshVisionStatus, 1000);
 </script>
 {% endblock %}

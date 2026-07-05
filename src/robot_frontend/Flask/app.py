@@ -25,6 +25,7 @@ DATABASE_READY = False
 MEMORY_LOGS = []
 REGIONS = []
 DUMP_BUCKET_POSE_STORE = Path(ROS_CONFIG["dump_pose_store_path"])
+DUMP_BUCKET_NAV_OFFSET_M = 0.45
 
 
 def load_dump_bucket_poses():
@@ -42,13 +43,21 @@ def load_dump_bucket_poses():
             if bucket_id not in (1, 2):
                 continue
             yaw = float(item.get("yaw", item.get("theta", 0.0)))
+            x = float(item["x"])
+            y = float(item["y"])
             loaded[str(bucket_id)] = {
                 "bucket_id": bucket_id,
-                "x": float(item["x"]),
-                "y": float(item["y"]),
+                "x": x,
+                "y": y,
                 "theta": yaw,
                 "yaw": yaw,
                 "frame_id": item.get("frame_id") or ROS_CONFIG["map_frame"],
+                "bucket_x": float(item.get("bucket_x", x)),
+                "bucket_y": float(item.get("bucket_y", y)),
+                "bucket_theta": float(item.get("bucket_theta", yaw)),
+                "nav_offset_m": float(
+                    item.get("nav_offset_m", DUMP_BUCKET_NAV_OFFSET_M)
+                ),
             }
         except (KeyError, TypeError, ValueError):
             continue
@@ -198,6 +207,23 @@ def submit_dump_bucket(bucket_id):
         },
     )
     return result, 200 if success else 503
+
+
+def dump_bucket_nav_goal_from_bucket_pose(bucket_id, x, y, yaw, frame_id):
+    nav_x = x - math.cos(yaw) * DUMP_BUCKET_NAV_OFFSET_M
+    nav_y = y - math.sin(yaw) * DUMP_BUCKET_NAV_OFFSET_M
+    return {
+        "bucket_id": bucket_id,
+        "x": nav_x,
+        "y": nav_y,
+        "theta": yaw,
+        "yaw": yaw,
+        "frame_id": frame_id,
+        "bucket_x": x,
+        "bucket_y": y,
+        "bucket_theta": yaw,
+        "nav_offset_m": DUMP_BUCKET_NAV_OFFSET_M,
+    }
 
 
 class RuntimeData:
@@ -508,9 +534,16 @@ def robot_velocity():
 
     max_linear = float(data.get("max_linear", 1.2) or 1.2)
     max_angular = float(data.get("max_angular", 2.4) or 2.4)
+    command_session = data.get("command_session")
+    command_seq = data.get("command_seq")
     linear_x = max(-max_linear, min(max_linear, linear_x))
     angular_z = max(-max_angular, min(max_angular, angular_z))
-    result = ROS_BRIDGE.publish_velocity(linear_x, angular_z)
+    result = ROS_BRIDGE.publish_velocity(
+        linear_x,
+        angular_z,
+        command_session=command_session,
+        command_seq=command_seq,
+    )
     return jsonify(result), 200 if result.get("success") else 503
 
 
@@ -599,33 +632,70 @@ def dump_bucket_pose():
         return jsonify({"success": False, "error": "卸载桶编号必须是 1 或 2"}), 400
 
     frame_id = data.get("frame_id") or ROS_CONFIG["map_frame"]
-    result = ROS_BRIDGE.set_dump_bucket_pose(bucket_id, x, y, yaw, frame_id)
-    success = bool(result.get("success"))
-    if success:
-        DUMP_BUCKET_POSES[str(bucket_id)] = {
-            "bucket_id": bucket_id,
-            "x": x,
-            "y": y,
-            "theta": yaw,
-            "yaw": yaw,
-            "frame_id": frame_id,
-        }
-        save_dump_bucket_poses()
+    try:
+        nav_goal = dump_bucket_nav_goal_from_bucket_pose(
+            bucket_id,
+            x,
+            y,
+            yaw,
+            frame_id,
+        )
+        result = ROS_BRIDGE.set_dump_bucket_pose(
+            bucket_id,
+            nav_goal["x"],
+            nav_goal["y"],
+            nav_goal["yaw"],
+            frame_id,
+        )
+        success = bool(result.get("success"))
+        if success:
+            DUMP_BUCKET_POSES[str(bucket_id)] = nav_goal
+            save_dump_bucket_poses()
 
-    add_log(
-        "设定卸载桶位置",
-        f"设定卸载桶 {bucket_id}：({x:.3f}, {y:.3f}, theta={yaw:.3f})",
-        status="完成" if success else "失败",
-        success=success,
-        metadata={"pose": DUMP_BUCKET_POSES.get(str(bucket_id)), "task_result": result},
-    )
-    return jsonify(
-        {
-            **result,
-            "pose": DUMP_BUCKET_POSES.get(str(bucket_id)),
-            "poses": DUMP_BUCKET_POSES,
-        }
-    ), 200 if success else 503
+        add_log(
+            "设定卸载桶位置",
+            (
+                f"设定卸载桶 {bucket_id} Nav2 Goal："
+                f"({nav_goal['x']:.3f}, {nav_goal['y']:.3f}, "
+                f"theta={nav_goal['yaw']:.3f})"
+            ),
+            status="完成" if success else "失败",
+            success=success,
+            metadata={
+                "input_pose": {
+                    "bucket_id": bucket_id,
+                    "x": x,
+                    "y": y,
+                    "theta": yaw,
+                    "yaw": yaw,
+                    "frame_id": frame_id,
+                },
+                "nav_goal": nav_goal,
+                "pose": DUMP_BUCKET_POSES.get(str(bucket_id)),
+                "task_result": result,
+            },
+        )
+        return jsonify(
+            {
+                **result,
+                "pose": DUMP_BUCKET_POSES.get(str(bucket_id)),
+                "poses": DUMP_BUCKET_POSES,
+            }
+        ), 200 if success else 503
+    except Exception as exc:
+        app.logger.exception("dump bucket pose save failed")
+        message = f"卸载桶位置保存失败: {exc}"
+        try:
+            add_log(
+                "设定卸载桶位置",
+                f"设定卸载桶 {bucket_id}：({x:.3f}, {y:.3f}, theta={yaw:.3f})",
+                status="失败",
+                success=False,
+                metadata={"error": str(exc)},
+            )
+        except Exception:
+            app.logger.exception("dump bucket pose failure log failed")
+        return jsonify({"success": False, "error": message}), 500
 
 
 @app.route("/api/map/regions", methods=["GET", "POST", "DELETE"])
@@ -703,6 +773,26 @@ def camera_stream(camera_id):
 @app.route("/api/camera/info", methods=["GET"])
 def camera_info():
     return jsonify(ROS_BRIDGE.get_camera_info())
+
+
+@app.route("/api/vision/stream")
+def vision_stream():
+    frame_interval = 1.0 / max(0.5, float(ROS_CONFIG.get("vision_monitor_max_fps", 6.0)))
+
+    def generate_frames():
+        while True:
+            frame = ROS_BRIDGE.get_vision_frame()
+            if frame is None:
+                frame = placeholder_jpeg("No vision frame")
+            yield b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + frame + b"\r\n"
+            time.sleep(frame_interval)
+
+    return Response(generate_frames(), mimetype="multipart/x-mixed-replace; boundary=frame")
+
+
+@app.route("/api/vision/info", methods=["GET"])
+def vision_info():
+    return jsonify(ROS_BRIDGE.get_vision_info())
 
 
 @app.route("/api/logs", methods=["GET", "DELETE"])

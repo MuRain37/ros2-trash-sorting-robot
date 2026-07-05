@@ -156,7 +156,7 @@
     let dragStart = null;
     let dragCurrent = null;
     let currentImageVersion = null;
-    const MAP_DEFAULT_ROTATION = Math.PI;
+    const MAP_DEFAULT_ROTATION = 0;
     const viewTransform = { scale: 1, offsetX: 0, offsetY: 0, rotation: MAP_DEFAULT_ROTATION };
     const mapImage = new Image();
 
@@ -538,7 +538,15 @@
 
     function drawDumpBucketMarkers() {
         Object.entries(dumpBucketPoses || {}).forEach(([key, pose]) => {
-            const point = worldToCanvas(pose);
+            const bucketPose = {
+                ...pose,
+                x: Number.isFinite(Number(pose.bucket_x)) ? Number(pose.bucket_x) : pose.x,
+                y: Number.isFinite(Number(pose.bucket_y)) ? Number(pose.bucket_y) : pose.y,
+                theta: Number.isFinite(Number(pose.bucket_theta))
+                    ? Number(pose.bucket_theta)
+                    : (pose.theta || pose.yaw || 0)
+            };
+            const point = worldToCanvas(bucketPose);
             if (!point) return;
             const bucketId = Number(pose.bucket_id || key);
             ctx.save();
@@ -549,7 +557,7 @@
             ctx.arc(point.x, point.y, 13, 0, Math.PI * 2);
             ctx.fill();
             ctx.stroke();
-            drawDirectionArrow({ ...point, theta: pose.theta || pose.yaw || 0 }, 36, '#101615');
+            drawDirectionArrow({ ...point, theta: bucketPose.theta }, 36, '#101615');
             ctx.fillStyle = '#101615';
             ctx.font = '800 11px Microsoft YaHei';
             ctx.textAlign = 'center';
@@ -821,7 +829,15 @@
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(startWorld)
         });
-        const data = await response.json();
+        const rawText = await response.text();
+        let data = {};
+        try {
+            data = rawText ? JSON.parse(rawText) : {};
+        } catch (error) {
+            throw new Error(
+                `卸载桶位置保存接口返回非 JSON: HTTP ${response.status}`
+            );
+        }
         if (!response.ok || !data.success) {
             throw new Error(data.error || data.message || '卸载桶位置保存失败');
         }

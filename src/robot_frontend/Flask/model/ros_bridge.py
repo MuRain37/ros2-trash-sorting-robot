@@ -1,8 +1,11 @@
 import math
 import os
+from pathlib import Path as FilesystemPath
 import signal
 import shlex
+import shutil
 import subprocess
+import sys
 import threading
 import time
 
@@ -13,7 +16,7 @@ try:
     import rclpy
     from cv_bridge import CvBridge
     from geometry_msgs.msg import PoseWithCovarianceStamped, PoseStamped, Twist
-    from nav_msgs.msg import OccupancyGrid, Path
+    from nav_msgs.msg import OccupancyGrid, Path as RosPath
     from rclpy.action import ActionClient
     from rclpy.executors import SingleThreadedExecutor
     from rclpy.node import Node
@@ -24,9 +27,26 @@ try:
 except Exception as exc:
     rclpy = None
     Node = object
+    RosPath = object
     ROS_IMPORT_ERROR = exc
 else:
     ROS_IMPORT_ERROR = None
+
+try:
+    from nav2_msgs.srv import LoadMap
+except Exception as exc:
+    LoadMap = None
+    LOAD_MAP_IMPORT_ERROR = exc
+else:
+    LOAD_MAP_IMPORT_ERROR = None
+
+try:
+    from robot_interfaces.action import ArmPreset
+except Exception as exc:
+    ArmPreset = None
+    ARM_PRESET_IMPORT_ERROR = exc
+else:
+    ARM_PRESET_IMPORT_ERROR = None
 
 try:
     from robot_interfaces.action import RobotTask
@@ -35,6 +55,82 @@ except Exception as exc:
     ROBOT_TASK_IMPORT_ERROR = exc
 else:
     ROBOT_TASK_IMPORT_ERROR = None
+
+try:
+    from robot_interfaces.srv import SetCameraTfPreset
+except Exception as exc:
+    SetCameraTfPreset = None
+    CAMERA_TF_PRESET_IMPORT_ERROR = exc
+else:
+    CAMERA_TF_PRESET_IMPORT_ERROR = None
+
+DEFAULT_MONITOR_CLASS_NAMES = ['bottle', 'pen', 'paper', 'charger', 'usb', 'yan']
+VISION_MODEL_IMPORT_ERROR = None
+try:
+    from robot_vision_grasp.yolo_seg_openvino import YOLOSegOpenVINO
+except Exception as exc:
+    vision_package_path = FilesystemPath(__file__).resolve().parents[3] / "robot_vision_grasp"
+    if vision_package_path.exists() and str(vision_package_path) not in sys.path:
+        sys.path.append(str(vision_package_path))
+    try:
+        from robot_vision_grasp.yolo_seg_openvino import YOLOSegOpenVINO
+    except Exception as retry_exc:
+        YOLOSegOpenVINO = None
+        VISION_MODEL_IMPORT_ERROR = retry_exc
+    else:
+        VISION_MODEL_IMPORT_ERROR = None
+else:
+    VISION_MODEL_IMPORT_ERROR = None
+
+
+def _unique_paths(paths):
+    seen = set()
+    unique = []
+    for path in paths:
+        if not path:
+            continue
+        text = str(path)
+        if text not in seen:
+            seen.add(text)
+            unique.append(text)
+    return unique
+
+
+def _repo_root():
+    current = FilesystemPath(__file__).resolve()
+    for parent in current.parents:
+        if (parent / "src" / "robot_vision_grasp").exists():
+            return parent
+    return current.parents[4]
+
+
+def _vision_model_candidates(configured_path):
+    default_relative = "src/robot_vision_grasp/robot_vision_grasp/models/best.xml"
+    module_relative = (
+        FilesystemPath(__file__).resolve().parents[3]
+        / "robot_vision_grasp"
+        / "robot_vision_grasp"
+        / "models"
+        / "best.xml"
+    )
+    repo_relative = _repo_root() / default_relative
+    candidates = []
+    if configured_path:
+        configured = FilesystemPath(str(configured_path)).expanduser()
+        candidates.append(configured)
+        if not configured.is_absolute():
+            candidates.append(_repo_root() / configured)
+            candidates.append(FilesystemPath.cwd() / configured)
+    candidates.extend([repo_relative, module_relative])
+    return _unique_paths(candidates)
+
+
+def _resolve_vision_model_path(configured_path):
+    candidates = _vision_model_candidates(configured_path)
+    for candidate in candidates:
+        if os.path.isfile(candidate):
+            return candidate, candidates
+    return None, candidates
 
 def _yaw_from_quaternion(q):
     siny_cosp = 2.0 * (q.w * q.z + q.x * q.y)
@@ -76,7 +172,33 @@ class FlaskRosNode(Node):
                 RobotTask,
                 config["robot_task_action"],
             )
+        self.arm_preset_client = None
+        if ArmPreset is not None:
+            self.arm_preset_client = ActionClient(
+                self,
+                ArmPreset,
+                config["arm_preset_action"],
+            )
+        self.camera_tf_preset_client = None
+        if SetCameraTfPreset is not None:
+            self.camera_tf_preset_client = self.create_client(
+                SetCameraTfPreset,
+                config["camera_tf_preset_service"],
+            )
+        self.map_server_load_client = None
+        if LoadMap is not None:
+            self.map_server_load_client = self.create_client(
+                LoadMap,
+                config["map_server_load_map_service"],
+            )
         self.cmd_vel_pub = self.create_publisher(Twist, config["cmd_vel_topic"], 10)
+        self._velocity_lock = threading.Lock()
+        self._velocity_command = Twist()
+        self._velocity_updated_at = 0.0
+        self._velocity_active = False
+        self._velocity_stop_sent = True
+        self._velocity_timeout_sec = float(config.get("velocity_command_timeout_sec", 0.6))
+        self.create_timer(0.05, self.publish_velocity_timer)
 
         self.depth_topics = list(dict.fromkeys(config["depth_camera_topics"]))
         self.color_topics = list(dict.fromkeys(config["color_camera_topics"]))
@@ -133,7 +255,14 @@ class FlaskRosNode(Node):
         try:
             image = self.cv_bridge.imgmsg_to_cv2(msg, desired_encoding="passthrough")
             jpeg = self.bridge.depth_image_to_jpeg(image)
-            self.bridge.set_camera_frame("depth", jpeg, msg.header.frame_id, _stamp_to_float(msg.header.stamp), topic)
+            self.bridge.set_camera_frame(
+                "depth",
+                jpeg,
+                msg.header.frame_id,
+                _stamp_to_float(msg.header.stamp),
+                topic,
+                image=image,
+            )
         except Exception as exc:
             self.bridge.set_error("depth_camera", str(exc))
 
@@ -149,7 +278,14 @@ class FlaskRosNode(Node):
                     image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
             ok, buffer = cv2.imencode(".jpg", image, [int(cv2.IMWRITE_JPEG_QUALITY), 82])
             if ok:
-                self.bridge.set_camera_frame("color", buffer.tobytes(), msg.header.frame_id, _stamp_to_float(msg.header.stamp), topic)
+                self.bridge.set_camera_frame(
+                    "color",
+                    buffer.tobytes(),
+                    msg.header.frame_id,
+                    _stamp_to_float(msg.header.stamp),
+                    topic,
+                    image=image,
+                )
         except Exception as exc:
             self.bridge.set_error("color_camera", str(exc))
 
@@ -160,6 +296,10 @@ class FlaskRosNode(Node):
             self.bridge.set_error("map", str(exc))
 
     def handle_amcl_pose(self, msg):
+        if self.bridge.is_mapping_active():
+            return
+        if self.bridge.prefers_tf_pose():
+            return
         pose = msg.pose.pose
         self.bridge.set_robot_pose(
             pose.position.x,
@@ -193,12 +333,35 @@ class FlaskRosNode(Node):
         )
 
     def publish_stop(self):
+        self.set_velocity_command(0.0, 0.0)
         self.cmd_vel_pub.publish(Twist())
 
     def publish_velocity(self, linear_x, angular_z):
+        self.set_velocity_command(linear_x, angular_z)
+
+    def set_velocity_command(self, linear_x, angular_z):
         msg = Twist()
         msg.linear.x = float(linear_x)
         msg.angular.z = float(angular_z)
+        with self._velocity_lock:
+            self._velocity_command = msg
+            self._velocity_updated_at = time.time()
+            self._velocity_active = True
+            self._velocity_stop_sent = False
+
+    def publish_velocity_timer(self):
+        with self._velocity_lock:
+            age = time.time() - self._velocity_updated_at
+            if not self._velocity_active:
+                return
+            if age <= self._velocity_timeout_sec:
+                msg = self._velocity_command
+            elif not self._velocity_stop_sent:
+                msg = Twist()
+                self._velocity_stop_sent = True
+            else:
+                self._velocity_active = False
+                return
         self.cmd_vel_pub.publish(msg)
 
     def send_robot_task_goal(self, task_type, **kwargs):
@@ -233,15 +396,36 @@ class RosBridge:
         self.start_error = None
 
         self.frames = {
-            "depth": {"jpeg": None, "frame_id": None, "stamp": None, "received_at": None, "topic": None},
-            "color": {"jpeg": None, "frame_id": None, "stamp": None, "received_at": None, "topic": None},
+            "depth": {"jpeg": None, "frame_id": None, "stamp": None, "received_at": None, "topic": None, "image": None},
+            "color": {"jpeg": None, "frame_id": None, "stamp": None, "received_at": None, "topic": None, "image": None},
+        }
+        self.vision_lock = threading.Lock()
+        self.vision_model = None
+        self.vision_model_error = None
+        self.vision_last_frame = None
+        self.vision_last_completed_at = None
+        self.vision_info = {
+            "enabled": bool(self.config.get("vision_monitor_enabled", True)),
+            "model_loaded": False,
+            "connected": False,
+            "message": "等待彩色摄像头",
+            "objects": [],
+            "updated_at": None,
+            "topic": None,
+            "frame_id": None,
+            "depth_topic": None,
+            "depth_frame_id": None,
         }
         self.map = None
         self.map_png = None
         self.map_version = 0
+        self.accept_live_map = True
+        self.mapping_active = False
         self.robot_pose = None
         self.last_scan = None
         self.target_point = None
+        self.latest_velocity_command_session = None
+        self.latest_velocity_command_seq = -1
         self.nav_status = {
             "state": "idle",
             "message": "未发送导航目标",
@@ -253,12 +437,49 @@ class RosBridge:
             "updated_at": _now_iso(),
         }
         self.errors = {}
-        self.load_static_map()
+        self.startup_static_map_yaml = None
+        self.load_static_map(remember_startup=True)
 
-    def load_static_map(self):
-        yaml_path = self.config.get("static_map_yaml")
+    def _map_yaml_candidates(self, yaml_path=None):
+        candidates = []
+        for raw_path in (
+            yaml_path,
+            self.config.get("static_map_yaml"),
+            self.config.get("map_save_prefix"),
+        ):
+            if not raw_path:
+                continue
+            raw_path = str(raw_path).strip()
+            if not raw_path:
+                continue
+            if raw_path.endswith((".yaml", ".yml")):
+                path_candidates = (raw_path,)
+            else:
+                path_candidates = (raw_path, f"{raw_path}.yaml", f"{raw_path}.yml")
+            for candidate in path_candidates:
+                if candidate not in candidates:
+                    candidates.append(candidate)
+        return candidates
+
+    def _resolve_map_yaml_path(self, yaml_path=None):
+        candidates = self._map_yaml_candidates(yaml_path)
+        for candidate in candidates:
+            if os.path.isfile(candidate):
+                return candidate, candidates
+        return (candidates[0] if candidates else yaml_path), candidates
+
+    def load_static_map(self, yaml_path=None, remember_startup=False):
+        yaml_path, candidates = self._resolve_map_yaml_path(yaml_path)
         if not yaml_path or not os.path.exists(yaml_path):
-            return
+            tried = "，".join(candidates) if candidates else str(yaml_path)
+            message = f"保存地图文件不存在，已尝试: {tried}"
+            self.set_error("static_map", message)
+            return {
+                "success": False,
+                "message": message,
+                "yaml_path": yaml_path,
+                "candidates": candidates,
+            }
 
         try:
             info = {}
@@ -272,12 +493,30 @@ class RosBridge:
 
             image_path = info.get("image")
             if not image_path:
-                return
+                message = f"地图 YAML 缺少 image 字段: {yaml_path}"
+                self.set_error("static_map", message)
+                return {"success": False, "message": message, "yaml_path": yaml_path}
             if not os.path.isabs(image_path):
                 image_path = os.path.join(os.path.dirname(yaml_path), image_path)
+            if not os.path.exists(image_path):
+                message = f"保存地图图片不存在: {image_path}"
+                self.set_error("static_map", message)
+                return {
+                    "success": False,
+                    "message": message,
+                    "yaml_path": yaml_path,
+                    "image_path": image_path,
+                }
             image = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
             if image is None:
-                return
+                message = f"保存地图图片读取失败: {image_path}"
+                self.set_error("static_map", message)
+                return {
+                    "success": False,
+                    "message": message,
+                    "yaml_path": yaml_path,
+                    "image_path": image_path,
+                }
 
             resolution = float(info.get("resolution", 1.0))
             origin_text = info.get("origin", "[0, 0, 0]").strip()
@@ -293,7 +532,14 @@ class RosBridge:
             color = cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
             ok, buffer = cv2.imencode(".png", color)
             if not ok:
-                return
+                message = f"保存地图 PNG 编码失败: {image_path}"
+                self.set_error("static_map", message)
+                return {
+                    "success": False,
+                    "message": message,
+                    "yaml_path": yaml_path,
+                    "image_path": image_path,
+                }
 
             with self.lock:
                 self.map = {
@@ -313,8 +559,22 @@ class RosBridge:
                 }
                 self.map_png = buffer.tobytes()
                 self.map_version += 1
+                self.errors.pop("static_map", None)
+                if remember_startup or self.startup_static_map_yaml is None:
+                    self.startup_static_map_yaml = yaml_path
+            return {
+                "success": True,
+                "message": "已从文件加载保存地图",
+                "yaml_path": yaml_path,
+                "image_path": image_path,
+                "width": int(width),
+                "height": int(height),
+                "resolution": resolution,
+            }
         except Exception as exc:
-            self.set_error("static_map", str(exc))
+            message = f"保存地图加载失败: {exc}"
+            self.set_error("static_map", message)
+            return {"success": False, "message": message, "yaml_path": yaml_path}
 
     def start(self):
         if self.started:
@@ -359,7 +619,7 @@ class RosBridge:
                 "updated_at": _now_iso(),
             }
 
-    def set_camera_frame(self, camera_id, jpeg, frame_id, stamp, topic):
+    def set_camera_frame(self, camera_id, jpeg, frame_id, stamp, topic, image=None):
         with self.lock:
             self.frames[camera_id] = {
                 "jpeg": jpeg,
@@ -367,6 +627,7 @@ class RosBridge:
                 "stamp": stamp,
                 "received_at": time.time(),
                 "topic": topic,
+                "image": image.copy() if image is not None else None,
             }
             self.errors.pop(f"{camera_id}_camera", None)
 
@@ -390,6 +651,9 @@ class RosBridge:
         return buffer.tobytes()
 
     def set_map(self, msg):
+        if not self.accept_live_map:
+            return
+
         width = int(msg.info.width)
         height = int(msg.info.height)
         if width <= 0 or height <= 0:
@@ -428,6 +692,14 @@ class RosBridge:
 
     def set_robot_pose(self, x, y, theta, source, stamp):
         with self.lock:
+            current = self.robot_pose
+            if (
+                source != "tf"
+                and current
+                and current.get("source") == "tf"
+                and time.time() - current.get("received_at", 0.0) < 0.5
+            ):
+                return
             self.robot_pose = {
                 "x": float(x),
                 "y": float(y),
@@ -437,6 +709,18 @@ class RosBridge:
                 "stamp": stamp,
                 "received_at": time.time(),
             }
+
+    def prefers_tf_pose(self):
+        with self.lock:
+            return (
+                self.robot_pose is not None
+                and self.robot_pose.get("source") == "tf"
+                and time.time() - self.robot_pose.get("received_at", 0.0) < 0.5
+            )
+
+    def is_mapping_active(self):
+        with self.lock:
+            return bool(self.mapping_active)
 
     def set_scan(self, msg):
         valid_ranges = [value for value in msg.ranges if math.isfinite(value)]
@@ -480,6 +764,356 @@ class RosBridge:
                 }
                 for camera_id, frame in self.frames.items()
             }
+
+    def _load_vision_model(self):
+        if self.vision_model is not None:
+            return self.vision_model
+        if self.vision_model_error:
+            return None
+        if not self.config.get("vision_monitor_enabled", True):
+            self.vision_model_error = "实例分割监控已禁用"
+            return None
+        if YOLOSegOpenVINO is None:
+            self.vision_model_error = f"YOLO 分割模型导入失败: {VISION_MODEL_IMPORT_ERROR}"
+            return None
+
+        model_path, model_candidates = _resolve_vision_model_path(
+            self.config.get("vision_model_path")
+        )
+        if model_path is None:
+            tried = "，".join(model_candidates)
+            self.vision_model_error = f"YOLO 分割模型文件不存在，已尝试: {tried}"
+            return None
+        class_names = self.config.get("vision_class_names") or DEFAULT_MONITOR_CLASS_NAMES
+        try:
+            self.vision_model = YOLOSegOpenVINO(
+                model_path,
+                device=self.config.get("vision_model_device", "CPU"),
+                names={index: name for index, name in enumerate(class_names)},
+                conf_thres=float(self.config.get("vision_confidence_threshold", 0.55)),
+                iou_thres=float(self.config.get("vision_iou_threshold", 0.65)),
+            )
+            self.vision_model_error = None
+            return self.vision_model
+        except Exception as exc:
+            self.vision_model_error = f"YOLO 分割模型加载失败: {exc}; model_path={model_path}"
+            return None
+
+    def get_vision_frame(self):
+        with self.lock:
+            color_frame = self.frames.get("color", {})
+            depth_frame = self.frames.get("depth", {})
+            color_image = color_frame.get("image")
+            depth_image = depth_frame.get("image")
+            cached_frame = self.vision_last_frame
+            last_completed_at = self.vision_last_completed_at
+            frame_meta = {
+                "topic": color_frame.get("topic"),
+                "frame_id": color_frame.get("frame_id"),
+                "stamp": color_frame.get("stamp"),
+                "depth_topic": depth_frame.get("topic"),
+                "depth_frame_id": depth_frame.get("frame_id"),
+                "connected": (
+                    color_frame.get("received_at") is not None
+                    and (time.time() - color_frame.get("received_at")) < 5.0
+                ),
+            }
+
+        max_fps = max(0.5, float(self.config.get("vision_monitor_max_fps", 6.0)))
+        if cached_frame is not None and last_completed_at and time.time() - last_completed_at < 1.0 / max_fps:
+            return cached_frame
+
+        if color_image is None:
+            frame = placeholder_jpeg("No color frame")
+            self._set_vision_info([], "等待彩色摄像头", frame_meta, frame, connected=False)
+            return frame
+
+        if not self.vision_lock.acquire(blocking=False):
+            if cached_frame is not None:
+                return cached_frame
+            return self._encode_vision_frame(color_image, [], "Detecting...")
+
+        try:
+            model = self._load_vision_model()
+            if model is None:
+                message = self.vision_model_error or "YOLO segmentation model unavailable"
+                frame = self._encode_vision_frame(color_image, [], message)
+                self._set_vision_info([], message, frame_meta, frame, connected=frame_meta["connected"])
+                return frame
+
+            results = model(color_image, verbose=False)
+            detections = self._vision_detections_from_results(results, color_image.shape[:2])
+            self._update_vision_timestamp()
+            self._attach_vision_pose_estimates(detections, depth_image, color_image.shape[:2])
+            message = "识别到物体" if detections else "未识别到物体"
+            frame = self._encode_vision_frame(color_image, detections, message)
+            self._set_vision_info(detections, message, frame_meta, frame, connected=frame_meta["connected"])
+            return frame
+        except Exception as exc:
+            message = f"实例分割失败: {exc}"
+            frame = self._encode_vision_frame(color_image, [], message)
+            self._set_vision_info([], message, frame_meta, frame, connected=frame_meta["connected"])
+            return frame
+        finally:
+            self.vision_lock.release()
+
+    def _update_vision_timestamp(self):
+        self.vision_last_completed_at = time.time()
+
+    def _vision_detections_from_results(self, results, image_shape):
+        detections = []
+        conf_threshold = float(self.config.get("vision_confidence_threshold", 0.55))
+        mask_threshold = float(self.config.get("vision_mask_threshold", 0.5))
+        for result in results or []:
+            boxes = getattr(result, "boxes", None) or []
+            names = getattr(result, "names", {}) or {}
+            for index, box in enumerate(boxes):
+                try:
+                    cls_id = int(box.cls[0])
+                    confidence = float(box.conf[0])
+                    xyxy = np.asarray(box.xyxy[0], dtype=float)
+                except (IndexError, TypeError, ValueError, AttributeError):
+                    continue
+                if confidence < conf_threshold:
+                    continue
+                mask = self._vision_mask_for_result(result, index, image_shape, mask_threshold)
+                if mask is None or not np.any(mask):
+                    continue
+                rotation_deg = self._vision_mask_rotation_deg(mask)
+                detections.append(
+                    {
+                        "class_name": names.get(cls_id, str(cls_id)),
+                        "confidence": confidence,
+                        "bbox": np.clip(
+                            xyxy,
+                            [0, 0, 0, 0],
+                            [image_shape[1] - 1, image_shape[0] - 1, image_shape[1] - 1, image_shape[0] - 1],
+                        ).astype(int).tolist(),
+                        "mask": mask,
+                        "mask_pixels": int(np.count_nonzero(mask)),
+                        "rotation_deg": rotation_deg,
+                    }
+                )
+        detections.sort(key=lambda item: item["confidence"], reverse=True)
+        return detections
+
+    @staticmethod
+    def _vision_mask_rotation_deg(mask):
+        try:
+            mask_u8 = mask.astype(np.uint8) * 255
+            contours, _ = cv2.findContours(mask_u8, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            if not contours:
+                return None
+            contour = max(contours, key=cv2.contourArea)
+            if cv2.contourArea(contour) <= 1.0:
+                return None
+            (_, _), (_, _), angle = cv2.minAreaRect(contour)
+            if angle < -45.0:
+                angle += 90.0
+            return round(float(angle), 1)
+        except Exception:
+            return None
+
+    def _attach_vision_pose_estimates(self, detections, depth_image, image_shape):
+        if not detections:
+            return
+
+        height, width = image_shape
+        center_x = width * 0.5
+        center_y = height * 0.5
+        hfov = math.radians(float(self.config.get("vision_camera_hfov_deg", 69.0)))
+        vfov = math.radians(float(self.config.get("vision_camera_vfov_deg", 42.0)))
+
+        depth = None
+        if depth_image is not None:
+            depth = depth_image[:, :, 0] if depth_image.ndim == 3 else depth_image
+            depth = depth.astype(np.float32)
+            if depth_image.dtype == np.uint16:
+                depth = depth / 1000.0
+            if depth.shape[:2] != (height, width):
+                depth = cv2.resize(depth, (width, height), interpolation=cv2.INTER_NEAREST)
+
+        for detection in detections:
+            x1, y1, x2, y2 = detection["bbox"]
+            mask = detection.get("mask")
+            if mask is not None and np.any(mask):
+                ys, xs = np.where(mask)
+                pixel_x = float(np.mean(xs))
+                pixel_y = float(np.mean(ys))
+            else:
+                pixel_x = (x1 + x2) * 0.5
+                pixel_y = (y1 + y2) * 0.5
+
+            yaw = math.atan2(pixel_x - center_x, max(1.0, center_x) / math.tan(hfov * 0.5))
+            pitch = math.atan2(center_y - pixel_y, max(1.0, center_y) / math.tan(vfov * 0.5))
+            z_m = None
+            if depth is not None:
+                x1c, x2c = max(0, int(x1)), min(depth.shape[1], int(x2) + 1)
+                y1c, y2c = max(0, int(y1)), min(depth.shape[0], int(y2) + 1)
+                if x1c < x2c and y1c < y2c:
+                    region = depth[y1c:y2c, x1c:x2c]
+                    if mask is not None and mask.shape[:2] == depth.shape[:2]:
+                        values = region[mask[y1c:y2c, x1c:x2c]]
+                    else:
+                        values = region.reshape(-1)
+                    values = values[np.isfinite(values) & (values > 0.05)]
+                    if values.size:
+                        z_m = float(np.median(values))
+
+            x_m = y_m = distance_m = None
+            if z_m is not None:
+                x_m = math.tan(yaw) * z_m
+                y_m = math.tan(pitch) * z_m
+                distance_m = math.sqrt(x_m * x_m + y_m * y_m + z_m * z_m)
+
+            detection["pose"] = {
+                "pixel": {"x": round(pixel_x, 1), "y": round(pixel_y, 1)},
+                "x_m": round(x_m, 3) if x_m is not None else None,
+                "y_m": round(y_m, 3) if y_m is not None else None,
+                "z_m": round(z_m, 3) if z_m is not None else None,
+                "distance_m": round(distance_m, 3) if distance_m is not None else None,
+                "yaw_deg": round(math.degrees(yaw), 1),
+                "pitch_deg": round(math.degrees(pitch), 1),
+                "rotation_deg": detection.get("rotation_deg"),
+            }
+
+    @staticmethod
+    def _vision_mask_for_result(result, index, image_shape, mask_threshold):
+        masks = getattr(result, "masks", None)
+        if masks is None:
+            return None
+        try:
+            if getattr(masks, "soft_data", None) is not None:
+                mask = np.asarray(masks.soft_data[index], dtype=np.float32)
+            else:
+                mask = np.asarray(masks.data[index], dtype=np.float32)
+        except (IndexError, TypeError, ValueError):
+            return None
+
+        height, width = image_shape
+        if mask.shape[:2] != (height, width):
+            mask = cv2.resize(mask, (width, height), interpolation=cv2.INTER_LINEAR)
+        mask = cv2.GaussianBlur(mask, (5, 5), 0)
+        mask_bin = (mask > mask_threshold).astype(np.uint8)
+        mask_bin = cv2.morphologyEx(
+            mask_bin,
+            cv2.MORPH_OPEN,
+            cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5)),
+        )
+        return mask_bin.astype(bool)
+
+    def _encode_vision_frame(self, image, detections, message):
+        frame = image.copy()
+        palette = [
+            (38, 166, 154),
+            (255, 171, 64),
+            (66, 165, 245),
+            (171, 71, 188),
+            (102, 187, 106),
+            (239, 83, 80),
+        ]
+
+        if detections:
+            overlay = frame.copy()
+            for index, detection in enumerate(detections):
+                color = np.array(palette[index % len(palette)], dtype=np.uint8)
+                overlay[detection["mask"]] = (
+                    overlay[detection["mask"]].astype(np.float32) * 0.35
+                    + color.astype(np.float32) * 0.65
+                ).astype(np.uint8)
+            frame = cv2.addWeighted(overlay, 0.55, frame, 0.45, 0)
+
+            for index, detection in enumerate(detections):
+                color = palette[index % len(palette)]
+                mask_u8 = detection["mask"].astype(np.uint8) * 255
+                contours, _ = cv2.findContours(mask_u8, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                cv2.drawContours(frame, contours, -1, color, 2)
+                x1, y1, x2, y2 = detection["bbox"]
+                cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
+                pose = detection.get("pose") or {}
+                label = f"{detection['class_name']} {detection['confidence']:.2f}"
+                if pose.get("z_m") is not None and pose.get("yaw_deg") is not None:
+                    label = f"{label} Z {pose['z_m']:.2f}m Yaw {pose['yaw_deg']:+.1f}"
+                cv2.putText(
+                    frame,
+                    label,
+                    (x1, max(24, y1 - 8)),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.62,
+                    color,
+                    2,
+                    cv2.LINE_AA,
+                )
+        else:
+            cv2.putText(
+                frame,
+                "No object detected",
+                (24, 48),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.78,
+                (220, 230, 235),
+                2,
+                cv2.LINE_AA,
+            )
+
+        cv2.rectangle(frame, (0, 0), (frame.shape[1], 32), (16, 24, 28), -1)
+        if detections:
+            pose = detections[0].get("pose") or {}
+            if pose.get("z_m") is not None:
+                banner = (
+                    f"X {pose['x_m']:+.2f}m  Y {pose['y_m']:+.2f}m  "
+                    f"Z {pose['z_m']:.2f}m  Rot {pose.get('rotation_deg') if pose.get('rotation_deg') is not None else '-'}deg"
+                )
+            else:
+                banner = "Target pose: waiting depth"
+        else:
+            banner = str(message or "No object detected")[:80]
+        cv2.putText(
+            frame,
+            banner,
+            (16, 23),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.62,
+            (235, 245, 240),
+            2,
+            cv2.LINE_AA,
+        )
+        ok, buffer = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), 82])
+        return buffer.tobytes() if ok else b""
+
+    def _set_vision_info(self, detections, message, frame_meta, jpeg, connected):
+        objects = [
+            {
+                "class_name": detection["class_name"],
+                "confidence": round(float(detection["confidence"]), 3),
+                "mask_pixels": int(detection["mask_pixels"]),
+                "bbox": list(detection["bbox"]),
+                "pose": dict(detection.get("pose") or {}),
+            }
+            for detection in detections
+        ]
+        with self.lock:
+            self.vision_last_frame = jpeg
+            self.vision_info = {
+                "enabled": bool(self.config.get("vision_monitor_enabled", True)),
+                "model_loaded": self.vision_model is not None,
+                "model_error": self.vision_model_error,
+                "connected": bool(connected),
+                "message": message,
+                "objects": objects,
+                "updated_at": _now_iso(),
+                "topic": frame_meta.get("topic"),
+                "frame_id": frame_meta.get("frame_id"),
+                "depth_topic": frame_meta.get("depth_topic"),
+                "depth_frame_id": frame_meta.get("depth_frame_id"),
+                "stamp": frame_meta.get("stamp"),
+            }
+
+    def get_vision_info(self):
+        with self.lock:
+            info = dict(self.vision_info)
+            info["objects"] = [dict(item) for item in self.vision_info.get("objects", [])]
+            return info
 
     def get_map_png(self):
         with self.lock:
@@ -529,8 +1163,20 @@ class RosBridge:
             }
 
     def reset_mapping(self):
+        prepare_result = self.prepare_mapping_camera_pose()
+        if not prepare_result.get("success"):
+            with self.lock:
+                self.nav_status = {
+                    "state": "mapping_prepare_failed",
+                    "message": prepare_result.get("message", "建图姿态准备失败"),
+                    "updated_at": _now_iso(),
+                }
+            return prepare_result
+
         process_result = self.start_mapping_process()
         with self.lock:
+            self.mapping_active = bool(process_result.get("success"))
+            self.accept_live_map = True
             self.map = None
             self.map_png = None
             self.map_version += 1
@@ -547,29 +1193,342 @@ class RosBridge:
             "command": process_result.get("command"),
         }
 
+    def prepare_mapping_camera_pose(self):
+        if not self.started or not self.node:
+            return {
+                "success": False,
+                "message": self.start_error or "ROS bridge 未启动",
+            }
+        if ArmPreset is None or self.node.arm_preset_client is None:
+            return {
+                "success": False,
+                "message": f"ArmPreset 接口未加载: {ARM_PRESET_IMPORT_ERROR}",
+            }
+        if (
+            SetCameraTfPreset is None
+            or self.node.camera_tf_preset_client is None
+        ):
+            return {
+                "success": False,
+                "message": (
+                    "SetCameraTfPreset 接口未加载: "
+                    f"{CAMERA_TF_PRESET_IMPORT_ERROR}"
+                ),
+            }
+
+        timeout_sec = float(
+            self.config.get("mapping_prepare_timeout_sec", 60.0)
+        )
+        action_type = ArmPreset.Goal.ARM_MAPPING
+        arm_result = self._send_arm_preset_sync(action_type, timeout_sec)
+        if not arm_result.get("success"):
+            return arm_result
+
+        tf_result = self._set_camera_tf_preset_sync(
+            action_type,
+            float(self.config.get("goal_timeout_sec", 3.0)),
+        )
+        if not tf_result.get("success"):
+            return tf_result
+
+        return {
+            "success": True,
+            "message": "机械臂已切换建图姿态，真实相机 TF 已更新",
+        }
+
+    def _send_arm_preset_sync(self, action_type, timeout_sec):
+        client = self.node.arm_preset_client
+        if not client.wait_for_server(
+            timeout_sec=float(self.config.get("goal_timeout_sec", 3.0))
+        ):
+            return {
+                "success": False,
+                "message": f"ArmPreset Action 不可用: {self.config['arm_preset_action']}",
+            }
+
+        goal = ArmPreset.Goal()
+        goal.action_type = int(action_type)
+        done_event = threading.Event()
+        result = {}
+
+        def on_result(done):
+            try:
+                wrapped = done.result()
+                action_result = wrapped.result
+                result.update(
+                    {
+                        "success": bool(action_result.success),
+                        "message": action_result.message,
+                    }
+                )
+            except Exception as exc:
+                result.update(
+                    {
+                        "success": False,
+                        "message": f"ArmPreset 结果失败: {exc}",
+                    }
+                )
+            finally:
+                done_event.set()
+
+        def on_goal(done):
+            try:
+                goal_handle = done.result()
+                if goal_handle is None or not goal_handle.accepted:
+                    result.update(
+                        {
+                            "success": False,
+                            "message": "ArmPreset 建图姿态目标被拒绝",
+                        }
+                    )
+                    done_event.set()
+                    return
+                goal_handle.get_result_async().add_done_callback(on_result)
+            except Exception as exc:
+                result.update(
+                    {
+                        "success": False,
+                        "message": f"ArmPreset 发送失败: {exc}",
+                    }
+                )
+                done_event.set()
+
+        client.send_goal_async(goal).add_done_callback(on_goal)
+        if not done_event.wait(float(timeout_sec)):
+            return {
+                "success": False,
+                "message": "ArmPreset 建图姿态执行超时",
+            }
+        return result
+
+    def _set_camera_tf_preset_sync(self, action_type, timeout_sec):
+        client = self.node.camera_tf_preset_client
+        if not client.wait_for_service(timeout_sec=float(timeout_sec)):
+            return {
+                "success": False,
+                "message": (
+                    "真实相机 TF preset 服务不可用: "
+                    f"{self.config['camera_tf_preset_service']}"
+                ),
+            }
+
+        request = SetCameraTfPreset.Request()
+        request.action_type = int(action_type)
+        done_event = threading.Event()
+        result = {}
+
+        def on_response(done):
+            try:
+                response = done.result()
+                result.update(
+                    {
+                        "success": bool(response.success),
+                        "message": response.message,
+                    }
+                )
+            except Exception as exc:
+                result.update(
+                    {
+                        "success": False,
+                        "message": f"真实相机 TF preset 调用失败: {exc}",
+                    }
+                )
+            finally:
+                done_event.set()
+
+        client.call_async(request).add_done_callback(on_response)
+        if not done_event.wait(float(timeout_sec)):
+            return {
+                "success": False,
+                "message": "真实相机 TF preset 调用超时",
+            }
+        return result
+
+    def reload_nav2_map_server(self, yaml_path):
+        if not self.started or not self.node:
+            return {
+                "success": False,
+                "message": self.start_error or "ROS bridge 未启动",
+                "yaml_path": yaml_path,
+            }
+        if LoadMap is None or self.node.map_server_load_client is None:
+            return {
+                "success": False,
+                "message": f"LoadMap 服务接口未加载: {LOAD_MAP_IMPORT_ERROR}",
+                "yaml_path": yaml_path,
+            }
+        if not yaml_path or not os.path.exists(yaml_path):
+            return {
+                "success": False,
+                "message": f"Nav2 地图 YAML 不存在: {yaml_path}",
+                "yaml_path": yaml_path,
+            }
+
+        timeout_sec = float(self.config.get("map_server_load_timeout_sec", 5.0))
+        client = self.node.map_server_load_client
+        if not client.wait_for_service(timeout_sec=timeout_sec):
+            return {
+                "success": False,
+                "message": (
+                    "Nav2 map_server load_map 服务不可用: "
+                    f"{self.config['map_server_load_map_service']}"
+                ),
+                "yaml_path": yaml_path,
+            }
+
+        request = LoadMap.Request()
+        request.map_url = str(yaml_path)
+        done_event = threading.Event()
+        result = {}
+
+        def on_response(done):
+            try:
+                response = done.result()
+                success = response.result == LoadMap.Response.RESULT_SUCCESS
+                result.update(
+                    {
+                        "success": success,
+                        "message": (
+                            "Nav2 map_server 已重新加载地图"
+                            if success
+                            else f"Nav2 map_server 重新加载地图失败: {response.result}"
+                        ),
+                        "result_code": int(response.result),
+                        "yaml_path": str(yaml_path),
+                    }
+                )
+            except Exception as exc:
+                result.update(
+                    {
+                        "success": False,
+                        "message": f"Nav2 map_server 重新加载地图异常: {exc}",
+                        "yaml_path": str(yaml_path),
+                    }
+                )
+            finally:
+                done_event.set()
+
+        client.call_async(request).add_done_callback(on_response)
+        if not done_event.wait(timeout_sec):
+            return {
+                "success": False,
+                "message": "Nav2 map_server 重新加载地图超时",
+                "yaml_path": str(yaml_path),
+            }
+        return result
+
     def finish_mapping(self, save=False):
         if save:
             try:
                 result = self.save_current_map()
             finally:
                 self.stop_mapping_process()
+                with self.lock:
+                    self.mapping_active = False
             if result.get("success"):
-                self.load_static_map()
+                map_load_result = self.load_static_map()
+                result["map_load_after_stop"] = map_load_result
+                yaml_path = (
+                    map_load_result.get("yaml_path")
+                    or result.get("replace", {}).get("yaml_path")
+                    or self.map_file_paths(result.get("map_prefix", ""))["yaml"]
+                )
+                nav2_load_result = self.reload_nav2_map_server(yaml_path)
+                result["nav2_map_load"] = nav2_load_result
+                result.setdefault("replace", {})["nav2_map_load"] = nav2_load_result
+                if nav2_load_result.get("success"):
+                    result["message"] = "地图已保存并重新加载到 Nav2"
+                    with self.lock:
+                        self.nav_status = {
+                            "state": "mapping_saved",
+                            "message": result["message"],
+                            "updated_at": _now_iso(),
+                        }
+                else:
+                    result["success"] = False
+                    result["message"] = nav2_load_result.get(
+                        "message",
+                        "地图已保存，但 Nav2 map_server 重新加载失败",
+                    )
+                    with self.lock:
+                        self.nav_status = {
+                            "state": "mapping_reload_failed",
+                            "message": result["message"],
+                            "updated_at": _now_iso(),
+                        }
             return result
 
         self.stop_mapping_process()
-        self.load_static_map()
+        self.remove_temp_map_files()
+        with self.lock:
+            self.mapping_active = False
+            self.accept_live_map = False
+            self.map = None
+            self.map_png = None
+            self.map_version += 1
+        load_result = self.load_static_map(self.startup_static_map_yaml)
+        if not load_result.get("success"):
+            with self.lock:
+                self.nav_status = {
+                    "state": "mapping_discard_failed",
+                    "message": load_result.get("message", "恢复原保存地图失败"),
+                    "updated_at": _now_iso(),
+                }
+            return {
+                "success": False,
+                "message": load_result.get("message", "恢复原保存地图失败"),
+                "map_load": load_result,
+            }
         with self.lock:
             self.nav_status = {
                 "state": "mapping_discarded",
                 "message": "已放弃本次建图，恢复使用原保存地图",
                 "updated_at": _now_iso(),
             }
-        return {"success": True, "message": "已放弃本次建图，未保存新地图"}
+        return {
+            "success": True,
+            "message": "已放弃本次建图，已从文件恢复原保存地图",
+            "map_load": load_result,
+            "map": self.get_map_data().get("map"),
+        }
+
+    def map_file_paths(self, prefix):
+        prefix = (prefix or "").strip()
+        if prefix.endswith(".yaml"):
+            prefix = prefix[:-5]
+        elif prefix.endswith(".yml"):
+            prefix = prefix[:-4]
+        elif prefix.endswith(".pgm"):
+            prefix = prefix[:-4]
+        return {
+            "yaml": f"{prefix}.yaml",
+            "yml": f"{prefix}.yml",
+            "pgm": f"{prefix}.pgm",
+        }
+
+    def temp_map_prefix(self):
+        prefix = (self.config.get("map_save_prefix") or "").strip()
+        configured = (self.config.get("map_temp_prefix") or "").strip()
+        if configured:
+            return configured
+        if not prefix:
+            return ""
+        return f"{prefix}_new"
+
+    def remove_temp_map_files(self):
+        temp_prefix = self.temp_map_prefix()
+        if not temp_prefix:
+            return
+        for path in self.map_file_paths(temp_prefix).values():
+            try:
+                os.remove(path)
+            except FileNotFoundError:
+                pass
 
     def start_mapping_process(self):
         command = (self.config.get("slam_rebuild_command") or "").strip()
         if not command:
+            self.remove_temp_map_files()
             return {
                 "success": True,
                 "message": "已清空前端静态地图缓存，等待外部 SLAM 节点发布新的 /map",
@@ -577,6 +1536,7 @@ class RosBridge:
 
         try:
             self.stop_mapping_process()
+            self.remove_temp_map_files()
 
             log_path = "/tmp/robot_frontend_slam_rebuild.log"
             log_file = open(log_path, "ab")
@@ -616,11 +1576,13 @@ class RosBridge:
 
     def save_current_map(self):
         prefix = (self.config.get("map_save_prefix") or "").strip()
+        temp_prefix = self.temp_map_prefix()
         command_template = (self.config.get("map_save_command") or "").strip()
-        if not prefix or not command_template:
+        if not prefix or not temp_prefix or not command_template:
             return {"success": False, "message": "地图保存命令未配置"}
 
-        command = command_template.format(map_prefix=prefix)
+        self.remove_temp_map_files()
+        command = command_template.format(map_prefix=temp_prefix)
         try:
             completed = subprocess.run(
                 shlex.split(command),
@@ -637,20 +1599,85 @@ class RosBridge:
             }
 
         success = completed.returncode == 0
+        replace_result = {}
         if success:
-            with self.lock:
-                self.nav_status = {
-                    "state": "mapping_saved",
-                    "message": f"地图已保存到 {prefix}.yaml / {prefix}.pgm",
-                    "updated_at": _now_iso(),
-                }
+            replace_result = self.commit_temp_map(temp_prefix, prefix)
+            success = replace_result.get("success", False)
+        if success:
+            load_result = self.load_static_map(prefix, remember_startup=True)
+            success = load_result.get("success", False)
+            replace_result["map_load"] = load_result
+        with self.lock:
+            self.nav_status = {
+                "state": "mapping_saved" if success else "mapping_save_failed",
+                "message": (
+                    f"地图已保存到 {prefix}.yaml / {prefix}.pgm"
+                    if success
+                    else (
+                        replace_result.get("map_load", {}).get("message")
+                        or replace_result.get("message", "地图保存失败")
+                    )
+                ),
+                "updated_at": _now_iso(),
+            }
         return {
             "success": success,
             "message": "地图已保存" if success else "地图保存失败",
             "command": command,
             "output": (completed.stdout or "")[-2000:],
             "map_prefix": prefix,
+            "temp_map_prefix": temp_prefix,
+            "replace": replace_result,
         }
+
+    def commit_temp_map(self, temp_prefix, final_prefix):
+        temp_paths = self.map_file_paths(temp_prefix)
+        final_paths = self.map_file_paths(final_prefix)
+        temp_yaml = temp_paths["yaml"] if os.path.exists(temp_paths["yaml"]) else temp_paths["yml"]
+        if not os.path.exists(temp_yaml):
+            return {
+                "success": False,
+                "message": f"临时地图 YAML 不存在: {temp_paths['yaml']}",
+            }
+        if not os.path.exists(temp_paths["pgm"]):
+            return {
+                "success": False,
+                "message": f"临时地图 PGM 不存在: {temp_paths['pgm']}",
+            }
+
+        try:
+            final_dir = os.path.dirname(final_paths["yaml"])
+            if final_dir:
+                os.makedirs(final_dir, exist_ok=True)
+            shutil.copyfile(temp_paths["pgm"], final_paths["pgm"])
+            yaml_text = open(temp_yaml, "r", encoding="utf-8").read()
+            final_image = os.path.basename(final_paths["pgm"])
+            lines = []
+            replaced_image = False
+            for line in yaml_text.splitlines():
+                if line.strip().startswith("image:"):
+                    lines.append(f"image: {final_image}")
+                    replaced_image = True
+                else:
+                    lines.append(line)
+            if not replaced_image:
+                lines.insert(0, f"image: {final_image}")
+            with open(final_paths["yaml"], "w", encoding="utf-8") as yaml_file:
+                yaml_file.write("\n".join(lines).rstrip() + "\n")
+            self.remove_temp_map_files()
+            return {
+                "success": True,
+                "message": "临时地图已替换正式地图",
+                "yaml_path": final_paths["yaml"],
+                "image_path": final_paths["pgm"],
+            }
+        except Exception as exc:
+            return {
+                "success": False,
+                "message": f"替换正式地图失败: {exc}",
+                "temp_prefix": temp_prefix,
+                "map_prefix": final_prefix,
+            }
 
     def send_navigation_goal(self, x, y, yaw=0.0):
         if not self.started or not self.node:
@@ -722,7 +1749,7 @@ class RosBridge:
                 "error": f"RobotTask 接口未加载: {ROBOT_TASK_IMPORT_ERROR}",
             }
 
-        path = Path()
+        path = RosPath()
         path.header.frame_id = self.config["map_frame"]
         path.header.stamp = self.node.get_clock().now().to_msg()
         for waypoint in parsed:
@@ -1024,15 +2051,39 @@ class RosBridge:
         if self.started and self.node:
             self.node.publish_stop()
 
-    def publish_velocity(self, linear_x, angular_z):
+    def publish_velocity(self, linear_x, angular_z, command_session=None, command_seq=None):
         if not self.started or not self.node:
             return {"success": False, "error": self.start_error or "ROS bridge 未启动"}
+        parsed_command_seq = None
+        if command_seq is not None:
+            try:
+                parsed_command_seq = int(command_seq)
+            except (TypeError, ValueError):
+                return {"success": False, "error": "速度命令序号无效"}
+            command_session = str(command_session or "default")
+            with self.lock:
+                if command_session != self.latest_velocity_command_session:
+                    self.latest_velocity_command_session = command_session
+                    self.latest_velocity_command_seq = -1
+                if parsed_command_seq < self.latest_velocity_command_seq:
+                    return {
+                        "success": True,
+                        "ignored": True,
+                        "command_session": command_session,
+                        "command_seq": parsed_command_seq,
+                        "latest_command_seq": self.latest_velocity_command_seq,
+                    }
+                self.latest_velocity_command_seq = parsed_command_seq
         self.node.publish_velocity(linear_x, angular_z)
-        return {
+        result = {
             "success": True,
             "linear_x": float(linear_x),
             "angular_z": float(angular_z),
         }
+        if parsed_command_seq is not None:
+            result["command_session"] = command_session
+            result["command_seq"] = parsed_command_seq
+        return result
 
     def call_grasp_service(self, action):
         if not self.started or not self.node:
@@ -1080,12 +2131,20 @@ class RosBridge:
                     "amcl_pose": self.config["amcl_pose_topic"],
                     "scan": self.config["scan_topic"],
                     "robot_task_action": self.config["robot_task_action"],
+                    "arm_preset_action": self.config["arm_preset_action"],
+                    "camera_tf_preset_service": self.config[
+                        "camera_tf_preset_service"
+                    ],
                 },
                 "camera": self.get_camera_info(),
                 "has_map": self.map is not None,
                 "has_robot_pose": self.robot_pose is not None,
                 "robot_task_interface_loaded": RobotTask is not None,
                 "robot_task_interface_error": str(ROBOT_TASK_IMPORT_ERROR) if ROBOT_TASK_IMPORT_ERROR else None,
+                "arm_preset_interface_loaded": ArmPreset is not None,
+                "arm_preset_interface_error": str(ARM_PRESET_IMPORT_ERROR) if ARM_PRESET_IMPORT_ERROR else None,
+                "camera_tf_preset_interface_loaded": SetCameraTfPreset is not None,
+                "camera_tf_preset_interface_error": str(CAMERA_TF_PRESET_IMPORT_ERROR) if CAMERA_TF_PRESET_IMPORT_ERROR else None,
                 "nav_status": dict(self.nav_status),
                 "robot_task_status": dict(self.robot_task_status),
                 "errors": dict(self.errors),

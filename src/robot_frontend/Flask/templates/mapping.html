@@ -50,7 +50,7 @@
                 <kbd id="key-s">S</kbd>
                 <kbd id="key-d">D</kbd>
             </div>
-            <p class="control-hint">W/A/S/D 对应 teleop_twist_keyboard 的 I/J/,/L；组合键按 U/O/M/. 方向发布速度。</p>
+            <p class="control-hint">W/A/S/D 控制移动；保持 step4 的低延迟控制逻辑，并自动丢弃旧速度命令。</p>
 
             <label class="slider-label" for="speed-slider">
                 <span>加速 speed</span>
@@ -232,7 +232,11 @@
     let smoothPose = null;
     let lastPoseStamp = null;
     let lastVelocityErrorAt = 0;
-    let velocityRequestInFlight = false;
+    let velocityRequestsInFlight = 0;
+    const velocityCommandSession = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    let velocityCommandSeq = 0;
+    let lastSentTwist = { linear_x: 0, angular_z: 0 };
+    let lastVelocitySentAt = 0;
     let mapRequestInFlight = false;
     let poseRequestInFlight = false;
     let isDraggingView = false;
@@ -240,9 +244,10 @@
     let lastPointer = null;
     let viewDragStart = null;
     let viewStartTransform = null;
-    const MAP_DEFAULT_ROTATION = Math.PI;
+    const MAP_DEFAULT_ROTATION = 0;
     const viewTransform = { scale: 1, offsetX: 0, offsetY: 0, rotation: MAP_DEFAULT_ROTATION };
     const pressedKeys = new Set();
+    const CONTROL_KEYS = ['w', 'a', 's', 'd'];
     const mapImage = new Image();
 
     const canvas = document.getElementById('map-canvas');
@@ -275,7 +280,7 @@
         const stamp = pose.stamp ?? pose.received_at ?? Date.now();
         if (!smoothPose || stamp !== lastPoseStamp) {
             const jump = smoothPose ? Math.hypot(pose.x - smoothPose.x, pose.y - smoothPose.y) : 0;
-            const alpha = jump > 1.2 ? 1.0 : 0.35;
+            const alpha = jump > 1.2 ? 0.08 : 0.35;
             smoothPose = {
                 ...pose,
                 x: smoothPose ? lerp(smoothPose.x, pose.x, alpha) : pose.x,
@@ -575,20 +580,33 @@
 
     async function publishVelocity(twist, force = false) {
         if (!controlMode && !force) return;
-        if (velocityRequestInFlight && !force) return;
-        velocityRequestInFlight = true;
+        const now = Date.now();
+        const changed = (
+            Math.abs(twist.linear_x - lastSentTwist.linear_x) > 1e-6 ||
+            Math.abs(twist.angular_z - lastSentTwist.angular_z) > 1e-6
+        );
+        if (!force && !changed && now - lastVelocitySentAt < 250) return;
+        if (velocityRequestsInFlight > 0 && !force) return;
+        const commandSeq = ++velocityCommandSeq;
+        velocityRequestsInFlight += 1;
         try {
             const response = await fetch('/api/robot/velocity', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     ...twist,
+                    command_session: velocityCommandSession,
+                    command_seq: commandSeq,
                     max_linear: parseFloat(speedSlider.max),
                     max_angular: parseFloat(turnSlider.max)
                 })
             });
             const data = await response.json();
             if (!response.ok || !data.success) throw new Error(data.error || '速度发布失败');
+            if (!data.ignored && commandSeq === velocityCommandSeq) {
+                lastSentTwist = { ...twist };
+                lastVelocitySentAt = now;
+            }
         } catch (error) {
             const now = Date.now();
             if (now - lastVelocityErrorAt > 2500) {
@@ -596,12 +614,12 @@
                 lastVelocityErrorAt = now;
             }
         } finally {
-            velocityRequestInFlight = false;
+            velocityRequestsInFlight = Math.max(0, velocityRequestsInFlight - 1);
         }
     }
 
-    function publishCurrentVelocity() {
-        publishVelocity(currentTwist());
+    function publishCurrentVelocity(force = false) {
+        publishVelocity(currentTwist(), force);
     }
 
     function stopRobot() {
@@ -611,7 +629,7 @@
     }
 
     function updateKeyDisplay() {
-        ['w', 'a', 's', 'd'].forEach(key => {
+        CONTROL_KEYS.forEach(key => {
             document.getElementById(`key-${key}`).classList.toggle('active', pressedKeys.has(key));
         });
     }
@@ -624,19 +642,22 @@
 
     document.addEventListener('keydown', event => {
         const key = event.key.toLowerCase();
-        if (!controlMode || !['w', 'a', 's', 'd'].includes(key)) return;
+        if (!controlMode || !CONTROL_KEYS.includes(key)) return;
         event.preventDefault();
+        const alreadyPressed = pressedKeys.has(key);
         pressedKeys.add(key);
         updateKeyDisplay();
-        publishCurrentVelocity();
+        if (event.repeat && alreadyPressed) return;
+        publishCurrentVelocity(true);
     });
 
     document.addEventListener('keyup', event => {
         const key = event.key.toLowerCase();
-        if (!['w', 'a', 's', 'd'].includes(key)) return;
+        if (!CONTROL_KEYS.includes(key)) return;
+        event.preventDefault();
         pressedKeys.delete(key);
         updateKeyDisplay();
-        publishCurrentVelocity();
+        publishCurrentVelocity(true);
     });
 
     stage.addEventListener('wheel', event => {
@@ -729,6 +750,6 @@
     setInterval(refreshMapData, 1000);
     setInterval(refreshRobotPose, 60);
     setInterval(() => drawMap(), 60);
-    setInterval(publishCurrentVelocity, 60);
+    setInterval(publishCurrentVelocity, 250);
 </script>
 {% endblock %}

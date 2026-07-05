@@ -25,8 +25,8 @@ LEFT_BUCKET_CLASSES = {'paper', 'yan', 'bottle'}
 RIGHT_BUCKET_CLASSES = {'usb', 'charger', 'pen'}
 TARGET_OFFSETS_CM = {
     'bottle': (0.0, 0.0, -6.0),
-    'charger': (1.5, 0.0, -3.5),
-    'paper': (1.5, 0.0, -3.5),
+    'charger': (1.0, 0.0, -4.5),
+    'paper': (1.0, 0.0, -3.5),
 }
 
 
@@ -257,7 +257,7 @@ class VisionGraspNode(Node):
         ])
 
     def _target_cm_for_object(self, object_arm_m, class_name):
-        return object_arm_m * 100.0 + np.array(TARGET_OFFSETS_CM.get(class_name, (0.0, 0.0, -2.5)), dtype=float)
+        return object_arm_m * 100.0 + np.array(TARGET_OFFSETS_CM.get(class_name, (0.0, 0.0, -3.0)), dtype=float)
 
     @staticmethod
     def _bucket_preset_for_class(class_name):

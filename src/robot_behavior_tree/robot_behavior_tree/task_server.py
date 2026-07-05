@@ -19,10 +19,10 @@ from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
 from robot_interfaces.action import ArmPreset, ArmTarget, RobotTask
 from robot_interfaces.srv import (
-    AddCoverageRectangle,
     DetectDumpBucket,
     DetectGraspTarget,
     DumpTrash,
+    GenerateCoveragePath,
     SetCameraTfPreset,
     SetGripper,
 )
@@ -90,7 +90,7 @@ class RobotTaskServer(Node):
         self.declare_parameter('detect_grasp_service', 'vision_grasp/detect')
         self.declare_parameter('detect_dump_service', 'detect_dump_bucket')
         self.declare_parameter('dump_trash_service', 'dump_trash')
-        self.declare_parameter('coverage_task_service', 'add_coverage_rectangle')
+        self.declare_parameter('coverage_path_service', 'generate_coverage_path')
         self.declare_parameter('arm_target_action', '/arm_target')
         self.declare_parameter('arm_preset_action', '/arm_preset')
         self.declare_parameter(
@@ -106,6 +106,7 @@ class RobotTaskServer(Node):
         self.declare_parameter('imu_topic', '/imu/data')
         self.declare_parameter('service_timeout_sec', 3.0)
         self.declare_parameter('action_timeout_sec', 45.0)
+        self.declare_parameter('navigation_timeout_sec', 300.0)
         self.declare_parameter('dump_timeout_sec', 90.0)
         # <= 0 means keep scanning/grasping until TASK_STOP or action cancel.
         self.declare_parameter('clean_max_objects', 0)
@@ -115,6 +116,7 @@ class RobotTaskServer(Node):
         self.declare_parameter('approach_target_y_cm', 24.0)
         self.declare_parameter('approach_max_step_m', 0.08)
         self.declare_parameter('approach_linear_speed', 0.08)
+        self.declare_parameter('coverage_detect_interval_sec', 0.3)
         self.declare_parameter('gripper_duration_ms', 500.0)
         self.declare_parameter('gripper_wait_sec', 1.0)
         self.declare_parameter('require_dump_bucket_detect', True)
@@ -178,9 +180,9 @@ class RobotTaskServer(Node):
             self.get_parameter('dump_trash_service').value,
             callback_group=callback_group,
         )
-        self._coverage_client = self.create_client(
-            AddCoverageRectangle,
-            self.get_parameter('coverage_task_service').value,
+        self._coverage_path_client = self.create_client(
+            GenerateCoveragePath,
+            self.get_parameter('coverage_path_service').value,
             callback_group=callback_group,
         )
         self._gripper_client = self.create_client(
@@ -594,27 +596,176 @@ class RobotTaskServer(Node):
     def _run_clean_region_tree(self, goal_handle, goal):
         self._feedback(goal_handle, 'clean_region: arm mapping pose', 0.05)
         self._send_arm_preset(goal_handle, ArmPreset.Goal.ARM_MAPPING)
-        self._feedback(goal_handle, 'clean_region: queue coverage rectangle', 0.20)
+        self._feedback(goal_handle, 'clean_region: generate coverage path', 0.15)
         region, error = self._resolve_clean_region(goal)
         if region is None:
             return False, error
 
-        request = AddCoverageRectangle.Request()
+        path, message = self._generate_coverage_path(goal_handle, region)
+        if path is None:
+            return False, message
+
+        picked = self._run_coverage_path_with_grasp(goal_handle, path)
+        if picked is None:
+            return False, 'clean region canceled'
+        return True, f'clean region completed: picked={picked}'
+
+    def _generate_coverage_path(self, goal_handle, region):
+        request = GenerateCoveragePath.Request()
         request.min_x = region.min_x
         request.min_y = region.min_y
         request.max_x = region.max_x
         request.max_y = region.max_y
         request.frame_id = region.frame_id
         response = self._call_service(
-            self._coverage_client,
+            self._coverage_path_client,
             request,
             timeout_sec=float(self.get_parameter('service_timeout_sec').value),
             goal_handle=goal_handle,
-            label='add coverage rectangle',
+            label='generate coverage path',
         )
         if response is None:
-            return False, 'coverage task service unavailable or timed out'
-        return bool(response.success), response.message
+            return None, 'coverage path service unavailable or timed out'
+        if not response.success:
+            return None, response.message
+        if not response.coverage_path.poses:
+            return None, 'coverage path service returned no path'
+        return response.coverage_path, response.message
+
+    def _run_coverage_path_with_grasp(self, goal_handle, path):
+        picked = 0
+        total = len(path.poses)
+        for index, pose in enumerate(path.poses):
+            if self._is_canceling(goal_handle):
+                return None
+
+            self._feedback(
+                goal_handle,
+                f'clean_region: coverage waypoint {index + 1}/{total}',
+                0.20 + 0.70 * index / max(1, total),
+            )
+            target = self._navigate_pose_with_visual_interrupt(
+                goal_handle,
+                pose,
+                f'coverage waypoint {index + 1}',
+            )
+            if not target:
+                continue
+
+            self._feedback(
+                goal_handle,
+                'clean_region: reacquire stopped target',
+                0.40,
+            )
+            target = self._detect_reachable_target(goal_handle)
+            if target is None:
+                self.get_logger().warning(
+                    'clean_region visual interrupt had no reachable target after stop'
+                )
+                continue
+
+            self._feedback(
+                goal_handle,
+                f'clean_region: grasping {target.class_name}',
+                0.45,
+            )
+            self._grasp_target(goal_handle, target)
+            picked += 1
+
+            if self._is_canceling(goal_handle):
+                return None
+            self._feedback(goal_handle, 'clean_region: resume coverage pose', 0.60)
+            self._send_arm_preset(goal_handle, ArmPreset.Goal.ARM_MAPPING)
+
+            if self._is_canceling(goal_handle):
+                return None
+            self._feedback(
+                goal_handle,
+                f'clean_region: return to waypoint {index + 1}/{total}',
+                0.62,
+            )
+            self._navigate_pose_with_visual_interrupt(
+                goal_handle,
+                pose,
+                f'return coverage waypoint {index + 1}',
+                detect_enabled=False,
+            )
+
+        return picked
+
+    def _navigate_pose_with_visual_interrupt(
+        self,
+        goal_handle,
+        pose,
+        label,
+        detect_enabled=True,
+    ):
+        if self._is_canceling(goal_handle):
+            return None
+        if not self._navigate_client.wait_for_server(
+            timeout_sec=float(self.get_parameter('service_timeout_sec').value)
+        ):
+            raise RuntimeError(f'{label} action server not available')
+
+        nav_goal = NavigateToPose.Goal()
+        nav_goal.pose = pose
+        send_future = self._navigate_client.send_goal_async(nav_goal)
+        if not self._wait_future(
+            send_future,
+            float(self.get_parameter('service_timeout_sec').value),
+            goal_handle,
+        ):
+            raise RuntimeError(f'{label} goal response timed out')
+
+        nav_handle = send_future.result()
+        if nav_handle is None or not nav_handle.accepted:
+            raise RuntimeError(f'{label} goal rejected')
+
+        result_future = nav_handle.get_result_async()
+        next_detect = time.monotonic()
+        detect_interval = max(
+            0.2,
+            float(self.get_parameter('coverage_detect_interval_sec').value),
+        )
+        deadline = (
+            time.monotonic()
+            + self._navigation_timeout_sec()
+        )
+
+        while rclpy.ok() and not result_future.done():
+            if self._is_canceling(goal_handle):
+                self._cancel_action_goal(nav_handle)
+                return None
+
+            if time.monotonic() >= deadline:
+                self._cancel_action_goal(nav_handle)
+                raise RuntimeError(f'{label} result timed out')
+
+            if detect_enabled and time.monotonic() >= next_detect:
+                target = self._detect_grasp_target(goal_handle)
+                next_detect = time.monotonic() + detect_interval
+                if target is not None:
+                    self.get_logger().info(
+                        f'clean_region detected {target.class_name}; '
+                        f'interrupting {label}'
+                    )
+                    self._cancel_action_goal(nav_handle)
+                    self._publish_stop()
+                    return True
+
+            time.sleep(0.05)
+
+        wrapped = result_future.result()
+        if wrapped.status != GoalStatus.STATUS_SUCCEEDED:
+            raise RuntimeError(f'{label} failed: status={wrapped.status}')
+        return False
+
+    def _cancel_action_goal(self, action_goal_handle):
+        try:
+            cancel_future = action_goal_handle.cancel_goal_async()
+        except Exception:
+            return
+        self._wait_future(cancel_future, 2.0, None)
 
     def _run_set_clean_region(self, goal_handle, goal):
         region_id = int(goal.bucket_id)
@@ -690,7 +841,7 @@ class RobotTaskServer(Node):
         result = self._send_action_goal(
             self._navigate_client,
             nav_goal,
-            timeout_sec=float(self.get_parameter('action_timeout_sec').value),
+            timeout_sec=self._navigation_timeout_sec(),
             goal_handle=goal_handle,
             label='navigate to pose',
         )
@@ -705,36 +856,51 @@ class RobotTaskServer(Node):
 
         self._feedback(goal_handle, 'navigate_path: arm mapping pose', 0.05)
         self._send_arm_preset(goal_handle, ArmPreset.Goal.ARM_MAPPING)
-        self._feedback(goal_handle, 'navigate_path: sending path', 0.20)
-        nav_goal = NavigateThroughPoses.Goal()
-        nav_goal.poses = path.poses
-        wrapped = self._send_action_goal_wrapped(
-            self._navigate_through_client,
-            nav_goal,
-            timeout_sec=float(self.get_parameter('action_timeout_sec').value),
-            goal_handle=goal_handle,
-            label='navigate through poses',
-        )
-        if wrapped is None:
-            return False, 'navigate through poses failed'
-        if wrapped.status != GoalStatus.STATUS_SUCCEEDED:
-            return False, f'navigate through poses failed: status={wrapped.status}'
-        return True, 'navigate path completed'
+        total = len(path.poses)
+        timeout_sec = self._navigation_timeout_sec()
+        for index, pose in enumerate(path.poses, start=1):
+            if self._is_canceling(goal_handle):
+                return False, 'navigate path canceled'
+
+            progress = 0.10 + 0.85 * ((index - 1) / max(1, total))
+            self._feedback(
+                goal_handle,
+                f'navigate_path: sending point {index}/{total}',
+                progress,
+            )
+            nav_goal = NavigateToPose.Goal()
+            nav_goal.pose = pose
+            nav_goal.pose.header.stamp = self.get_clock().now().to_msg()
+            if not nav_goal.pose.header.frame_id:
+                nav_goal.pose.header.frame_id = (
+                    goal.frame_id or str(self.get_parameter('map_frame').value)
+                )
+
+            wrapped = self._send_action_goal_wrapped(
+                self._navigate_client,
+                nav_goal,
+                timeout_sec=timeout_sec,
+                goal_handle=goal_handle,
+                label=f'navigate path point {index}/{total}',
+            )
+            if wrapped is None:
+                return False, f'navigate path point {index}/{total} failed'
+            if wrapped.status != GoalStatus.STATUS_SUCCEEDED:
+                return (
+                    False,
+                    f'navigate path point {index}/{total} failed: '
+                    f'status={wrapped.status}',
+                )
+
+        return True, f'navigate path completed: points={total}'
 
     def _navigate_to_dump_front(self, goal_handle, pose):
-        distance = max(
-            0.0,
-            float(self.get_parameter('dump_approach_distance_m').value),
-        )
-        front_x = pose.x - math.cos(pose.yaw) * distance
-        front_y = pose.y - math.sin(pose.yaw) * distance
-
         nav_goal = NavigateToPose.Goal()
         nav_goal.pose = PoseStamped()
         nav_goal.pose.header.frame_id = pose.frame_id
         nav_goal.pose.header.stamp = self.get_clock().now().to_msg()
-        nav_goal.pose.pose.position.x = front_x
-        nav_goal.pose.pose.position.y = front_y
+        nav_goal.pose.pose.position.x = pose.x
+        nav_goal.pose.pose.position.y = pose.y
         nav_goal.pose.pose.position.z = 0.0
         qz, qw = self._yaw_to_quaternion_z_w(pose.yaw)
         nav_goal.pose.pose.orientation.z = qz
@@ -743,7 +909,7 @@ class RobotTaskServer(Node):
         wrapped = self._send_action_goal_wrapped(
             self._navigate_client,
             nav_goal,
-            timeout_sec=float(self.get_parameter('action_timeout_sec').value),
+            timeout_sec=self._navigation_timeout_sec(),
             goal_handle=goal_handle,
             label='navigate to dump front',
         )
@@ -1172,6 +1338,12 @@ class RobotTaskServer(Node):
         result.success = bool(success)
         result.message = str(message)
         return result
+
+    def _navigation_timeout_sec(self):
+        return max(
+            1.0,
+            float(self.get_parameter('navigation_timeout_sec').value),
+        )
 
     def _is_canceling(self, goal_handle):
         return (
