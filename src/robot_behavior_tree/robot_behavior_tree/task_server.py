@@ -186,6 +186,7 @@ class RobotTaskServer(Node):
         self._stop_requested = False
         self._dump_bucket_poses = {}
         self._clean_regions = {}
+        self._bucket_fill_percent = {1: 0, 2: 0}
         self._latest_odom_yaw = None
         self._latest_imu_yaw = None
         self._latest_map_pose = None
@@ -489,8 +490,15 @@ class RobotTaskServer(Node):
                 f'clean_trash: grasping {target.class_name}',
                 0.35,
             )
-            self._grasp_target(goal_handle, target)
+            bucket_id, bucket_level = self._grasp_target(goal_handle, target)
             picked += 1
+            success, message = self._maybe_auto_dump_full_bucket(
+                goal_handle,
+                bucket_id,
+                bucket_level,
+            )
+            if not success:
+                return False, message
 
         return True, f'clean trash completed: picked={picked}'
 
@@ -616,9 +624,63 @@ class RobotTaskServer(Node):
         self._set_gripper(goal_handle, 1.0, duration_ms, 'release object')
         time.sleep(wait_sec)
 
+        bucket_level = self._increment_bucket_fill(goal_handle, bucket_id)
+
         self._feedback(goal_handle, 'clean_trash: arm center', 0.90)
         self._send_arm_preset(goal_handle, ArmPreset.Goal.ARM_CENTER)
         self._set_gripper(goal_handle, 0.0, duration_ms, 'close gripper idle')
+        return bucket_id, bucket_level
+
+    def _increment_bucket_fill(self, goal_handle, bucket_id):
+        bucket_id = bucket_id if bucket_id in (1, 2) else 1
+        level = min(100, int(self._bucket_fill_percent.get(bucket_id, 0)) + 10)
+        self._bucket_fill_percent[bucket_id] = level
+        self._feedback(
+            goal_handle,
+            f'bucket_fill: bucket_id={bucket_id} level={level}',
+            0.89,
+        )
+        return level
+
+    def _reset_bucket_fill(self, goal_handle, bucket_id, progress=0.99):
+        bucket_id = bucket_id if bucket_id in (1, 2) else 1
+        self._bucket_fill_percent[bucket_id] = 0
+        self._feedback(
+            goal_handle,
+            f'bucket_fill: bucket_id={bucket_id} level=0 dumped',
+            progress,
+        )
+
+    def _maybe_auto_dump_full_bucket(self, goal_handle, bucket_id, bucket_level):
+        if bucket_level < 100:
+            return True, 'bucket is not full'
+
+        self._load_dump_bucket_poses()
+        if bucket_id not in self._dump_bucket_poses:
+            self._feedback(
+                goal_handle,
+                f'bucket_fill: bucket_id={bucket_id} level=100 no_dump_pose',
+                0.90,
+            )
+            return True, f'bucket {bucket_id} full but dump pose is not set'
+
+        self._feedback(
+            goal_handle,
+            f'bucket_fill: bucket_id={bucket_id} level=100 auto_dump_start',
+            0.90,
+        )
+        success, message = self._dump_single_bucket(
+            goal_handle,
+            bucket_id,
+            base_progress=0.90,
+            span=0.09,
+        )
+        if not success:
+            return False, message
+
+        self._reset_bucket_fill(goal_handle, bucket_id)
+        self._send_arm_preset(goal_handle, ArmPreset.Goal.ARM_CENTER)
+        return True, message
 
     def _run_dump_trash_tree(self, goal_handle, goal):
         self._load_dump_bucket_poses()
@@ -633,6 +695,11 @@ class RobotTaskServer(Node):
             )
             if not success:
                 return False, message
+            self._reset_bucket_fill(
+                goal_handle,
+                bucket_id,
+                progress=(index + 1) / max(1, len(bucket_ids)),
+            )
         if len(bucket_ids) == 1:
             return True, f'dump bucket {bucket_ids[0]} completed'
         return True, 'dump buckets 1 and 2 completed'
@@ -871,8 +938,15 @@ class RobotTaskServer(Node):
                 f'clean_region: grasping {target.class_name}',
                 0.45,
             )
-            self._grasp_target(goal_handle, target)
+            bucket_id, bucket_level = self._grasp_target(goal_handle, target)
             picked += 1
+            success, message = self._maybe_auto_dump_full_bucket(
+                goal_handle,
+                bucket_id,
+                bucket_level,
+            )
+            if not success:
+                raise RuntimeError(message)
 
             if self._is_canceling(goal_handle):
                 return None

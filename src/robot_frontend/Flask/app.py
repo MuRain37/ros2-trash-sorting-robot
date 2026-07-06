@@ -194,6 +194,10 @@ def submit_dump_bucket(bucket_id):
 
     result = ROS_BRIDGE.dump_trash(bucket_id)
     success = bool(result.get("success"))
+    if success:
+        for item in required:
+            ROS_BRIDGE.reset_bucket_fill_level(item)
+        result["bins"] = RuntimeData.bin_levels()
     description = "执行卸载桶 1 和 2" if bucket_id == 0 else f"执行卸载桶 {bucket_id}"
     add_log(
         "卸载垃圾桶",
@@ -234,10 +238,7 @@ class RuntimeData:
 
     @staticmethod
     def bin_levels():
-        elapsed_minutes = max(0, int((datetime.now() - START_TIME).total_seconds() // 60))
-        left = min(100, 18 + elapsed_minutes // 3)
-        right = min(100, 11 + elapsed_minutes // 4)
-        return {"left": left, "right": right}
+        return ROS_BRIDGE.get_bucket_fill_levels()
 
     @staticmethod
     def robot_status():
@@ -352,7 +353,12 @@ def control_robot():
     if command_type in ("grasp_start", "grasp_stop"):
         action = "start" if command_type == "grasp_start" else "stop"
         result = ROS_BRIDGE.call_grasp_service(action)
-        return jsonify({"success": result.get("success", False), "message": result.get("message", ""), "command_type": command_type})
+        return jsonify({
+            "success": result.get("success", False),
+            "message": result.get("message", ""),
+            "command_type": command_type,
+            "status": RuntimeData.robot_status(),
+        })
 
     label = labels[command_type]
     add_log(

@@ -367,6 +367,7 @@ class FlaskRosNode(Node):
     def send_robot_task_goal(self, task_type, **kwargs):
         if RobotTask is None or self.robot_task_client is None:
             raise RuntimeError(f"RobotTask 接口未加载: {ROBOT_TASK_IMPORT_ERROR}")
+        feedback_callback = kwargs.pop("feedback_callback", None)
         goal = RobotTask.Goal()
         goal.task_type = int(task_type)
         goal.command = str(kwargs.get("command", ""))
@@ -381,7 +382,10 @@ class FlaskRosNode(Node):
         goal.frame_id = kwargs.get("frame_id") or self.map_frame
         if kwargs.get("path") is not None:
             goal.path = kwargs["path"]
-        return self.robot_task_client.send_goal_async(goal)
+        return self.robot_task_client.send_goal_async(
+            goal,
+            feedback_callback=feedback_callback,
+        )
 
 
 class RosBridge:
@@ -436,6 +440,7 @@ class RosBridge:
             "message": "未发送行为树任务",
             "updated_at": _now_iso(),
         }
+        self.bucket_fill_levels = {1: 0, 2: 0}
         self.errors = {}
         self.startup_static_map_yaml = None
         self.load_static_map(remember_startup=True)
@@ -1816,6 +1821,18 @@ class RosBridge:
                     "updated_at": _now_iso(),
                 }
 
+        def on_feedback(feedback_msg):
+            feedback = feedback_msg.feedback
+            message = str(feedback.state)
+            self._handle_bucket_fill_feedback(message)
+            with self.lock:
+                self.robot_task_status = {
+                    "state": "running",
+                    "message": message,
+                    "progress": float(feedback.progress),
+                    "updated_at": _now_iso(),
+                }
+
         def on_task_result(done):
             try:
                 wrapped = done.result()
@@ -1873,7 +1890,11 @@ class RosBridge:
                 update_status("error", str(exc))
                 response_event.set()
 
-        future = self.node.send_robot_task_goal(task_type, **kwargs)
+        future = self.node.send_robot_task_goal(
+            task_type,
+            feedback_callback=on_feedback,
+            **kwargs,
+        )
         future.add_done_callback(on_goal_response)
 
         timeout = (
@@ -2027,7 +2048,59 @@ class RosBridge:
             command="dump_trash",
         )
         result.setdefault("bucket_id", bucket_id)
+        if result.get("success"):
+            bucket_ids = (1, 2) if bucket_id == 0 else (bucket_id,)
+            for item in bucket_ids:
+                self.reset_bucket_fill_level(item)
         return result
+
+    @staticmethod
+    def _clamp_bucket_percent(value):
+        return int(max(0, min(100, round(float(value)))))
+
+    def get_bucket_fill_levels(self):
+        with self.lock:
+            left = self._clamp_bucket_percent(self.bucket_fill_levels.get(1, 0))
+            right = self._clamp_bucket_percent(self.bucket_fill_levels.get(2, 0))
+        return {
+            "left": left,
+            "right": right,
+            "bucket_1": left,
+            "bucket_2": right,
+        }
+
+    def reset_bucket_fill_level(self, bucket_id):
+        try:
+            bucket_id = int(bucket_id)
+        except (TypeError, ValueError):
+            return
+        if bucket_id not in (1, 2):
+            return
+        with self.lock:
+            self.bucket_fill_levels[bucket_id] = 0
+
+    def _handle_bucket_fill_feedback(self, message):
+        text = str(message or "")
+        if not text.startswith("bucket_fill:"):
+            return
+
+        values = {}
+        for token in text.replace(":", " ").split():
+            if "=" not in token:
+                continue
+            key, value = token.split("=", 1)
+            values[key.strip()] = value.strip()
+
+        try:
+            bucket_id = int(values.get("bucket_id", 0))
+            level = self._clamp_bucket_percent(values["level"])
+        except (KeyError, TypeError, ValueError):
+            return
+
+        if bucket_id not in (1, 2):
+            return
+        with self.lock:
+            self.bucket_fill_levels[bucket_id] = level
 
     def _handle_robot_task_result(self, done):
         try:

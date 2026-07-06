@@ -275,6 +275,9 @@
             }
             graspRunning = !graspRunning;
             updateGraspButton();
+            if (data.status) {
+                renderStatus(data.status);
+            }
             showToast(data.message || (graspRunning ? '视觉抓取已启动' : '视觉抓取已停止'), 'success');
         } catch (error) {
             showToast(error.message || '操作失败', 'error');
@@ -282,11 +285,11 @@
     }
 
     function renderStatus(status) {
-        const battery = clampPercent(status.battery_level);
-        const leftBin = clampPercent(status.bins?.left);
-        const rightBin = clampPercent(status.bins?.right);
+        const battery = clampPercent(status.battery_level ?? document.getElementById('battery-level').textContent);
+        const leftBin = clampPercent(status.bins?.left ?? document.getElementById('left-bin').textContent);
+        const rightBin = clampPercent(status.bins?.right ?? document.getElementById('right-bin').textContent);
 
-        document.getElementById('robot-status').textContent = status.status || '待机';
+        document.getElementById('robot-status').textContent = status.status || document.getElementById('robot-status').textContent || '待机';
         document.getElementById('battery-level').textContent = battery;
         document.getElementById('battery-fill').style.width = `${battery}%`;
         document.getElementById('left-bin').textContent = leftBin;
@@ -337,6 +340,11 @@
             if (!response.ok || !data.success) {
                 throw new Error(data.error || data.message || '卸载失败');
             }
+            if (data.bins) {
+                renderStatus({ bins: data.bins });
+            } else {
+                refreshStatus();
+            }
             showToast(data.message || `卸载桶${bucketId}完成`, 'success');
         } catch (error) {
             showToast(error.message || `卸载桶${bucketId}失败`, 'error');
@@ -344,6 +352,6 @@
     }
 
     refreshStatus();
-    setInterval(refreshStatus, 15000);
+    setInterval(refreshStatus, 5000);
 </script>
 {% endblock %}
