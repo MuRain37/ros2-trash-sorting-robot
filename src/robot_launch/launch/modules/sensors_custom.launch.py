@@ -9,6 +9,13 @@ from launch_ros.actions import LifecycleNode, Node
 from launch_ros.substitutions import FindPackageShare
 
 
+YDLIDAR_POINT_COUNT_FILTER_PREFIX = (
+    'bash -c \'"$@" 2>&1 | grep -Ev '
+    '"Real point count [0-9]+ > fixed point count [0-9]+"; '
+    'exit ${PIPESTATUS[0]}\' --'
+)
+
+
 def generate_launch_description():
     """生成真实传感器启动项。"""
     ydlidar_pkg = get_package_share_directory('ydlidar_ros2_driver')
@@ -87,6 +94,7 @@ def generate_launch_description():
         name='ydlidar_ros2_driver_node',
         output='screen',
         emulate_tty=True,
+        prefix=YDLIDAR_POINT_COUNT_FILTER_PREFIX,
         parameters=[LaunchConfiguration('ydlidar_params_file')],
         namespace='/',
     )

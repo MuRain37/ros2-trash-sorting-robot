@@ -9,7 +9,7 @@ import time
 
 import rclpy
 from action_msgs.msg import GoalStatus
-from geometry_msgs.msg import PoseStamped, Twist
+from geometry_msgs.msg import PoseStamped, PoseWithCovarianceStamped, Twist
 from nav_msgs.msg import Odometry
 from nav2_msgs.action import NavigateThroughPoses, NavigateToPose
 from rclpy.action import ActionClient, ActionServer
@@ -26,7 +26,7 @@ from robot_interfaces.srv import (
     SetCameraTfPreset,
     SetGripper,
 )
-from sensor_msgs.msg import Imu
+from sensor_msgs.msg import Imu, LaserScan
 
 
 @dataclass
@@ -80,6 +80,24 @@ class DumpBucketDetection:
     message: str
 
 
+@dataclass
+class MapPose:
+    """机器人当前 map 位姿。"""
+
+    x: float
+    y: float
+    yaw: float
+
+
+@dataclass
+class ScanCameraObstacle:
+    """scan_camera 最近看到的前方近距离障碍。"""
+
+    range_m: float
+    bearing_rad: float
+    seen_at: float
+
+
 class RobotTaskServer(Node):
     """统一接收用户任务，并调度导航、视觉、机械臂和底层硬件能力。"""
 
@@ -103,7 +121,9 @@ class RobotTaskServer(Node):
         self.declare_parameter('cmd_vel_topic', '/cmd_vel')
         self.declare_parameter('map_frame', 'map')
         self.declare_parameter('odom_topic', '/odom')
+        self.declare_parameter('amcl_pose_topic', '/amcl_pose')
         self.declare_parameter('imu_topic', '/imu/data')
+        self.declare_parameter('scan_camera_topic', '/scan_camera')
         self.declare_parameter('service_timeout_sec', 3.0)
         self.declare_parameter('action_timeout_sec', 45.0)
         self.declare_parameter('navigation_timeout_sec', 300.0)
@@ -120,7 +140,8 @@ class RobotTaskServer(Node):
         self.declare_parameter('gripper_duration_ms', 500.0)
         self.declare_parameter('gripper_wait_sec', 1.0)
         self.declare_parameter('require_dump_bucket_detect', True)
-        self.declare_parameter('dump_approach_distance_m', 0.45)
+        self.declare_parameter('dump_visual_align_required', False)
+        self.declare_parameter('dump_approach_distance_m', 1.15)
         self.declare_parameter('dump_align_max_attempts', 10)
         self.declare_parameter('dump_align_step_m', 0.03)
         self.declare_parameter('dump_align_linear_speed', 0.05)
@@ -131,6 +152,14 @@ class RobotTaskServer(Node):
         self.declare_parameter('dump_center_step_sec', 0.18)
         self.declare_parameter('dump_rotate_tolerance_rad', 0.04)
         self.declare_parameter('dump_rotate_timeout_sec', 12.0)
+        self.declare_parameter('dump_scan_camera_bucket_check_enabled', True)
+        self.declare_parameter('dump_scan_camera_obstacle_min_range_m', 0.05)
+        self.declare_parameter('dump_scan_camera_obstacle_max_range_m', 1.4)
+        self.declare_parameter('dump_scan_camera_front_angle_rad', 0.8)
+        self.declare_parameter('dump_scan_camera_obstacle_stale_sec', 0.6)
+        self.declare_parameter('dump_scan_camera_check_interval_sec', 0.5)
+        self.declare_parameter('dump_scan_camera_bucket_map_tolerance_m', 0.75)
+        self.declare_parameter('dump_camera_horizontal_fov_rad', 1.21)
         self.declare_parameter(
             'dump_pose_store_path',
             '/home/xjw/ros2_robot/src/robot_behavior_tree/config/dump_bucket_poses.json',
@@ -148,6 +177,8 @@ class RobotTaskServer(Node):
         self._clean_regions = {}
         self._latest_odom_yaw = None
         self._latest_imu_yaw = None
+        self._latest_map_pose = None
+        self._latest_scan_camera_obstacle = None
         self._load_dump_bucket_poses()
         self._load_clean_regions()
         self._odom_sub = self.create_subscription(
@@ -157,10 +188,24 @@ class RobotTaskServer(Node):
             10,
             callback_group=callback_group,
         )
+        self._amcl_pose_sub = self.create_subscription(
+            PoseWithCovarianceStamped,
+            self.get_parameter('amcl_pose_topic').value,
+            self._handle_amcl_pose,
+            10,
+            callback_group=callback_group,
+        )
         self._imu_sub = self.create_subscription(
             Imu,
             self.get_parameter('imu_topic').value,
             self._handle_imu,
+            10,
+            callback_group=callback_group,
+        )
+        self._scan_camera_sub = self.create_subscription(
+            LaserScan,
+            self.get_parameter('scan_camera_topic').value,
+            self._handle_scan_camera,
             10,
             callback_group=callback_group,
         )
@@ -244,6 +289,55 @@ class RobotTaskServer(Node):
 
     def _handle_imu(self, msg):
         self._latest_imu_yaw = self._yaw_from_quaternion(msg.orientation)
+
+    def _handle_amcl_pose(self, msg):
+        pose = msg.pose.pose
+        self._latest_map_pose = MapPose(
+            x=float(pose.position.x),
+            y=float(pose.position.y),
+            yaw=self._yaw_from_quaternion(pose.orientation),
+        )
+
+    def _handle_scan_camera(self, msg):
+        if not bool(
+            self.get_parameter('dump_scan_camera_bucket_check_enabled').value
+        ):
+            return
+
+        min_range = max(
+            0.0,
+            float(self.get_parameter('dump_scan_camera_obstacle_min_range_m').value),
+        )
+        max_range = max(
+            min_range,
+            float(self.get_parameter('dump_scan_camera_obstacle_max_range_m').value),
+        )
+        front_angle = abs(
+            float(self.get_parameter('dump_scan_camera_front_angle_rad').value)
+        )
+
+        best_range = None
+        best_angle = None
+        for index, range_m in enumerate(msg.ranges):
+            if not math.isfinite(range_m):
+                continue
+            range_m = float(range_m)
+            if range_m < min_range or range_m > max_range:
+                continue
+            angle = float(msg.angle_min + index * msg.angle_increment)
+            if abs(angle) > front_angle:
+                continue
+            if best_range is None or range_m < best_range:
+                best_range = range_m
+                best_angle = angle
+
+        if best_range is None:
+            return
+        self._latest_scan_camera_obstacle = ScanCameraObstacle(
+            range_m=best_range,
+            bearing_rad=best_angle,
+            seen_at=time.monotonic(),
+        )
 
     def _handle_goal(self, goal_request):
         task_type = int(goal_request.task_type)
@@ -501,6 +595,7 @@ class RobotTaskServer(Node):
         self._set_gripper(goal_handle, 0.0, duration_ms, 'close gripper idle')
 
     def _run_dump_trash_tree(self, goal_handle, goal):
+        self._load_dump_bucket_poses()
         raw_bucket_id = int(goal.bucket_id)
         bucket_ids = [raw_bucket_id] if raw_bucket_id in (1, 2) else [1, 2]
         for index, bucket_id in enumerate(bucket_ids):
@@ -523,6 +618,13 @@ class RobotTaskServer(Node):
 
         self._feedback(
             goal_handle,
+            f'dump_trash: arm mapping pose for bucket {bucket_id}',
+            base_progress + span * 0.05,
+        )
+        self._send_arm_preset(goal_handle, ArmPreset.Goal.ARM_MAPPING)
+
+        self._feedback(
+            goal_handle,
             f'dump_trash: navigate to bucket {bucket_id} front',
             base_progress + span * 0.10,
         )
@@ -537,7 +639,10 @@ class RobotTaskServer(Node):
                 base_progress + span * 0.45,
             )
             if not self._center_dump_bucket(goal_handle):
-                return False, f'dump bucket {bucket_id} visual center align failed'
+                message = f'dump bucket {bucket_id} visual center align failed'
+                if bool(self.get_parameter('dump_visual_align_required').value):
+                    return False, message
+                self.get_logger().warning(f'{message}; continue to dump')
 
             self._feedback(
                 goal_handle,
@@ -545,7 +650,10 @@ class RobotTaskServer(Node):
                 base_progress + span * 0.55,
             )
             if not self._align_dump_bucket_depth(goal_handle):
-                return False, f'dump bucket {bucket_id} not detected after align'
+                message = f'dump bucket {bucket_id} not detected after align'
+                if bool(self.get_parameter('dump_visual_align_required').value):
+                    return False, message
+                self.get_logger().warning(f'{message}; continue to dump')
 
         self._feedback(
             goal_handle,
@@ -895,26 +1003,90 @@ class RobotTaskServer(Node):
         return True, f'navigate path completed: points={total}'
 
     def _navigate_to_dump_front(self, goal_handle, pose):
+        distance = max(
+            0.0,
+            float(self.get_parameter('dump_approach_distance_m').value),
+        )
+        nav_yaw = self._normalize_angle(pose.yaw + math.pi)
+        nav_x = pose.x + math.cos(pose.yaw) * distance
+        nav_y = pose.y + math.sin(pose.yaw) * distance
+
         nav_goal = NavigateToPose.Goal()
         nav_goal.pose = PoseStamped()
         nav_goal.pose.header.frame_id = pose.frame_id
         nav_goal.pose.header.stamp = self.get_clock().now().to_msg()
-        nav_goal.pose.pose.position.x = pose.x
-        nav_goal.pose.pose.position.y = pose.y
+        nav_goal.pose.pose.position.x = nav_x
+        nav_goal.pose.pose.position.y = nav_y
         nav_goal.pose.pose.position.z = 0.0
-        qz, qw = self._yaw_to_quaternion_z_w(pose.yaw)
+        qz, qw = self._yaw_to_quaternion_z_w(nav_yaw)
         nav_goal.pose.pose.orientation.z = qz
         nav_goal.pose.pose.orientation.w = qw
-
-        wrapped = self._send_action_goal_wrapped(
-            self._navigate_client,
-            nav_goal,
-            timeout_sec=self._navigation_timeout_sec(),
-            goal_handle=goal_handle,
-            label='navigate to dump front',
+        self.get_logger().info(
+            f'dump bucket {pose.bucket_id} nav front goal: '
+            f'({nav_x:.3f}, {nav_y:.3f}, yaw={nav_yaw:.3f}), '
+            f'bucket=({pose.x:.3f}, {pose.y:.3f}, bucket_yaw={pose.yaw:.3f}), '
+            f'offset={distance:.3f}'
         )
-        if wrapped is None:
-            return False, f'navigate to dump bucket {pose.bucket_id} front failed'
+
+        if self._is_canceling(goal_handle):
+            return False, f'navigate to dump bucket {pose.bucket_id} front canceled'
+        if not self._navigate_client.wait_for_server(
+            timeout_sec=float(self.get_parameter('service_timeout_sec').value)
+        ):
+            return False, 'navigate to dump front action server not available'
+
+        send_future = self._navigate_client.send_goal_async(nav_goal)
+        if not self._wait_future(
+            send_future,
+            float(self.get_parameter('service_timeout_sec').value),
+            goal_handle,
+        ):
+            return False, 'navigate to dump front goal response timed out'
+
+        action_goal_handle = send_future.result()
+        if action_goal_handle is None or not action_goal_handle.accepted:
+            return False, 'navigate to dump front goal rejected'
+
+        result_future = action_goal_handle.get_result_async()
+        timeout_sec = self._navigation_timeout_sec()
+        deadline = time.monotonic() + timeout_sec
+        check_interval = max(
+            0.1,
+            float(self.get_parameter('dump_scan_camera_check_interval_sec').value),
+        )
+        next_bucket_check = time.monotonic()
+
+        while rclpy.ok() and not result_future.done():
+            if self._is_canceling(goal_handle):
+                self._cancel_action_goal(action_goal_handle)
+                return False, f'navigate to dump bucket {pose.bucket_id} front canceled'
+            if time.monotonic() >= deadline:
+                self._cancel_action_goal(action_goal_handle)
+                return False, f'navigate to dump bucket {pose.bucket_id} front timed out'
+
+            if time.monotonic() >= next_bucket_check:
+                next_bucket_check = time.monotonic() + check_interval
+                accepted, reason = self._scan_camera_obstacle_matches_dump_bucket(
+                    goal_handle,
+                    pose,
+                )
+                if accepted:
+                    self.get_logger().warning(
+                        'scan_camera obstacle matches dump bucket; '
+                        f'cancel nav and continue to visual alignment: {reason}'
+                    )
+                    self._cancel_action_goal(action_goal_handle)
+                    self._publish_stop()
+                    return (
+                        True,
+                        f'dump bucket {pose.bucket_id} found by scan_camera obstacle',
+                    )
+                if reason:
+                    self.get_logger().debug(f'dump scan_camera check skipped: {reason}')
+
+            time.sleep(0.05)
+
+        wrapped = result_future.result()
         if wrapped.status != GoalStatus.STATUS_SUCCEEDED:
             return (
                 False,
@@ -922,6 +1094,87 @@ class RobotTaskServer(Node):
                 f'status={wrapped.status}',
             )
         return True, f'navigated to dump bucket {pose.bucket_id} front'
+
+    def _recent_scan_camera_obstacle(self):
+        obstacle = self._latest_scan_camera_obstacle
+        if obstacle is None:
+            return None
+        stale_sec = max(
+            0.0,
+            float(self.get_parameter('dump_scan_camera_obstacle_stale_sec').value),
+        )
+        if time.monotonic() - obstacle.seen_at > stale_sec:
+            return None
+        return obstacle
+
+    def _scan_camera_obstacle_matches_dump_bucket(self, goal_handle, pose):
+        if not bool(
+            self.get_parameter('dump_scan_camera_bucket_check_enabled').value
+        ):
+            return False, ''
+        if not bool(self.get_parameter('require_dump_bucket_detect').value):
+            return False, ''
+        if self._is_canceling(goal_handle):
+            return False, 'task canceling'
+
+        obstacle = self._recent_scan_camera_obstacle()
+        if obstacle is None:
+            return False, ''
+
+        detection = self._detect_dump_bucket(goal_handle)
+        if detection is None:
+            return False, 'dump bucket color detection unavailable'
+        if not detection.detected:
+            return False, f'scan obstacle is not color bucket: {detection.message}'
+
+        accepted, reason = self._dump_detection_matches_pose(detection, pose)
+        if not accepted:
+            return False, reason
+        return (
+            True,
+            f'scan_range={obstacle.range_m:.3f}, '
+            f'scan_bearing={obstacle.bearing_rad:.3f}; {reason}',
+        )
+
+    def _dump_detection_matches_pose(self, detection, pose):
+        robot_pose = self._latest_map_pose
+        if robot_pose is None:
+            return False, 'map pose unavailable'
+        if not math.isfinite(detection.mean_depth_m) or detection.mean_depth_m <= 0.0:
+            return False, f'invalid depth={detection.mean_depth_m}'
+        if not math.isfinite(detection.offset_x_ratio):
+            return False, f'invalid offset={detection.offset_x_ratio}'
+
+        hfov = abs(float(self.get_parameter('dump_camera_horizontal_fov_rad').value))
+        if hfov <= 0.0:
+            return False, f'invalid camera hfov={hfov}'
+
+        bearing = math.atan(math.tan(hfov * 0.5) * detection.offset_x_ratio)
+        bucket_x = robot_pose.x + detection.mean_depth_m * math.cos(
+            robot_pose.yaw + bearing
+        )
+        bucket_y = robot_pose.y + detection.mean_depth_m * math.sin(
+            robot_pose.yaw + bearing
+        )
+        bucket_error = math.hypot(bucket_x - pose.x, bucket_y - pose.y)
+        bucket_tolerance = abs(
+            float(self.get_parameter('dump_scan_camera_bucket_map_tolerance_m').value)
+        )
+
+        if bucket_error <= bucket_tolerance:
+            return (
+                True,
+                f'est_bucket=({bucket_x:.3f}, {bucket_y:.3f}), '
+                f'set_bucket=({pose.x:.3f}, {pose.y:.3f}), '
+                f'bucket_error={bucket_error:.3f}',
+            )
+
+        return (
+            False,
+            f'est_bucket=({bucket_x:.3f}, {bucket_y:.3f}), '
+            f'set_bucket=({pose.x:.3f}, {pose.y:.3f}), '
+            f'bucket_error={bucket_error:.3f}>{bucket_tolerance:.3f}',
+        )
 
     def _detect_dump_bucket(self, goal_handle):
         request = DetectDumpBucket.Request()
@@ -953,22 +1206,57 @@ class RobotTaskServer(Node):
         if speed <= 0.0:
             return False
 
-        for _ in range(attempts):
+        for attempt in range(attempts):
             if self._is_canceling(goal_handle):
                 return False
             detection = self._detect_dump_bucket(goal_handle)
             if detection is None or not detection.detected:
+                if detection is None:
+                    self.get_logger().warning(
+                        'dump center detect '
+                        f'{attempt + 1}/{attempts}: no response'
+                    )
+                else:
+                    self.get_logger().warning(
+                        'dump center detect '
+                        f'{attempt + 1}/{attempts}: not detected, '
+                        f'mask_pixels={detection.mask_pixels}, '
+                        f'mean_depth_m={detection.mean_depth_m:.3f}, '
+                        f'offset_x_ratio={detection.offset_x_ratio:.4f}, '
+                        f'message={detection.message}'
+                    )
                 self._publish_stop()
                 time.sleep(0.15)
                 continue
             if not math.isfinite(detection.offset_x_ratio):
+                self.get_logger().warning(
+                    'dump center detect '
+                    f'{attempt + 1}/{attempts}: invalid offset, '
+                    f'mask_pixels={detection.mask_pixels}, '
+                    f'mean_depth_m={detection.mean_depth_m:.3f}, '
+                    f'offset_x_ratio={detection.offset_x_ratio}, '
+                    f'message={detection.message}'
+                )
                 return False
+            self.get_logger().info(
+                'dump center detect '
+                f'{attempt + 1}/{attempts}: detected, '
+                f'mask_pixels={detection.mask_pixels}, '
+                f'mean_depth_m={detection.mean_depth_m:.3f}, '
+                f'offset_x_ratio={detection.offset_x_ratio:.4f}, '
+                f'tolerance={tolerance:.4f}, '
+                f'message={detection.message}'
+            )
             if abs(detection.offset_x_ratio) <= tolerance:
                 return True
 
             twist = Twist()
             # 图像中心在左侧时 offset_x 为负，向左旋转；反之向右旋转。
             twist.angular.z = -speed if detection.offset_x_ratio > 0.0 else speed
+            self.get_logger().info(
+                'dump center rotate step: '
+                f'angular_z={twist.angular.z:.3f}, step_sec={step_sec:.3f}'
+            )
             self._publish_twist_for(goal_handle, twist, step_sec)
             time.sleep(0.12)
         return False
@@ -980,7 +1268,31 @@ class RobotTaskServer(Node):
                 return False
             detection = self._detect_dump_bucket(goal_handle)
             if detection is not None and detection.detected and detection.within_depth:
+                self.get_logger().info(
+                    'dump depth align detect '
+                    f'{attempt + 1}/{attempts}: within depth, '
+                    f'mask_pixels={detection.mask_pixels}, '
+                    f'mean_depth_m={detection.mean_depth_m:.3f}, '
+                    f'offset_x_ratio={detection.offset_x_ratio:.4f}, '
+                    f'message={detection.message}'
+                )
                 return True
+            if detection is None:
+                self.get_logger().warning(
+                    'dump depth align detect '
+                    f'{attempt + 1}/{attempts}: no response'
+                )
+            else:
+                self.get_logger().warning(
+                    'dump depth align detect '
+                    f'{attempt + 1}/{attempts}: not within depth, '
+                    f'detected={detection.detected}, '
+                    f'within_depth={detection.within_depth}, '
+                    f'mask_pixels={detection.mask_pixels}, '
+                    f'mean_depth_m={detection.mean_depth_m:.3f}, '
+                    f'offset_x_ratio={detection.offset_x_ratio:.4f}, '
+                    f'message={detection.message}'
+                )
             if attempt < attempts - 1:
                 self._drive_forward_step(
                     goal_handle,
@@ -1048,16 +1360,23 @@ class RobotTaskServer(Node):
             self.get_logger().warning(f'load dump bucket poses failed: {exc}')
             return
         poses = raw.get('dump_bucket_poses', raw)
+        loaded = {}
         for key, item in poses.items():
             try:
                 bucket_id = int(item.get('bucket_id', key))
                 if bucket_id not in (1, 2):
                     continue
-                self._dump_bucket_poses[bucket_id] = DumpBucketPose(
+                yaw = float(
+                    item.get(
+                        'bucket_theta',
+                        item.get('yaw', item.get('theta', 0.0)),
+                    )
+                )
+                loaded[bucket_id] = DumpBucketPose(
                     bucket_id=bucket_id,
-                    x=float(item['x']),
-                    y=float(item['y']),
-                    yaw=float(item.get('yaw', item.get('theta', 0.0))),
+                    x=float(item.get('bucket_x', item['x'])),
+                    y=float(item.get('bucket_y', item['y'])),
+                    yaw=yaw,
                     frame_id=str(
                         item.get('frame_id')
                         or self.get_parameter('map_frame').value
@@ -1065,6 +1384,7 @@ class RobotTaskServer(Node):
                 )
             except (KeyError, TypeError, ValueError):
                 continue
+        self._dump_bucket_poses = loaded
 
     def _save_dump_bucket_poses(self):
         path = Path(str(self.get_parameter('dump_pose_store_path').value))
@@ -1076,6 +1396,7 @@ class RobotTaskServer(Node):
                         'bucket_id': pose.bucket_id,
                         'x': pose.x,
                         'y': pose.y,
+                        'theta': pose.yaw,
                         'yaw': pose.yaw,
                         'frame_id': pose.frame_id,
                     }

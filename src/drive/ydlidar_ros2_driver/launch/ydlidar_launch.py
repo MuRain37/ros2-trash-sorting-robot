@@ -22,6 +22,13 @@ from launch.substitutions import LaunchConfiguration
 import os
 
 
+YDLIDAR_POINT_COUNT_FILTER_PREFIX = (
+    'bash -c \'"$@" 2>&1 | grep -Ev '
+    '"Real point count [0-9]+ > fixed point count [0-9]+"; '
+    'exit ${PIPESTATUS[0]}\' --'
+)
+
+
 def generate_launch_description():
     share_dir = get_package_share_directory('ydlidar_ros2_driver')
     parameter_file = LaunchConfiguration('params_file')
@@ -35,6 +42,7 @@ def generate_launch_description():
                                 name='ydlidar_ros2_driver_node',
                                 output='screen',
                                 emulate_tty=True,
+                                prefix=YDLIDAR_POINT_COUNT_FILTER_PREFIX,
                                 parameters=[parameter_file],
                                 namespace='/',
                                 )
