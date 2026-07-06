@@ -27,6 +27,7 @@ from robot_interfaces.srv import (
     SetGripper,
 )
 from sensor_msgs.msg import Imu, LaserScan
+from std_srvs.srv import Trigger
 
 
 @dataclass
@@ -107,7 +108,10 @@ class RobotTaskServer(Node):
         self.declare_parameter('action_name', '/robot_task')
         self.declare_parameter('detect_grasp_service', 'vision_grasp/detect')
         self.declare_parameter('detect_dump_service', 'detect_dump_bucket')
-        self.declare_parameter('dump_trash_service', 'dump_trash')
+        self.declare_parameter('dump_pick_bucket_service', 'dump_pick_bucket')
+        self.declare_parameter('dump_pour_bucket_service', 'dump_pour_bucket')
+        self.declare_parameter('dump_place_bucket_service', 'dump_place_bucket')
+        self.declare_parameter('dump_home_service', 'dump_home')
         self.declare_parameter('coverage_path_service', 'generate_coverage_path')
         self.declare_parameter('arm_target_action', '/arm_target')
         self.declare_parameter('arm_preset_action', '/arm_preset')
@@ -126,30 +130,37 @@ class RobotTaskServer(Node):
         self.declare_parameter('scan_camera_topic', '/scan_camera')
         self.declare_parameter('service_timeout_sec', 3.0)
         self.declare_parameter('action_timeout_sec', 45.0)
-        self.declare_parameter('navigation_timeout_sec', 300.0)
-        self.declare_parameter('dump_timeout_sec', 90.0)
+        self.declare_parameter('navigation_timeout_sec', 90.0)
+        self.declare_parameter('dump_timeout_sec', 180.0)
+        self.declare_parameter('dump_backup_distance_m', 0.30)
+        self.declare_parameter('dump_backup_linear_speed', 0.05)
+        self.declare_parameter('dump_forward_distance_m', 0.15)
+        self.declare_parameter('dump_forward_linear_speed', 0.05)
         # <= 0 means keep scanning/grasping until TASK_STOP or action cancel.
         self.declare_parameter('clean_max_objects', 0)
         self.declare_parameter('detect_retry_count', 3)
         self.declare_parameter('approach_max_attempts', 3)
-        self.declare_parameter('approach_y_threshold_cm', 30.0)
-        self.declare_parameter('approach_target_y_cm', 24.0)
+        self.declare_parameter('approach_y_threshold_cm', 28.0)
+        self.declare_parameter('approach_target_y_cm', 20.0)
         self.declare_parameter('approach_max_step_m', 0.08)
-        self.declare_parameter('approach_linear_speed', 0.08)
+        self.declare_parameter('approach_linear_speed', 0.12)
         self.declare_parameter('coverage_detect_interval_sec', 0.3)
+        self.declare_parameter('arm_target_duration_sec', 2.0)
         self.declare_parameter('gripper_duration_ms', 500.0)
         self.declare_parameter('gripper_wait_sec', 1.0)
         self.declare_parameter('require_dump_bucket_detect', True)
         self.declare_parameter('dump_visual_align_required', False)
-        self.declare_parameter('dump_approach_distance_m', 1.15)
-        self.declare_parameter('dump_align_max_attempts', 10)
-        self.declare_parameter('dump_align_step_m', 0.03)
+        self.declare_parameter('dump_approach_distance_m', 0.95)
+        self.declare_parameter('dump_align_max_attempts', 8)
+        self.declare_parameter('dump_align_target_depth_m', 0.35)
+        self.declare_parameter('dump_align_depth_tolerance_m', 0.04)
+        self.declare_parameter('dump_align_step_m', 0.05)
         self.declare_parameter('dump_align_linear_speed', 0.05)
-        self.declare_parameter('dump_rotate_angular_speed', 0.5)
+        self.declare_parameter('dump_rotate_angular_speed', 0.8)
         self.declare_parameter('dump_center_tolerance_ratio', 0.04)
-        self.declare_parameter('dump_center_max_attempts', 12)
-        self.declare_parameter('dump_center_angular_speed', 0.18)
-        self.declare_parameter('dump_center_step_sec', 0.18)
+        self.declare_parameter('dump_center_max_attempts',8)
+        self.declare_parameter('dump_center_angular_speed', 0.50)
+        self.declare_parameter('dump_center_step_sec', 0.20)
         self.declare_parameter('dump_rotate_tolerance_rad', 0.04)
         self.declare_parameter('dump_rotate_timeout_sec', 12.0)
         self.declare_parameter('dump_scan_camera_bucket_check_enabled', True)
@@ -220,9 +231,24 @@ class RobotTaskServer(Node):
             self.get_parameter('detect_dump_service').value,
             callback_group=callback_group,
         )
-        self._dump_trash_client = self.create_client(
+        self._dump_pick_bucket_client = self.create_client(
             DumpTrash,
-            self.get_parameter('dump_trash_service').value,
+            self.get_parameter('dump_pick_bucket_service').value,
+            callback_group=callback_group,
+        )
+        self._dump_pour_bucket_client = self.create_client(
+            DumpTrash,
+            self.get_parameter('dump_pour_bucket_service').value,
+            callback_group=callback_group,
+        )
+        self._dump_place_bucket_client = self.create_client(
+            DumpTrash,
+            self.get_parameter('dump_place_bucket_service').value,
+            callback_group=callback_group,
+        )
+        self._dump_home_client = self.create_client(
+            Trigger,
+            self.get_parameter('dump_home_service').value,
             callback_group=callback_group,
         )
         self._coverage_path_client = self.create_client(
@@ -655,6 +681,17 @@ class RobotTaskServer(Node):
                     return False, message
                 self.get_logger().warning(f'{message}; continue to dump')
 
+            self._feedback(
+                goal_handle,
+                f'dump_trash: final center bucket {bucket_id}',
+                base_progress + span * 0.60,
+            )
+            if not self._center_dump_bucket(goal_handle):
+                message = f'dump bucket {bucket_id} visual center align failed'
+                if bool(self.get_parameter('dump_visual_align_required').value):
+                    return False, message
+                self.get_logger().warning(f'{message}; continue to dump')
+
         self._feedback(
             goal_handle,
             f'dump_trash: rotate before dumping bucket {bucket_id}',
@@ -664,21 +701,78 @@ class RobotTaskServer(Node):
 
         self._feedback(
             goal_handle,
-            f'dump_trash: bucket {bucket_id}',
-            base_progress + span * 0.82,
+            f'dump_trash: pick onboard bucket {bucket_id}',
+            base_progress + span * 0.76,
         )
-        request = DumpTrash.Request()
-        request.bucket_id = bucket_id
-        response = self._call_service(
-            self._dump_trash_client,
-            request,
-            timeout_sec=float(self.get_parameter('dump_timeout_sec').value),
-            goal_handle=goal_handle,
-            label='dump trash',
+        success, message = self._call_dump_bucket_service(
+            goal_handle,
+            self._dump_pick_bucket_client,
+            bucket_id,
+            f'pick onboard bucket {bucket_id}',
         )
-        if response is None:
-            return False, 'dump trash service unavailable or timed out'
-        return bool(response.success), response.message
+        if not success:
+            return False, message
+
+        self._feedback(
+            goal_handle,
+            f'dump_trash: backup bucket {bucket_id}',
+            base_progress + span * 0.80,
+        )
+        self._drive_backward_step(
+            goal_handle,
+            float(self.get_parameter('dump_backup_distance_m').value),
+            float(self.get_parameter('dump_backup_linear_speed').value),
+        )
+
+        self._feedback(
+            goal_handle,
+            f'dump_trash: pour bucket {bucket_id}',
+            base_progress + span * 0.84,
+        )
+        success, message = self._call_dump_bucket_service(
+            goal_handle,
+            self._dump_pour_bucket_client,
+            bucket_id,
+            f'pour onboard bucket {bucket_id}',
+        )
+        if not success:
+            return False, message
+
+        self._feedback(
+            goal_handle,
+            f'dump_trash: place bucket {bucket_id}',
+            base_progress + span * 0.88,
+        )
+        success, message = self._call_dump_bucket_service(
+            goal_handle,
+            self._dump_place_bucket_client,
+            bucket_id,
+            f'place onboard bucket {bucket_id}',
+        )
+        if not success:
+            return False, message
+
+        self._feedback(
+            goal_handle,
+            f'dump_trash: move forward after bucket {bucket_id}',
+            base_progress + span * 0.92,
+        )
+        self._drive_forward_step(
+            goal_handle,
+            float(self.get_parameter('dump_forward_distance_m').value),
+            float(self.get_parameter('dump_forward_linear_speed').value),
+        )
+
+        self._feedback(
+            goal_handle,
+            'dump_trash: home dump mechanism',
+            base_progress + span * 0.96,
+        )
+        return self._call_dump_trigger(
+            goal_handle,
+            self._dump_home_client,
+            'home dump mechanism',
+        )
 
     def _run_set_dump_pose(self, goal_handle, goal):
         bucket_id = int(goal.bucket_id)
@@ -1123,9 +1217,9 @@ class RobotTaskServer(Node):
 
         detection = self._detect_dump_bucket(goal_handle)
         if detection is None:
-            return False, 'dump bucket color detection unavailable'
+            return False, 'dump bucket contour detection unavailable'
         if not detection.detected:
-            return False, f'scan obstacle is not color bucket: {detection.message}'
+            return False, f'scan obstacle has no usable contour: {detection.message}'
 
         accepted, reason = self._dump_detection_matches_pose(detection, pose)
         if not accepted:
@@ -1263,16 +1357,30 @@ class RobotTaskServer(Node):
 
     def _align_dump_bucket_depth(self, goal_handle):
         attempts = max(1, int(self.get_parameter('dump_align_max_attempts').value))
+        target_depth = max(
+            0.0,
+            float(self.get_parameter('dump_align_target_depth_m').value),
+        )
+        tolerance = abs(
+            float(self.get_parameter('dump_align_depth_tolerance_m').value)
+        )
         for attempt in range(attempts):
             if self._is_canceling(goal_handle):
                 return False
             detection = self._detect_dump_bucket(goal_handle)
-            if detection is not None and detection.detected and detection.within_depth:
+            if (
+                detection is not None
+                and detection.detected
+                and math.isfinite(detection.mean_depth_m)
+                and detection.mean_depth_m > 0.0
+                and detection.mean_depth_m <= target_depth + tolerance
+            ):
                 self.get_logger().info(
                     'dump depth align detect '
-                    f'{attempt + 1}/{attempts}: within depth, '
+                    f'{attempt + 1}/{attempts}: reached target depth, '
                     f'mask_pixels={detection.mask_pixels}, '
                     f'mean_depth_m={detection.mean_depth_m:.3f}, '
+                    f'target_depth_m={target_depth:.3f}, '
                     f'offset_x_ratio={detection.offset_x_ratio:.4f}, '
                     f'message={detection.message}'
                 )
@@ -1290,13 +1398,18 @@ class RobotTaskServer(Node):
                     f'within_depth={detection.within_depth}, '
                     f'mask_pixels={detection.mask_pixels}, '
                     f'mean_depth_m={detection.mean_depth_m:.3f}, '
+                    f'target_depth_m={target_depth:.3f}, '
                     f'offset_x_ratio={detection.offset_x_ratio:.4f}, '
                     f'message={detection.message}'
                 )
             if attempt < attempts - 1:
+                step_m = float(self.get_parameter('dump_align_step_m').value)
+                if detection is not None and math.isfinite(detection.mean_depth_m):
+                    remaining_m = detection.mean_depth_m - target_depth
+                    step_m = min(step_m, max(0.0, remaining_m))
                 self._drive_forward_step(
                     goal_handle,
-                    float(self.get_parameter('dump_align_step_m').value),
+                    step_m,
                     float(self.get_parameter('dump_align_linear_speed').value),
                 )
         return False
@@ -1310,6 +1423,42 @@ class RobotTaskServer(Node):
         msg.linear.x = speed
         self._publish_twist_for(goal_handle, msg, distance_m / speed)
         time.sleep(0.15)
+
+    def _drive_backward_step(self, goal_handle, distance_m, speed):
+        speed = abs(float(speed))
+        distance_m = max(0.0, float(distance_m))
+        if speed <= 0.0 or distance_m <= 0.0:
+            return
+        msg = Twist()
+        msg.linear.x = -speed
+        self._publish_twist_for(goal_handle, msg, distance_m / speed)
+        time.sleep(0.15)
+
+    def _call_dump_trigger(self, goal_handle, client, label):
+        response = self._call_service(
+            client,
+            Trigger.Request(),
+            timeout_sec=float(self.get_parameter('dump_timeout_sec').value),
+            goal_handle=goal_handle,
+            label=label,
+        )
+        if response is None:
+            return False, f'{label} service unavailable or timed out'
+        return bool(response.success), response.message
+
+    def _call_dump_bucket_service(self, goal_handle, client, bucket_id, label):
+        request = DumpTrash.Request()
+        request.bucket_id = int(bucket_id)
+        response = self._call_service(
+            client,
+            request,
+            timeout_sec=float(self.get_parameter('dump_timeout_sec').value),
+            goal_handle=goal_handle,
+            label=label,
+        )
+        if response is None:
+            return False, f'{label} service unavailable or timed out'
+        return bool(response.success), response.message
 
     def _rotate_in_place_180(self, goal_handle):
         speed = abs(float(self.get_parameter('dump_rotate_angular_speed').value))
@@ -1474,7 +1623,7 @@ class RobotTaskServer(Node):
         goal.x = target.target_x_cm
         goal.y = target.target_y_cm
         goal.z = target.target_z_cm
-        goal.duration = 2.0
+        goal.duration = float(self.get_parameter('arm_target_duration_sec').value)
         goal.end_angle = target.end_angle
         goal.gripper_rotation = target.gripper_rotation
         result = self._send_action_goal(

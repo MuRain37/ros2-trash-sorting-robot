@@ -21,18 +21,14 @@ from robot_hardware_bridge.packet_protocol import (
 
 # 7 号舵机：水平旋转 (Horizontal Rotation)
 HORIZONTAL_SERVO_ID = 7
-HORIZONTAL_MAX_DEGREES = 180.0       # 最大转动角度（度）
-HORIZONTAL_DIRECTION = 1.0           # 转动方向（1.0 正向, -1.0 反向）
 
 # 8 号舵机：夹爪旋转 (Gripper Rotation)
 GRIPPER_ROTATE_SERVO_ID = 8
-GRIPPER_ROTATE_MAX_DEGREES = 180.0   # 最大转动角度（度）
-GRIPPER_ROTATE_DIRECTION = 1.0       # 转动方向（1.0 正向, -1.0 反向）
 
 # 9 号舵机：夹爪开度 (Gripper Open/Close)
 LIFT_GRIPPER_SERVO_ID = 9
 LIFT_GRIPPER_OPEN_RAW = 500.0       # 夹爪全开时的 raw 值
-LIFT_GRIPPER_CLOSE_RAW = 585.0       # 夹爪扣紧时的 raw 值
+LIFT_GRIPPER_CLOSE_RAW = 595.0       # 夹爪扣紧时的 raw 值
 
 # 舵机通用默认值
 SERVO_DURATION_MS = 100.0            # 默认运动时长（毫秒）
@@ -53,19 +49,6 @@ DUMP_BUCKET_2_RAW = 110.0
 def clamp_servo_raw(position):
     """将舵机原始位置值限制在 [0, 1000] 安全范围内."""
     return max(SERVO_RAW_MIN, min(SERVO_RAW_MAX, position))
-
-
-def angle_to_servo_raw(value, max_degrees, direction):
-    """角度（弧度）→ 舵机原始位置值."""
-    degrees = math.degrees(float(value))
-    if not -max_degrees <= degrees <= max_degrees:
-        raise ValueError(
-            f'angle out of range: {degrees} not in '
-            f'[-{max_degrees}, {max_degrees}] deg'
-        )
-    return clamp_servo_raw(
-        SERVO_CENTER + direction * degrees * (SERVO_CENTER / max_degrees)
-    )
 
 
 def gripper_open_ratio_to_servo_raw(open_ratio):
@@ -159,13 +142,10 @@ class LiftDumpBridge:
         return response
 
     def _on_horizontal_rotation_command(self, request, response):
-        """接收水平旋转舵机目标，校验后立即发送一次."""
+        """接收水平旋转舵机 raw 目标，校验后立即发送一次."""
         try:
-            horizontal_raw = angle_to_servo_raw(
-                request.angle,
-                HORIZONTAL_MAX_DEGREES,
-                HORIZONTAL_DIRECTION,
-            )
+            horizontal_raw = float(request.angle)
+            self._validate_servo_raw('horizontal raw', horizontal_raw)
             duration_ms = float(request.duration_ms)
             if duration_ms < 0.0:
                 raise ValueError(f'duration_ms must be >= 0: {duration_ms}')
@@ -190,12 +170,12 @@ class LiftDumpBridge:
         return response
 
     def _on_gripper_rotation_command(self, request, response):
-        """接收夹爪旋转舵机目标，校验后立即发送一次."""
+        """接收夹爪旋转舵机 raw 目标，校验后立即发送一次."""
         try:
-            gripper_rotation_raw = angle_to_servo_raw(
-                request.angle,
-                GRIPPER_ROTATE_MAX_DEGREES,
-                GRIPPER_ROTATE_DIRECTION,
+            gripper_rotation_raw = float(request.angle)
+            self._validate_servo_raw(
+                'gripper rotation raw',
+                gripper_rotation_raw,
             )
             duration_ms = float(request.duration_ms)
             if duration_ms < 0.0:

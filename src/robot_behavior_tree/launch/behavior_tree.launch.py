@@ -27,6 +27,18 @@ def generate_launch_description():
         output='screen',
         parameters=[{
             'use_sim_time': use_sim_time,
+            'color_topic': '/camera/real_camera/color/image_raw',
+            'depth_topic': '/camera/real_camera/aligned_depth_to_color/image_raw',
+        }],
+    )
+
+    dump_trash_node = Node(
+        package='robot_manipulation',
+        executable='dump_trash_node',
+        name='dump_trash_node',
+        output='screen',
+        parameters=[{
+            'use_sim_time': use_sim_time,
         }],
     )
 
@@ -34,4 +46,5 @@ def generate_launch_description():
         DeclareLaunchArgument('use_sim_time', default_value='false'),
         robot_task_server,
         dump_task,
+        dump_trash_node,
     ])

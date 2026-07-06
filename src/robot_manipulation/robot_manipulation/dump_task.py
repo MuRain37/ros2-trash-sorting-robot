@@ -3,19 +3,21 @@
 import math
 import threading
 
+import cv2
 import numpy as np
 import rclpy
 from rclpy.node import Node
+from rclpy.qos import qos_profile_sensor_data
 from robot_interfaces.srv import DetectDumpBucket
 from sensor_msgs.msg import Image
 
 
-DEFAULT_COLOR_TOPIC = '/camera/camera/color/image_raw'
-DEFAULT_DEPTH_TOPIC = '/camera/camera/aligned_depth_to_color/image_raw'
+DEFAULT_COLOR_TOPIC = '/camera/real_camera/color/image_raw'
+DEFAULT_DEPTH_TOPIC = '/camera/real_camera/aligned_depth_to_color/image_raw'
 DEFAULT_SERVICE_NAME = 'detect_dump_bucket'
 
-DETECTED_MESSAGE = 'dump bucket detected within depth threshold'
-NOT_DETECTED_MESSAGE = 'dump bucket not detected within depth threshold'
+DETECTED_MESSAGE = 'largest contour detected within depth threshold'
+NOT_DETECTED_MESSAGE = 'largest contour not detected within depth threshold'
 
 
 class DumpTaskNode(Node):
@@ -28,10 +30,8 @@ class DumpTaskNode(Node):
         self.declare_parameter('depth_topic', DEFAULT_DEPTH_TOPIC)
         self.declare_parameter('service_name', DEFAULT_SERVICE_NAME)
         self.declare_parameter('mask_min_pixels', 100)
-        self.declare_parameter('depth_threshold_m', 0.20)
+        self.declare_parameter('depth_threshold_m', 0.35)
         self.declare_parameter('depth_scale', 0.001)
-        self.declare_parameter('lower_rgb', [70, 70, 70])
-        self.declare_parameter('upper_rgb', [115, 110, 100])
 
         self._lock = threading.Lock()
         self._latest_color = None
@@ -40,18 +40,20 @@ class DumpTaskNode(Node):
         color_topic = str(self.get_parameter('color_topic').value)
         depth_topic = str(self.get_parameter('depth_topic').value)
         service_name = str(self.get_parameter('service_name').value)
+        self._color_topic = color_topic
+        self._depth_topic = depth_topic
 
         self._color_subscription = self.create_subscription(
             Image,
             color_topic,
             self._on_color_image,
-            10,
+            qos_profile_sensor_data,
         )
         self._depth_subscription = self.create_subscription(
             Image,
             depth_topic,
             self._on_depth_image,
-            10,
+            qos_profile_sensor_data,
         )
         self._detect_service = self.create_service(
             DetectDumpBucket,
@@ -80,7 +82,16 @@ class DumpTaskNode(Node):
             depth_msg = self._latest_depth
 
         if color_msg is None or depth_msg is None:
-            fill_empty_response(response, False, 'waiting for color and depth images')
+            missing = []
+            if color_msg is None:
+                missing.append(f'color({self._color_topic})')
+            if depth_msg is None:
+                missing.append(f'depth({self._depth_topic})')
+            fill_empty_response(
+                response,
+                False,
+                f'waiting for {", ".join(missing)} images',
+            )
             return response
 
         try:
@@ -143,16 +154,7 @@ class DumpTaskNode(Node):
                 f'color={color.shape[:2]}, depth={depth_m.shape[:2]}'
             )
 
-        lower_rgb = np.array(
-            list(self.get_parameter('lower_rgb').value),
-            dtype=np.uint8,
-        )
-        upper_rgb = np.array(
-            list(self.get_parameter('upper_rgb').value),
-            dtype=np.uint8,
-        )
-        mask = np.all((color >= lower_rgb) & (color <= upper_rgb), axis=2)
-        component = largest_mask_component(mask)
+        component = largest_contour_component(color)
         mask_pixels = int(np.count_nonzero(component))
 
         mask_min_pixels = int(self.get_parameter('mask_min_pixels').value)
@@ -232,38 +234,30 @@ def detection_result(
     }
 
 
-def largest_mask_component(mask):
-    """从 RGB 掩膜中取最大连通区域，避免零散噪声影响中心点."""
-    height, width = mask.shape
-    visited = np.zeros(mask.shape, dtype=bool)
-    best_pixels = []
+def largest_contour_component(color):
+    """不做 RGB 色彩筛选，直接取画面中最大的外轮廓区域。"""
+    gray = cv2.cvtColor(color, cv2.COLOR_RGB2GRAY)
+    blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+    edges = cv2.Canny(blurred, 50, 150)
+    kernel = np.ones((5, 5), dtype=np.uint8)
+    edges = cv2.dilate(edges, kernel, iterations=1)
+    edges = cv2.morphologyEx(edges, cv2.MORPH_CLOSE, kernel, iterations=2)
+    contours, _ = cv2.findContours(
+        edges,
+        cv2.RETR_EXTERNAL,
+        cv2.CHAIN_APPROX_SIMPLE,
+    )
 
-    for start_y, start_x in zip(*np.nonzero(mask)):
-        if visited[start_y, start_x]:
-            continue
-        stack = [(int(start_y), int(start_x))]
-        visited[start_y, start_x] = True
-        pixels = []
-        while stack:
-            y, x = stack.pop()
-            pixels.append((y, x))
-            for ny, nx in ((y - 1, x), (y + 1, x), (y, x - 1), (y, x + 1)):
-                if (
-                    0 <= ny < height
-                    and 0 <= nx < width
-                    and mask[ny, nx]
-                    and not visited[ny, nx]
-                ):
-                    visited[ny, nx] = True
-                    stack.append((ny, nx))
-        if len(pixels) > len(best_pixels):
-            best_pixels = pixels
+    component = np.zeros(gray.shape, dtype=np.uint8)
+    if not contours:
+        return component.astype(bool)
 
-    component = np.zeros(mask.shape, dtype=bool)
-    if best_pixels:
-        ys, xs = zip(*best_pixels)
-        component[np.array(ys), np.array(xs)] = True
-    return component
+    contour = max(contours, key=cv2.contourArea)
+    if cv2.contourArea(contour) <= 1.0:
+        return component.astype(bool)
+
+    cv2.drawContours(component, [contour], -1, 255, thickness=cv2.FILLED)
+    return component.astype(bool)
 
 
 def image_to_rgb_array(msg):
