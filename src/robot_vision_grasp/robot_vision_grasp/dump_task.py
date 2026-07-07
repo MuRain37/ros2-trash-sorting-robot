@@ -21,8 +21,8 @@ DEFAULT_COLOR_TOPIC = '/camera/real_camera/color/image_raw'
 DEFAULT_DEPTH_TOPIC = '/camera/real_camera/aligned_depth_to_color/image_raw'
 DEFAULT_SERVICE_NAME = 'detect_dump_bucket'
 DEFAULT_CLASS_NAME = 'bin'
-DEFAULT_CONFIDENCE = 0.75
-DEFAULT_IOU = 0.45
+DEFAULT_CONFIDENCE = 0.55
+DEFAULT_IOU = 0.4
 DEFAULT_DEPTH_SCALE = 0.001
 DEFAULT_MODEL_DEVICE = 'CPU'
 
