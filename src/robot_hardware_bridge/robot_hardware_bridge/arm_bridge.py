@@ -31,10 +31,27 @@ SERVO_CENTER = 500.0
 SERVO_RAW_MIN = 0.0
 SERVO_RAW_MAX = 1000.0
 
-# 各关节半角行程（度），总行程 = 半角 × 2
-JOINT_MAX_DEGREES = (180.0 , 120.0, 120.0, 120.0, 120.0)
+# 舵机1是底座旋转，机械行程和其他舵机不同，必须单独映射。
+BASE_JOINT_MAX_DEGREES = 180.0
+OTHER_JOINT_MAX_DEGREES = 120.0
+JOINT_MAX_DEGREES = (
+    BASE_JOINT_MAX_DEGREES,
+    OTHER_JOINT_MAX_DEGREES,
+    OTHER_JOINT_MAX_DEGREES,
+    OTHER_JOINT_MAX_DEGREES,
+    OTHER_JOINT_MAX_DEGREES,
+)
 # 各关节方向系数：±1，由舵机安装方向决定
 JOINT_DIRECTIONS = (-1.0, -1.0, -1.0, -1.0, 1.0)
+
+
+def joint_max_degrees(index):
+    """返回指定关节的半角行程；舵机1与其他舵机分开映射."""
+    if index == 0:
+        return BASE_JOINT_MAX_DEGREES
+    if 0 < index < DEFAULT_ARM_JOINT_COUNT:
+        return OTHER_JOINT_MAX_DEGREES
+    raise ValueError(f'unsupported arm joint index: {index}')
 
 
 def clamp_servo_raw(position):
@@ -49,34 +66,34 @@ def joint_command_to_servo_raw(index, value):
     映射公式：raw = 500 + direction × deg × (500 / max_degrees)
     """
     value = math.degrees(float(value))
-    if index < len(JOINT_MAX_DEGREES):
-        max_degrees = JOINT_MAX_DEGREES[index]
+    try:
+        max_degrees = joint_max_degrees(index)
         direction = JOINT_DIRECTIONS[index]
-        if not -max_degrees <= value <= max_degrees:
-            raise ValueError(
-                f'joint {index + 1} out of range: {value} '
-                f'not in [{-max_degrees}, {max_degrees}] deg'
-            )
-        return clamp_servo_raw(
-            SERVO_CENTER + direction * value * (SERVO_CENTER / max_degrees)
+    except IndexError as exc:
+        raise ValueError(f'unsupported arm joint index: {index}') from exc
+    if not -max_degrees <= value <= max_degrees:
+        raise ValueError(
+            f'joint {index + 1} out of range: {value} '
+            f'not in [{-max_degrees}, {max_degrees}] deg'
         )
-
-    raise ValueError(f'unsupported arm joint index: {index}')
+    return clamp_servo_raw(
+        SERVO_CENTER + direction * value * (SERVO_CENTER / max_degrees)
+    )
 
 
 def servo_raw_to_joint_command(index, raw_position):
     """舵机原始位置值 → 关节角度（弧度），上面公式的逆运算."""
     raw_position = float(raw_position)
-    if index < len(JOINT_MAX_DEGREES):
-        max_degrees = JOINT_MAX_DEGREES[index]
+    try:
+        max_degrees = joint_max_degrees(index)
         direction = JOINT_DIRECTIONS[index]
-        degrees = (raw_position - SERVO_CENTER) * (
-            max_degrees / SERVO_CENTER
-        )
-        degrees *= direction
-        return math.radians(degrees)
-
-    raise ValueError(f'unsupported arm joint index: {index}')
+    except IndexError as exc:
+        raise ValueError(f'unsupported arm joint index: {index}') from exc
+    degrees = (raw_position - SERVO_CENTER) * (
+        max_degrees / SERVO_CENTER
+    )
+    degrees *= direction
+    return math.radians(degrees)
 
 
 class ArmBridge:

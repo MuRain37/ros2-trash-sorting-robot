@@ -26,6 +26,7 @@ def generate_launch_description():
             default_value='camera_optical_link',
         ),
         DeclareLaunchArgument('base_frame', default_value='arm_link0'),
+        DeclareLaunchArgument('target_y_scale', default_value='1.3'),
         DeclareLaunchArgument(
             'gripper_service',
             default_value='arm_gripper',
@@ -42,6 +43,7 @@ def generate_launch_description():
                 'depth_info_topic': LaunchConfiguration('depth_info_topic'),
                 'base_frame': LaunchConfiguration('base_frame'),
                 'camera_frame': LaunchConfiguration('camera_frame'),
+                'target_y_scale': LaunchConfiguration('target_y_scale'),
                 'gripper_service': LaunchConfiguration('gripper_service'),
             }],
         ),

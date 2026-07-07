@@ -17,7 +17,15 @@ ACTION_NAMES = {
 SERVO_CENTER = 500.0
 SERVO_RAW_MIN = 0.0
 SERVO_RAW_MAX = 1000.0
-JOINT_MAX_DEGREES = (180.0, 120.0, 120.0, 120.0, 120.0)
+BASE_JOINT_MAX_DEGREES = 180.0
+OTHER_JOINT_MAX_DEGREES = 120.0
+JOINT_MAX_DEGREES = (
+    BASE_JOINT_MAX_DEGREES,
+    OTHER_JOINT_MAX_DEGREES,
+    OTHER_JOINT_MAX_DEGREES,
+    OTHER_JOINT_MAX_DEGREES,
+    OTHER_JOINT_MAX_DEGREES,
+)
 JOINT_DIRECTIONS = (-1.0, -1.0, -1.0, -1.0, 1.0)
 
 
@@ -26,11 +34,21 @@ def preset_name(action_type):
     return ACTION_NAMES.get(int(action_type), f'unknown_{int(action_type)}')
 
 
+def joint_max_degrees(index):
+    """返回指定关节的半角行程；舵机1与其他舵机分开映射."""
+    if index == 0:
+        return BASE_JOINT_MAX_DEGREES
+    if 0 < index < len(JOINT_MAX_DEGREES):
+        return OTHER_JOINT_MAX_DEGREES
+    raise ValueError(f'unsupported arm joint index: {index}')
+
+
 def joint_position_to_servo_raw(index, joint_position):
     """MoveIt 关节角（弧度）→ 舵机原始位置值."""
     degrees = math.degrees(float(joint_position))
+    max_degrees = joint_max_degrees(index)
     raw = SERVO_CENTER + JOINT_DIRECTIONS[index] * degrees * (
-        SERVO_CENTER / JOINT_MAX_DEGREES[index]
+        SERVO_CENTER / max_degrees
     )
     return max(SERVO_RAW_MIN, min(SERVO_RAW_MAX, raw))
 
@@ -54,7 +72,7 @@ def servo_raw_to_joint_position(index, raw_position):
             f'not in [{SERVO_RAW_MIN}, {SERVO_RAW_MAX}]'
         )
 
-    max_degrees = JOINT_MAX_DEGREES[index]
+    max_degrees = joint_max_degrees(index)
     direction = JOINT_DIRECTIONS[index]
     degrees = (raw_position - SERVO_CENTER) * (max_degrees / SERVO_CENTER)
     degrees *= direction

@@ -134,6 +134,7 @@ class RobotTaskServer(Node):
         self.declare_parameter('action_timeout_sec', 45.0)
         self.declare_parameter('navigation_timeout_sec', 90.0)
         self.declare_parameter('dump_timeout_sec', 180.0)
+        self.declare_parameter('clean_region_timeout_sec', 600.0)
         self.declare_parameter('dump_backup_distance_m', 0.30)
         self.declare_parameter('dump_backup_linear_speed', 0.05)
         self.declare_parameter('dump_forward_distance_m', 0.15)
@@ -151,6 +152,7 @@ class RobotTaskServer(Node):
         self.declare_parameter('approach_y_angular_speed', 0.25)
         self.declare_parameter('approach_y_max_rotate_rad', 0.35)
         self.declare_parameter('coverage_detect_interval_sec', 0.3)
+        self.declare_parameter('coverage_scan_forward_step_m', 0.30)
         self.declare_parameter(
             'coverage_controller_set_parameters_service',
             '/controller_server/set_parameters',
@@ -173,6 +175,8 @@ class RobotTaskServer(Node):
         self.declare_parameter('dump_center_max_attempts',8)
         self.declare_parameter('dump_center_angular_speed', 0.25)
         self.declare_parameter('dump_center_step_sec', 0.20)
+        self.declare_parameter('dump_center_max_rotate_rad', 0.75)
+        self.declare_parameter('dump_align_max_forward_step_m', 1.0)
         self.declare_parameter('dump_rotate_tolerance_rad', 0.04)
         self.declare_parameter('dump_rotate_timeout_sec', 12.0)
         self.declare_parameter('dump_scan_camera_bucket_check_enabled', True)
@@ -197,6 +201,8 @@ class RobotTaskServer(Node):
         self._task_lock = threading.Lock()
         self._active_goal = None
         self._stop_requested = False
+        self._pause_requested = False
+        self._clear_requested = False
         self._dump_bucket_poses = {}
         self._clean_regions = {}
         self._bucket_fill_percent = {1: 0, 2: 0}
@@ -389,7 +395,7 @@ class RobotTaskServer(Node):
         if task_type not in self._known_task_types():
             self.get_logger().warning(f'rejecting unknown task_type={task_type}')
             return GoalResponse.REJECT
-        if task_type == RobotTask.Goal.TASK_STOP:
+        if task_type in (RobotTask.Goal.TASK_STOP, RobotTask.Goal.TASK_RESUME):
             return GoalResponse.ACCEPT
         if self._active_goal is not None:
             self.get_logger().warning('rejecting task because another task is active')
@@ -403,14 +409,29 @@ class RobotTaskServer(Node):
 
     def _execute_task(self, goal_handle):
         task_type = int(goal_handle.request.task_type)
-        if (
-            task_type == RobotTask.Goal.TASK_STOP
-            and not self._task_lock.acquire(blocking=False)
-        ):
-            self._stop_requested = True
-            self._publish_stop()
-            goal_handle.succeed()
-            return self._result(True, 'stop requested')
+        if task_type in (RobotTask.Goal.TASK_STOP, RobotTask.Goal.TASK_RESUME):
+            lock_acquired = self._task_lock.acquire(blocking=False)
+            if not lock_acquired:
+                if task_type == RobotTask.Goal.TASK_STOP:
+                    self._apply_control_command(goal_handle.request.command)
+                    message = 'clear requested' if self._clear_requested else 'pause requested'
+                else:
+                    self._pause_requested = False
+                    message = 'resume requested'
+                goal_handle.succeed()
+                return self._result(True, message)
+
+            try:
+                if task_type == RobotTask.Goal.TASK_STOP:
+                    self._apply_control_command(goal_handle.request.command)
+                    goal_handle.succeed()
+                    return self._result(True, 'robot stopped')
+
+                self._pause_requested = False
+                goal_handle.succeed()
+                return self._result(True, 'resume accepted')
+            finally:
+                self._task_lock.release()
 
         if not self._task_lock.acquire(blocking=False):
             goal_handle.abort()
@@ -419,8 +440,9 @@ class RobotTaskServer(Node):
         self._active_goal = goal_handle
         goal = goal_handle.request
         task_name = self._task_name(task_type)
-        if task_type != RobotTask.Goal.TASK_STOP:
+        if task_type not in (RobotTask.Goal.TASK_STOP, RobotTask.Goal.TASK_RESUME):
             self._stop_requested = False
+            self._clear_requested = False
         self._feedback(goal_handle, f'{task_name}: started', 0.0)
 
         try:
@@ -432,6 +454,8 @@ class RobotTaskServer(Node):
             self._publish_stop()
             self._close_gripper_for_cleanup(task_name)
             self._stop_requested = False
+            self._pause_requested = False
+            self._clear_requested = False
             self._active_goal = None
             self._task_lock.release()
 
@@ -464,12 +488,24 @@ class RobotTaskServer(Node):
         if task_type == RobotTask.Goal.TASK_SET_CLEAN_REGION:
             return self._run_set_clean_region(goal_handle, goal)
         if task_type == RobotTask.Goal.TASK_STOP:
-            self._stop_requested = True
-            self._publish_stop()
+            self._apply_control_command(goal.command)
             return True, 'robot stopped'
         if task_type == RobotTask.Goal.TASK_RESUME:
+            self._pause_requested = False
             return True, 'resume accepted'
         return False, f'unsupported task_type={task_type}'
+
+    def _apply_control_command(self, command):
+        command = str(command).strip().lower()
+        if command == 'pause':
+            self._pause_requested = True
+            self._clear_requested = False
+            self._stop_requested = False
+        else:
+            self._clear_requested = True
+            self._pause_requested = False
+            self._stop_requested = True
+        self._publish_stop()
 
     def _run_clean_trash_tree(self, goal_handle):
         """清扫垃圾：识别 -> 必要时前进 -> MoveIt 抓取 -> 投桶 -> 归中。"""
@@ -806,33 +842,11 @@ class RobotTaskServer(Node):
         if bool(self.get_parameter('require_dump_bucket_detect').value):
             self._feedback(
                 goal_handle,
-                f'dump_trash: center bucket {bucket_id}',
+                f'dump_trash: visual align bucket {bucket_id}',
                 base_progress + span * 0.45,
             )
-            if not self._center_dump_bucket(goal_handle):
-                message = f'dump bucket {bucket_id} visual center align failed'
-                if bool(self.get_parameter('dump_visual_align_required').value):
-                    return False, message
-                self.get_logger().warning(f'{message}; continue to dump')
-
-            self._feedback(
-                goal_handle,
-                f'dump_trash: depth align bucket {bucket_id}',
-                base_progress + span * 0.55,
-            )
-            if not self._align_dump_bucket_depth(goal_handle):
-                message = f'dump bucket {bucket_id} not detected after align'
-                if bool(self.get_parameter('dump_visual_align_required').value):
-                    return False, message
-                self.get_logger().warning(f'{message}; continue to dump')
-
-            self._feedback(
-                goal_handle,
-                f'dump_trash: final center bucket {bucket_id}',
-                base_progress + span * 0.60,
-            )
-            if not self._center_dump_bucket(goal_handle):
-                message = f'dump bucket {bucket_id} visual center align failed'
+            if not self._align_dump_bucket_once(goal_handle):
+                message = f'dump bucket {bucket_id} visual align failed'
                 if bool(self.get_parameter('dump_visual_align_required').value):
                     return False, message
                 self.get_logger().warning(f'{message}; continue to dump')
@@ -954,25 +968,17 @@ class RobotTaskServer(Node):
 
         start_pose = preview_path.poses[0]
         self._feedback(goal_handle, 'clean_region: navigate to start pose', 0.15)
-        self._navigate_pose_with_visual_interrupt(
+        start_result = self._navigate_pose_with_visual_interrupt(
             goal_handle,
             start_pose,
             'clean region start pose',
             detect_enabled=False,
         )
+        if start_result is None:
+            return False, 'clean region start pose canceled'
 
         self._feedback(goal_handle, 'clean_region: arm center for coverage', 0.20)
         self._send_arm_preset(goal_handle, ArmPreset.Goal.ARM_CENTER)
-
-        start_position = self._current_map_xy()
-        self._feedback(goal_handle, 'clean_region: generate coverage path', 0.25)
-        path, message = self._generate_coverage_path(
-            goal_handle,
-            region,
-            start_position=start_position,
-        )
-        if path is None:
-            return False, message
 
         self._set_coverage_linear_speed(
             goal_handle,
@@ -980,7 +986,7 @@ class RobotTaskServer(Node):
             'set coverage slow speed',
         )
         try:
-            picked = self._run_coverage_path_with_grasp(goal_handle, path)
+            picked = self._run_clean_region_scan_loop(goal_handle, region)
             if picked is None:
                 return False, 'clean region canceled'
         finally:
@@ -988,8 +994,114 @@ class RobotTaskServer(Node):
                 None,
                 float(self.get_parameter('coverage_restore_linear_speed').value),
                 'restore coverage normal speed',
-            )
+        )
         return True, f'clean region completed: picked={picked}'
+
+    def _run_clean_region_scan_loop(self, goal_handle, region):
+        picked = 0
+        timeout_sec = max(
+            1.0,
+            float(self.get_parameter('clean_region_timeout_sec').value),
+        )
+        deadline = time.monotonic() + timeout_sec
+        forward_step_m = max(
+            0.0,
+            float(self.get_parameter('coverage_scan_forward_step_m').value),
+        )
+
+        while time.monotonic() < deadline:
+            if self._is_canceling_without_pause(goal_handle):
+                return None
+            deadline, keep_waiting = self._wait_pause_and_extend_deadline(
+                goal_handle,
+                deadline,
+            )
+            if not keep_waiting:
+                return None
+
+            self._feedback(goal_handle, 'clean_region: detect at current pose', 0.30)
+            target = self._detect_reachable_target(goal_handle)
+            if target is not None:
+                self._feedback(
+                    goal_handle,
+                    f'clean_region: grasping {target.class_name}',
+                    0.45,
+                )
+                bucket_id, bucket_level = self._grasp_target(goal_handle, target)
+                picked += 1
+                success, message = self._maybe_auto_dump_full_bucket(
+                    goal_handle,
+                    bucket_id,
+                    bucket_level,
+                )
+                if not success:
+                    raise RuntimeError(message)
+
+                if self._is_canceling(goal_handle):
+                    return None
+                self._feedback(goal_handle, 'clean_region: arm center after grasp', 0.60)
+                self._send_arm_preset(goal_handle, ArmPreset.Goal.ARM_CENTER)
+                continue
+
+            current_xy = self._current_map_xy()
+            if current_xy is None:
+                return picked
+
+            path, message = self._generate_coverage_path(
+                goal_handle,
+                region,
+                start_position=current_xy,
+            )
+            if path is None:
+                raise RuntimeError(message)
+
+            next_pose = self._next_coverage_pose(path, forward_step_m)
+            if next_pose is None:
+                return picked
+
+            self._feedback(goal_handle, 'clean_region: move forward to next scan', 0.70)
+            result = self._navigate_pose_with_visual_interrupt(
+                goal_handle,
+                next_pose,
+                'clean region next scan pose',
+                detect_enabled=False,
+            )
+            if result is None:
+                return None
+
+        return picked
+
+    def _next_coverage_pose(self, path, step_m):
+        if not path.poses:
+            return None
+        if step_m <= 0.0:
+            return path.poses[0]
+
+        previous = path.poses[0]
+        travelled = 0.0
+        for pose in path.poses[1:]:
+            dx = pose.pose.position.x - previous.pose.position.x
+            dy = pose.pose.position.y - previous.pose.position.y
+            segment = math.hypot(dx, dy)
+            if segment <= 1e-6:
+                previous = pose
+                continue
+            if travelled + segment >= step_m:
+                ratio = (step_m - travelled) / segment
+                next_pose = PoseStamped()
+                next_pose.header = pose.header
+                next_pose.pose.position.x = (
+                    previous.pose.position.x + dx * ratio
+                )
+                next_pose.pose.position.y = (
+                    previous.pose.position.y + dy * ratio
+                )
+                next_pose.pose.position.z = 0.0
+                next_pose.pose.orientation = pose.pose.orientation
+                return next_pose
+            travelled += segment
+            previous = pose
+        return None
 
     def _generate_coverage_path(self, goal_handle, region, start_position=None):
         request = GenerateCoveragePath.Request()
@@ -1125,7 +1237,16 @@ class RobotTaskServer(Node):
         )
 
         while rclpy.ok() and not result_future.done():
-            if self._is_canceling(goal_handle):
+            if self._clear_requested or self._stop_requested or (
+                goal_handle is not None and goal_handle.is_cancel_requested
+            ):
+                self._cancel_action_goal(nav_handle)
+                return None
+            deadline, keep_waiting = self._wait_pause_and_extend_deadline(
+                goal_handle,
+                deadline,
+            )
+            if not keep_waiting:
                 self._cancel_action_goal(nav_handle)
                 return None
 
@@ -1371,7 +1492,16 @@ class RobotTaskServer(Node):
         next_bucket_check = time.monotonic()
 
         while rclpy.ok() and not result_future.done():
-            if self._is_canceling(goal_handle):
+            if self._clear_requested or self._stop_requested or (
+                goal_handle is not None and goal_handle.is_cancel_requested
+            ):
+                self._cancel_action_goal(action_goal_handle)
+                return False, f'navigate to dump bucket {pose.bucket_id} front canceled'
+            deadline, keep_waiting = self._wait_pause_and_extend_deadline(
+                goal_handle,
+                deadline,
+            )
+            if not keep_waiting:
                 self._cancel_action_goal(action_goal_handle)
                 return False, f'navigate to dump bucket {pose.bucket_id} front canceled'
             if time.monotonic() >= deadline:
@@ -1516,73 +1646,113 @@ class RobotTaskServer(Node):
         )
 
     def _center_dump_bucket(self, goal_handle):
-        attempts = max(1, int(self.get_parameter('dump_center_max_attempts').value))
         tolerance = abs(float(self.get_parameter('dump_center_tolerance_ratio').value))
         speed = abs(float(self.get_parameter('dump_center_angular_speed').value))
-        step_sec = max(0.05, float(self.get_parameter('dump_center_step_sec').value))
+        max_rotate = abs(
+            float(self.get_parameter('dump_center_max_rotate_rad').value)
+        )
         if speed <= 0.0:
             return False
 
-        for attempt in range(attempts):
-            if self._is_canceling(goal_handle):
-                return False
-            detection = self._detect_dump_bucket(goal_handle)
-            if detection is None or not detection.detected:
-                if detection is None:
-                    self.get_logger().warning(
-                        'dump center detect '
-                        f'{attempt + 1}/{attempts}: no response'
-                    )
-                else:
-                    self.get_logger().warning(
-                        'dump center detect '
-                        f'{attempt + 1}/{attempts}: not detected, '
-                        f'mask_pixels={detection.mask_pixels}, '
-                        f'mean_depth_m={detection.mean_depth_m:.3f}, '
-                        f'offset_x_ratio={detection.offset_x_ratio:.4f}, '
-                        f'message={detection.message}'
-                    )
-                self._publish_stop()
-                time.sleep(0.15)
-                continue
-            if not math.isfinite(detection.offset_x_ratio):
-                self.get_logger().warning(
-                    'dump center detect '
-                    f'{attempt + 1}/{attempts}: invalid offset, '
-                    f'mask_pixels={detection.mask_pixels}, '
-                    f'mean_depth_m={detection.mean_depth_m:.3f}, '
-                    f'offset_x_ratio={detection.offset_x_ratio}, '
-                    f'message={detection.message}'
-                )
-                return False
-            target_offset_ratio = self._dump_camera_offset_ratio(
-                detection.mean_depth_m
-            )
-            center_error_ratio = detection.offset_x_ratio - target_offset_ratio
-            self.get_logger().info(
-                'dump center detect '
-                f'{attempt + 1}/{attempts}: detected, '
-                f'mask_pixels={detection.mask_pixels}, '
-                f'mean_depth_m={detection.mean_depth_m:.3f}, '
-                f'offset_x_ratio={detection.offset_x_ratio:.4f}, '
-                f'target_offset_ratio={target_offset_ratio:.4f}, '
-                f'center_error_ratio={center_error_ratio:.4f}, '
-                f'tolerance={tolerance:.4f}, '
-                f'message={detection.message}'
-            )
-            if abs(center_error_ratio) <= tolerance:
-                return True
+        if self._is_canceling(goal_handle):
+            return False
+        detection = self._detect_dump_bucket(goal_handle)
+        if not self._valid_dump_detection(detection, 'dump center detect'):
+            return False
 
+        target_offset_ratio = self._dump_camera_offset_ratio(detection.mean_depth_m)
+        center_error_ratio = detection.offset_x_ratio - target_offset_ratio
+        self.get_logger().info(
+            'dump center detect: detected, '
+            f'mask_pixels={detection.mask_pixels}, '
+            f'mean_depth_m={detection.mean_depth_m:.3f}, '
+            f'offset_x_ratio={detection.offset_x_ratio:.4f}, '
+            f'target_offset_ratio={target_offset_ratio:.4f}, '
+            f'center_error_ratio={center_error_ratio:.4f}, '
+            f'tolerance={tolerance:.4f}, '
+            f'message={detection.message}'
+        )
+        if abs(center_error_ratio) <= tolerance:
+            return True
+
+        rotate_rad = self._dump_bearing_from_offset_ratio(center_error_ratio)
+        rotate_rad = max(-max_rotate, min(max_rotate, rotate_rad))
+        if abs(rotate_rad) <= 0.001:
+            return True
+
+        twist = Twist()
+        twist.angular.z = -speed if rotate_rad > 0.0 else speed
+        self.get_logger().info(
+            'dump center rotate direct: '
+            f'rotate={rotate_rad:.3f} rad, angular_z={twist.angular.z:.3f}'
+        )
+        self._publish_twist_for(goal_handle, twist, abs(rotate_rad) / speed)
+        time.sleep(0.12)
+        return True
+
+    def _align_dump_bucket_once(self, goal_handle):
+        tolerance = abs(float(self.get_parameter('dump_center_tolerance_ratio').value))
+        rotate_speed = abs(float(self.get_parameter('dump_center_angular_speed').value))
+        max_rotate = abs(
+            float(self.get_parameter('dump_center_max_rotate_rad').value)
+        )
+        target_depth = max(
+            0.0,
+            float(self.get_parameter('dump_align_target_depth_m').value),
+        )
+        depth_tolerance = abs(
+            float(self.get_parameter('dump_align_depth_tolerance_m').value)
+        )
+        max_forward = max(
+            0.0,
+            float(self.get_parameter('dump_align_max_forward_step_m').value),
+        )
+
+        if self._is_canceling(goal_handle):
+            return False
+        detection = self._detect_dump_bucket(goal_handle)
+        if not self._valid_dump_detection(detection, 'dump visual align detect'):
+            return False
+
+        target_offset_ratio = self._dump_camera_offset_ratio(detection.mean_depth_m)
+        center_error_ratio = detection.offset_x_ratio - target_offset_ratio
+        rotate_rad = self._dump_bearing_from_offset_ratio(center_error_ratio)
+        rotate_rad = max(-max_rotate, min(max_rotate, rotate_rad))
+        forward_m = max(0.0, detection.mean_depth_m - target_depth)
+        if forward_m <= depth_tolerance:
+            forward_m = 0.0
+        else:
+            forward_m = min(max_forward, forward_m)
+
+        self.get_logger().info(
+            'dump visual align direct: '
+            f'mask_pixels={detection.mask_pixels}, '
+            f'mean_depth_m={detection.mean_depth_m:.3f}, '
+            f'target_depth_m={target_depth:.3f}, '
+            f'offset_x_ratio={detection.offset_x_ratio:.4f}, '
+            f'target_offset_ratio={target_offset_ratio:.4f}, '
+            f'center_error_ratio={center_error_ratio:.4f}, '
+            f'rotate={rotate_rad:.3f} rad, '
+            f'forward={forward_m:.3f} m'
+        )
+
+        if abs(center_error_ratio) > tolerance and rotate_speed > 0.0:
             twist = Twist()
-            # 图像中心在左侧时 offset_x 为负，向左旋转；反之向右旋转。
-            twist.angular.z = -speed if center_error_ratio > 0.0 else speed
-            self.get_logger().info(
-                'dump center rotate step: '
-                f'angular_z={twist.angular.z:.3f}, step_sec={step_sec:.3f}'
+            twist.angular.z = -rotate_speed if rotate_rad > 0.0 else rotate_speed
+            self._publish_twist_for(
+                goal_handle,
+                twist,
+                abs(rotate_rad) / rotate_speed,
             )
-            self._publish_twist_for(goal_handle, twist, step_sec)
             time.sleep(0.12)
-        return False
+
+        if forward_m > 0.0:
+            self._drive_forward_step(
+                goal_handle,
+                forward_m,
+                float(self.get_parameter('dump_align_linear_speed').value),
+            )
+        return True
 
     def _dump_camera_offset_ratio(self, depth_m):
         lateral_offset_m = float(
@@ -1598,8 +1768,13 @@ class RobotTaskServer(Node):
             return 0.0
         return lateral_offset_m / (float(depth_m) * math.tan(hfov * 0.5))
 
+    def _dump_bearing_from_offset_ratio(self, offset_ratio):
+        hfov = abs(float(self.get_parameter('dump_camera_horizontal_fov_rad').value))
+        if hfov <= 0.0:
+            return 0.0
+        return math.atan(math.tan(hfov * 0.5) * float(offset_ratio))
+
     def _align_dump_bucket_depth(self, goal_handle):
-        attempts = max(1, int(self.get_parameter('dump_align_max_attempts').value))
         target_depth = max(
             0.0,
             float(self.get_parameter('dump_align_target_depth_m').value),
@@ -1607,55 +1782,67 @@ class RobotTaskServer(Node):
         tolerance = abs(
             float(self.get_parameter('dump_align_depth_tolerance_m').value)
         )
-        for attempt in range(attempts):
-            if self._is_canceling(goal_handle):
-                return False
-            detection = self._detect_dump_bucket(goal_handle)
-            if (
-                detection is not None
-                and detection.detected
-                and math.isfinite(detection.mean_depth_m)
-                and detection.mean_depth_m > 0.0
-                and detection.mean_depth_m <= target_depth + tolerance
-            ):
-                self.get_logger().info(
-                    'dump depth align detect '
-                    f'{attempt + 1}/{attempts}: reached target depth, '
-                    f'mask_pixels={detection.mask_pixels}, '
-                    f'mean_depth_m={detection.mean_depth_m:.3f}, '
-                    f'target_depth_m={target_depth:.3f}, '
-                    f'offset_x_ratio={detection.offset_x_ratio:.4f}, '
-                    f'message={detection.message}'
-                )
-                return True
-            if detection is None:
-                self.get_logger().warning(
-                    'dump depth align detect '
-                    f'{attempt + 1}/{attempts}: no response'
-                )
-            else:
-                self.get_logger().warning(
-                    'dump depth align detect '
-                    f'{attempt + 1}/{attempts}: not within depth, '
-                    f'detected={detection.detected}, '
-                    f'within_depth={detection.within_depth}, '
-                    f'mask_pixels={detection.mask_pixels}, '
-                    f'mean_depth_m={detection.mean_depth_m:.3f}, '
-                    f'target_depth_m={target_depth:.3f}, '
-                    f'offset_x_ratio={detection.offset_x_ratio:.4f}, '
-                    f'message={detection.message}'
-                )
-            if attempt < attempts - 1:
-                step_m = float(self.get_parameter('dump_align_step_m').value)
-                if detection is not None and math.isfinite(detection.mean_depth_m):
-                    remaining_m = detection.mean_depth_m - target_depth
-                    step_m = min(step_m, max(0.0, remaining_m))
-                self._drive_forward_step(
-                    goal_handle,
-                    step_m,
-                    float(self.get_parameter('dump_align_linear_speed').value),
-                )
-        return False
+        if self._is_canceling(goal_handle):
+            return False
+        detection = self._detect_dump_bucket(goal_handle)
+        if not self._valid_dump_detection(detection, 'dump depth align detect'):
+            return False
+
+        remaining_m = detection.mean_depth_m - target_depth
+        self.get_logger().info(
+            'dump depth align detect: '
+            f'mask_pixels={detection.mask_pixels}, '
+            f'mean_depth_m={detection.mean_depth_m:.3f}, '
+            f'target_depth_m={target_depth:.3f}, '
+            f'offset_x_ratio={detection.offset_x_ratio:.4f}, '
+            f'message={detection.message}'
+        )
+        if remaining_m <= tolerance:
+            return True
+
+        max_step = max(
+            0.0,
+            float(self.get_parameter('dump_align_max_forward_step_m').value),
+        )
+        self._drive_forward_step(
+            goal_handle,
+            min(max_step, max(0.0, remaining_m)),
+            float(self.get_parameter('dump_align_linear_speed').value),
+        )
+        return True
+
+    def _valid_dump_detection(self, detection, label):
+        if detection is None:
+            self.get_logger().warning(f'{label}: no response')
+            return False
+        if not detection.detected:
+            self.get_logger().warning(
+                f'{label}: not detected, '
+                f'mask_pixels={detection.mask_pixels}, '
+                f'mean_depth_m={detection.mean_depth_m:.3f}, '
+                f'offset_x_ratio={detection.offset_x_ratio:.4f}, '
+                f'message={detection.message}'
+            )
+            return False
+        if not math.isfinite(detection.offset_x_ratio):
+            self.get_logger().warning(
+                f'{label}: invalid offset, '
+                f'mask_pixels={detection.mask_pixels}, '
+                f'mean_depth_m={detection.mean_depth_m:.3f}, '
+                f'offset_x_ratio={detection.offset_x_ratio}, '
+                f'message={detection.message}'
+            )
+            return False
+        if not math.isfinite(detection.mean_depth_m) or detection.mean_depth_m <= 0.0:
+            self.get_logger().warning(
+                f'{label}: invalid depth, '
+                f'mask_pixels={detection.mask_pixels}, '
+                f'mean_depth_m={detection.mean_depth_m}, '
+                f'offset_x_ratio={detection.offset_x_ratio:.4f}, '
+                f'message={detection.message}'
+            )
+            return False
+        return True
 
     def _drive_forward_step(self, goal_handle, distance_m, speed):
         speed = abs(float(speed))
@@ -1717,7 +1904,15 @@ class RobotTaskServer(Node):
         deadline = time.monotonic() + timeout_sec
 
         msg = Twist()
-        while time.monotonic() < deadline and not self._is_canceling(goal_handle):
+        while time.monotonic() < deadline:
+            if self._is_canceling_without_pause(goal_handle):
+                break
+            deadline, keep_waiting = self._wait_pause_and_extend_deadline(
+                goal_handle,
+                deadline,
+            )
+            if not keep_waiting:
+                break
             current_yaw = self._current_yaw()
             if current_yaw is None:
                 break
@@ -1732,7 +1927,15 @@ class RobotTaskServer(Node):
 
     def _publish_twist_for(self, goal_handle, msg, duration_sec):
         deadline = time.monotonic() + max(0.0, float(duration_sec))
-        while time.monotonic() < deadline and not self._is_canceling(goal_handle):
+        while time.monotonic() < deadline:
+            if self._is_canceling_without_pause(goal_handle):
+                break
+            deadline, keep_waiting = self._wait_pause_and_extend_deadline(
+                goal_handle,
+                deadline,
+            )
+            if not keep_waiting:
+                break
             self._cmd_vel_pub.publish(msg)
             time.sleep(0.05)
         self._publish_stop()
@@ -2032,7 +2235,14 @@ class RobotTaskServer(Node):
     def _wait_future(self, future, timeout_sec, goal_handle):
         deadline = time.monotonic() + timeout_sec
         while rclpy.ok() and not future.done():
-            if self._is_canceling(goal_handle):
+            if self._is_canceling_without_pause(goal_handle):
+                future.cancel()
+                return False
+            deadline, keep_waiting = self._wait_pause_and_extend_deadline(
+                goal_handle,
+                deadline,
+            )
+            if not keep_waiting:
                 future.cancel()
                 return False
             if time.monotonic() >= deadline:
@@ -2040,6 +2250,22 @@ class RobotTaskServer(Node):
                 return False
             time.sleep(0.02)
         return future.done()
+
+    def _wait_pause_and_extend_deadline(self, goal_handle, deadline):
+        if not self._pause_requested:
+            return deadline, True
+        paused_at = time.monotonic()
+        if not self._wait_if_paused(goal_handle):
+            return deadline, False
+        return deadline + (time.monotonic() - paused_at), True
+
+    def _wait_if_paused(self, goal_handle):
+        while rclpy.ok() and self._pause_requested and not self._clear_requested:
+            self._publish_stop()
+            if goal_handle is not None and goal_handle.is_cancel_requested:
+                return False
+            time.sleep(0.05)
+        return not self._clear_requested
 
     def _publish_stop(self):
         self._cmd_vel_pub.publish(Twist())
@@ -2064,8 +2290,16 @@ class RobotTaskServer(Node):
         )
 
     def _is_canceling(self, goal_handle):
+        if self._is_canceling_without_pause(goal_handle):
+            return True
+        if not self._wait_if_paused(goal_handle):
+            return True
+        return self._is_canceling_without_pause(goal_handle)
+
+    def _is_canceling_without_pause(self, goal_handle):
         return (
-            self._stop_requested
+            self._clear_requested
+            or self._stop_requested
             or (goal_handle is not None and goal_handle.is_cancel_requested)
         )
 

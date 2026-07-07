@@ -4,6 +4,7 @@ import pytest
 
 from robot_arm.arm_moveit_controller import ArmMoveItController
 from robot_manipulation.arm_presets import ACTION_ARM_CENTER
+from robot_manipulation.arm_presets import joint_position_to_servo_raw
 from robot_manipulation.arm_presets import preset_to_joint_positions
 from robot_manipulation.arm_presets import servo_raw_to_joint_positions
 
@@ -28,6 +29,12 @@ def test_servo_raw_values_convert_with_hardware_mapping():
         pytest.approx(math.radians(-120.0)),
         pytest.approx(math.radians(120.0)),
     ]
+
+
+def test_servo1_uses_different_mapping_than_other_servos():
+    assert joint_position_to_servo_raw(0, math.radians(-180.0)) == pytest.approx(1000.0)
+    assert joint_position_to_servo_raw(1, math.radians(-120.0)) == pytest.approx(1000.0)
+    assert joint_position_to_servo_raw(0, math.radians(-120.0)) == pytest.approx(833.3333333333)
 
 
 def test_servo_raw_values_reject_out_of_range_value():

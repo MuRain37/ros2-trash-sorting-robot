@@ -2400,6 +2400,21 @@ class RosBridge:
         if self.started and self.node:
             self.node.publish_stop()
 
+    def clear_robot_tasks(self, command="standby"):
+        self.publish_stop()
+        if not self.started or not self.node:
+            return {"success": False, "error": self.start_error or "ROS bridge 未启动"}
+        if RobotTask is None:
+            return {
+                "success": False,
+                "error": f"RobotTask 接口未加载: {ROBOT_TASK_IMPORT_ERROR}",
+            }
+        return self.send_robot_task(
+            RobotTask.Goal.TASK_STOP,
+            wait_result=False,
+            command=command,
+        )
+
     def publish_velocity(self, linear_x, angular_z, command_session=None, command_seq=None):
         if not self.started or not self.node:
             return {"success": False, "error": self.start_error or "ROS bridge 未启动"}
@@ -2457,7 +2472,7 @@ class RosBridge:
             task_result = self.send_robot_task(
                 RobotTask.Goal.TASK_STOP,
                 wait_result=False,
-                command="stop",
+                command="standby",
             )
             return {
                 "success": task_result.get("success", False),

@@ -348,7 +348,7 @@ def control_robot():
         return jsonify({"success": False, "error": "不支持的控制命令"}), 400
 
     if command_type == "standby":
-        ROS_BRIDGE.publish_stop()
+        ROS_BRIDGE.clear_robot_tasks("standby")
 
     if command_type in ("grasp_start", "grasp_stop"):
         action = "start" if command_type == "grasp_start" else "stop"
@@ -397,7 +397,7 @@ def text_command():
     command_data = {}
     if "待机" in command_text or "停止" in command_text:
         command_type = "standby"
-        ROS_BRIDGE.publish_stop()
+        ROS_BRIDGE.clear_robot_tasks("standby")
     elif "启动" in command_text or "开始" in command_text:
         command_type = "start"
     elif "卸载" in command_text or "倒垃圾" in command_text:

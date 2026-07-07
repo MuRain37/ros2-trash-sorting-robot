@@ -92,6 +92,7 @@ class VisionGraspNode(Node):
         self._base_frame = self._param('base_frame', 'arm_link0')
         self._camera_frame = self._param('camera_frame', 'camera_optical_link')
         self._detect_service = self._param('detect_service', 'vision_grasp/detect')
+        self._target_y_scale = float(self._param('target_y_scale', 1.3))
 
     def _load_model(self):
         model_path = Path(self._model_path) if self._model_path else (
@@ -257,7 +258,15 @@ class VisionGraspNode(Node):
         ])
 
     def _target_cm_for_object(self, object_arm_m, class_name):
-        return object_arm_m * 100.0 + np.array(TARGET_OFFSETS_CM.get(class_name, (0.0, 0.0, -3.0)), dtype=float)
+        target_cm = (
+            object_arm_m * 100.0
+            + np.array(
+                TARGET_OFFSETS_CM.get(class_name, (0.0, 0.0, -3.0)),
+                dtype=float,
+            )
+        )
+        target_cm[1] *= getattr(self, '_target_y_scale', 1.3)
+        return target_cm
 
     @staticmethod
     def _bucket_preset_for_class(class_name):

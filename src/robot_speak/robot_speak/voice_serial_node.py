@@ -311,7 +311,11 @@ class VoiceSerialNode(Node):
                 bucket_id=1,
             )
         elif name == 'stop':
-            self._send_task(RobotTask.Goal.TASK_STOP, 'stop')
+            self._send_task(RobotTask.Goal.TASK_STOP, 'pause')
+        elif name == 'resume':
+            self._send_task(RobotTask.Goal.TASK_RESUME, 'resume')
+        elif name == 'power_off':
+            self._send_task(RobotTask.Goal.TASK_STOP, 'shutdown')
         elif name == 'dump_trash':
             self._send_task(
                 RobotTask.Goal.TASK_DUMP_TRASH,
