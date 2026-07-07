@@ -140,6 +140,10 @@ ROS_CONFIG = {
         'ROS_MAP_SERVER_LOAD_MAP_SERVICE',
         '/map_server/load_map',
     ),
+    'amcl_lifecycle_node': os.getenv('ROS_AMCL_LIFECYCLE_NODE', '/amcl'),
+    'amcl_lifecycle_timeout_sec': float(
+        os.getenv('ROS_AMCL_LIFECYCLE_TIMEOUT_SEC', '5.0')
+    ),
     'amcl_pose_topic': os.getenv('ROS_AMCL_POSE_TOPIC', '/amcl_pose'),
     'scan_topic': os.getenv('ROS_SCAN_TOPIC', '/scan'),
     'cmd_vel_topic': os.getenv('ROS_CMD_VEL_TOPIC', '/cmd_vel'),

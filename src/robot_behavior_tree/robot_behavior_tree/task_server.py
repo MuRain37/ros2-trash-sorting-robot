@@ -12,6 +12,8 @@ from action_msgs.msg import GoalStatus
 from geometry_msgs.msg import PoseStamped, PoseWithCovarianceStamped, Twist
 from nav_msgs.msg import Odometry
 from nav2_msgs.action import NavigateThroughPoses, NavigateToPose
+from rcl_interfaces.msg import Parameter, ParameterType, ParameterValue
+from rcl_interfaces.srv import SetParameters
 from rclpy.action import ActionClient, ActionServer
 from rclpy.action import CancelResponse, GoalResponse
 from rclpy.callback_groups import ReentrantCallbackGroup
@@ -140,11 +142,21 @@ class RobotTaskServer(Node):
         self.declare_parameter('clean_max_objects', 0)
         self.declare_parameter('detect_retry_count', 3)
         self.declare_parameter('approach_max_attempts', 3)
-        self.declare_parameter('approach_y_threshold_cm', 28.0)
-        self.declare_parameter('approach_target_y_cm', 20.0)
+        self.declare_parameter('approach_x_threshold_cm', 28.0)
+        self.declare_parameter('approach_y_threshold_cm', 13.0)
+        self.declare_parameter('approach_x_tolerance_cm', 2.0)
+        self.declare_parameter('approach_target_x_cm', 20.0)
         self.declare_parameter('approach_max_step_m', 0.08)
         self.declare_parameter('approach_linear_speed', 0.12)
+        self.declare_parameter('approach_y_angular_speed', 0.25)
+        self.declare_parameter('approach_y_max_rotate_rad', 0.35)
         self.declare_parameter('coverage_detect_interval_sec', 0.3)
+        self.declare_parameter(
+            'coverage_controller_set_parameters_service',
+            '/controller_server/set_parameters',
+        )
+        self.declare_parameter('coverage_linear_speed', 0.12)
+        self.declare_parameter('coverage_restore_linear_speed', 0.24)
         self.declare_parameter('arm_target_duration_sec', 2.0)
         self.declare_parameter('gripper_duration_ms', 500.0)
         self.declare_parameter('gripper_wait_sec', 1.0)
@@ -159,7 +171,7 @@ class RobotTaskServer(Node):
         self.declare_parameter('dump_rotate_angular_speed', 0.8)
         self.declare_parameter('dump_center_tolerance_ratio', 0.04)
         self.declare_parameter('dump_center_max_attempts',8)
-        self.declare_parameter('dump_center_angular_speed', 0.50)
+        self.declare_parameter('dump_center_angular_speed', 0.25)
         self.declare_parameter('dump_center_step_sec', 0.20)
         self.declare_parameter('dump_rotate_tolerance_rad', 0.04)
         self.declare_parameter('dump_rotate_timeout_sec', 12.0)
@@ -171,6 +183,7 @@ class RobotTaskServer(Node):
         self.declare_parameter('dump_scan_camera_check_interval_sec', 0.5)
         self.declare_parameter('dump_scan_camera_bucket_map_tolerance_m', 0.75)
         self.declare_parameter('dump_camera_horizontal_fov_rad', 1.21)
+        self.declare_parameter('dump_camera_lateral_offset_m', 0.033)
         self.declare_parameter(
             'dump_pose_store_path',
             '/home/xjw/ros2_robot/src/robot_behavior_tree/config/dump_bucket_poses.json',
@@ -255,6 +268,11 @@ class RobotTaskServer(Node):
         self._coverage_path_client = self.create_client(
             GenerateCoveragePath,
             self.get_parameter('coverage_path_service').value,
+            callback_group=callback_group,
+        )
+        self._coverage_controller_params_client = self.create_client(
+            SetParameters,
+            self.get_parameter('coverage_controller_set_parameters_service').value,
             callback_group=callback_group,
         )
         self._gripper_client = self.create_client(
@@ -504,23 +522,56 @@ class RobotTaskServer(Node):
 
     def _detect_reachable_target(self, goal_handle):
         last_target = None
+        max_attempts = int(self.get_parameter('approach_max_attempts').value)
         for approach_index in range(
-            int(self.get_parameter('approach_max_attempts').value) + 1
+            max_attempts + 1
         ):
             target = self._detect_grasp_target(goal_handle)
             if target is None:
                 return None
             last_target = target
 
-            threshold_cm = float(
-                self.get_parameter('approach_y_threshold_cm').value
+            x_threshold_cm = float(
+                self.get_parameter('approach_x_threshold_cm').value
             )
-            if target.target_y_cm <= threshold_cm:
+            x_tolerance_cm = max(
+                0.0,
+                float(self.get_parameter('approach_x_tolerance_cm').value),
+            )
+            y_threshold_cm = abs(
+                float(self.get_parameter('approach_y_threshold_cm').value)
+            )
+            if (
+                y_threshold_cm > 0.0
+                and abs(target.target_y_cm) > y_threshold_cm
+            ):
+                if approach_index >= max_attempts:
+                    break
+
+                self._feedback(
+                    goal_handle,
+                    'clean_trash: target lateral offset, rotating base',
+                    0.20,
+                )
+                self._rotate_toward_target_y(goal_handle, target)
+                continue
+
+            if target.target_x_cm <= x_threshold_cm:
+                return target
+            if (
+                approach_index >= max_attempts
+                and target.target_x_cm <= x_threshold_cm + x_tolerance_cm
+            ):
+                self.get_logger().warning(
+                    'target slightly beyond approach threshold; grasp anyway: '
+                    f'x={target.target_x_cm:.1f} cm, '
+                    f'threshold={x_threshold_cm:.1f} cm, '
+                    f'tolerance={x_tolerance_cm:.1f} cm, '
+                    f'y={target.target_y_cm:.1f} cm'
+                )
                 return target
 
-            if approach_index >= int(
-                self.get_parameter('approach_max_attempts').value
-            ):
+            if approach_index >= max_attempts:
                 break
 
             self._feedback(
@@ -528,10 +579,11 @@ class RobotTaskServer(Node):
                 'clean_trash: target is far, moving base forward',
                 0.20,
             )
-            self._drive_forward_toward_target(goal_handle, target.target_y_cm)
+            self._drive_forward_toward_target(goal_handle, target.target_x_cm)
 
         self.get_logger().warning(
             'target still beyond approach threshold: '
+            f'x={last_target.target_x_cm:.1f} cm, '
             f'y={last_target.target_y_cm:.1f} cm'
         )
         return None
@@ -584,14 +636,14 @@ class RobotTaskServer(Node):
             )
         return None
 
-    def _drive_forward_toward_target(self, goal_handle, target_y_cm):
-        target_y = float(self.get_parameter('approach_target_y_cm').value)
+    def _drive_forward_toward_target(self, goal_handle, target_x_cm):
+        target_x = float(self.get_parameter('approach_target_x_cm').value)
         max_step = float(self.get_parameter('approach_max_step_m').value)
         speed = abs(float(self.get_parameter('approach_linear_speed').value))
         if speed <= 0.0:
             return
 
-        distance_m = max(0.0, (target_y_cm - target_y) / 100.0)
+        distance_m = max(0.0, (target_x_cm - target_x) / 100.0)
         distance_m = min(distance_m, max_step)
         duration = distance_m / speed
 
@@ -602,6 +654,32 @@ class RobotTaskServer(Node):
             self._cmd_vel_pub.publish(msg)
             time.sleep(0.05)
         self._publish_stop()
+        time.sleep(0.2)
+
+    def _rotate_toward_target_y(self, goal_handle, target):
+        speed = abs(float(self.get_parameter('approach_y_angular_speed').value))
+        max_rotate = abs(
+            float(self.get_parameter('approach_y_max_rotate_rad').value)
+        )
+        if speed <= 0.0 or max_rotate <= 0.0:
+            return
+
+        forward_cm = max(1.0, float(target.target_x_cm))
+        rotate_rad = math.atan2(float(target.target_y_cm), forward_cm)
+        rotate_rad = max(-max_rotate, min(max_rotate, rotate_rad))
+        if abs(rotate_rad) <= 0.001:
+            return
+
+        msg = Twist()
+        msg.angular.z = speed if rotate_rad > 0.0 else -speed
+        self.get_logger().info(
+            'grasp lateral align rotate: '
+            f'x={target.target_x_cm:.1f} cm, '
+            f'y={target.target_y_cm:.1f} cm, '
+            f'rotate={rotate_rad:.3f} rad, '
+            f'angular_z={msg.angular.z:.3f}'
+        )
+        self._publish_twist_for(goal_handle, msg, abs(rotate_rad) / speed)
         time.sleep(0.2)
 
     def _grasp_target(self, goal_handle, target):
@@ -865,27 +943,65 @@ class RobotTaskServer(Node):
     def _run_clean_region_tree(self, goal_handle, goal):
         self._feedback(goal_handle, 'clean_region: arm mapping pose', 0.05)
         self._send_arm_preset(goal_handle, ArmPreset.Goal.ARM_MAPPING)
-        self._feedback(goal_handle, 'clean_region: generate coverage path', 0.15)
         region, error = self._resolve_clean_region(goal)
         if region is None:
             return False, error
 
-        path, message = self._generate_coverage_path(goal_handle, region)
+        self._feedback(goal_handle, 'clean_region: generate start path', 0.10)
+        preview_path, message = self._generate_coverage_path(goal_handle, region)
+        if preview_path is None:
+            return False, message
+
+        start_pose = preview_path.poses[0]
+        self._feedback(goal_handle, 'clean_region: navigate to start pose', 0.15)
+        self._navigate_pose_with_visual_interrupt(
+            goal_handle,
+            start_pose,
+            'clean region start pose',
+            detect_enabled=False,
+        )
+
+        self._feedback(goal_handle, 'clean_region: arm center for coverage', 0.20)
+        self._send_arm_preset(goal_handle, ArmPreset.Goal.ARM_CENTER)
+
+        start_position = self._current_map_xy()
+        self._feedback(goal_handle, 'clean_region: generate coverage path', 0.25)
+        path, message = self._generate_coverage_path(
+            goal_handle,
+            region,
+            start_position=start_position,
+        )
         if path is None:
             return False, message
 
-        picked = self._run_coverage_path_with_grasp(goal_handle, path)
-        if picked is None:
-            return False, 'clean region canceled'
+        self._set_coverage_linear_speed(
+            goal_handle,
+            float(self.get_parameter('coverage_linear_speed').value),
+            'set coverage slow speed',
+        )
+        try:
+            picked = self._run_coverage_path_with_grasp(goal_handle, path)
+            if picked is None:
+                return False, 'clean region canceled'
+        finally:
+            self._set_coverage_linear_speed(
+                None,
+                float(self.get_parameter('coverage_restore_linear_speed').value),
+                'restore coverage normal speed',
+            )
         return True, f'clean region completed: picked={picked}'
 
-    def _generate_coverage_path(self, goal_handle, region):
+    def _generate_coverage_path(self, goal_handle, region, start_position=None):
         request = GenerateCoveragePath.Request()
         request.min_x = region.min_x
         request.min_y = region.min_y
         request.max_x = region.max_x
         request.max_y = region.max_y
         request.frame_id = region.frame_id
+        if start_position is not None:
+            request.use_start = True
+            request.start_x = float(start_position[0])
+            request.start_y = float(start_position[1])
         response = self._call_service(
             self._coverage_path_client,
             request,
@@ -950,8 +1066,8 @@ class RobotTaskServer(Node):
 
             if self._is_canceling(goal_handle):
                 return None
-            self._feedback(goal_handle, 'clean_region: resume coverage pose', 0.60)
-            self._send_arm_preset(goal_handle, ArmPreset.Goal.ARM_MAPPING)
+            self._feedback(goal_handle, 'clean_region: arm center before resume', 0.60)
+            self._send_arm_preset(goal_handle, ArmPreset.Goal.ARM_CENTER)
 
             if self._is_canceling(goal_handle):
                 return None
@@ -1042,6 +1158,36 @@ class RobotTaskServer(Node):
         except Exception:
             return
         self._wait_future(cancel_future, 2.0, None)
+
+    def _set_coverage_linear_speed(self, goal_handle, speed, label):
+        request = SetParameters.Request()
+        parameter = Parameter()
+        parameter.name = 'FollowPath.desired_linear_vel'
+        parameter.value = ParameterValue()
+        parameter.value.type = ParameterType.PARAMETER_DOUBLE
+        parameter.value.double_value = float(max(0.01, speed))
+        request.parameters = [parameter]
+
+        response = self._call_service(
+            self._coverage_controller_params_client,
+            request,
+            timeout_sec=float(self.get_parameter('service_timeout_sec').value),
+            goal_handle=goal_handle,
+            label=label,
+        )
+        if response is None:
+            self.get_logger().warning(f'{label} failed: no response')
+            return False
+        for result in response.results:
+            if not result.successful:
+                self.get_logger().warning(
+                    f'{label} rejected: {result.reason}'
+                )
+                return False
+        self.get_logger().info(
+            f'{label}: FollowPath.desired_linear_vel={parameter.value.double_value:.3f}'
+        )
+        return True
 
     def _run_set_clean_region(self, goal_handle, goal):
         region_id = int(goal.bucket_id)
@@ -1317,7 +1463,10 @@ class RobotTaskServer(Node):
         if hfov <= 0.0:
             return False, f'invalid camera hfov={hfov}'
 
-        bearing = math.atan(math.tan(hfov * 0.5) * detection.offset_x_ratio)
+        offset_ratio = detection.offset_x_ratio - self._dump_camera_offset_ratio(
+            detection.mean_depth_m
+        )
+        bearing = math.atan(math.tan(hfov * 0.5) * offset_ratio)
         bucket_x = robot_pose.x + detection.mean_depth_m * math.cos(
             robot_pose.yaw + bearing
         )
@@ -1406,21 +1555,27 @@ class RobotTaskServer(Node):
                     f'message={detection.message}'
                 )
                 return False
+            target_offset_ratio = self._dump_camera_offset_ratio(
+                detection.mean_depth_m
+            )
+            center_error_ratio = detection.offset_x_ratio - target_offset_ratio
             self.get_logger().info(
                 'dump center detect '
                 f'{attempt + 1}/{attempts}: detected, '
                 f'mask_pixels={detection.mask_pixels}, '
                 f'mean_depth_m={detection.mean_depth_m:.3f}, '
                 f'offset_x_ratio={detection.offset_x_ratio:.4f}, '
+                f'target_offset_ratio={target_offset_ratio:.4f}, '
+                f'center_error_ratio={center_error_ratio:.4f}, '
                 f'tolerance={tolerance:.4f}, '
                 f'message={detection.message}'
             )
-            if abs(detection.offset_x_ratio) <= tolerance:
+            if abs(center_error_ratio) <= tolerance:
                 return True
 
             twist = Twist()
             # 图像中心在左侧时 offset_x 为负，向左旋转；反之向右旋转。
-            twist.angular.z = -speed if detection.offset_x_ratio > 0.0 else speed
+            twist.angular.z = -speed if center_error_ratio > 0.0 else speed
             self.get_logger().info(
                 'dump center rotate step: '
                 f'angular_z={twist.angular.z:.3f}, step_sec={step_sec:.3f}'
@@ -1428,6 +1583,20 @@ class RobotTaskServer(Node):
             self._publish_twist_for(goal_handle, twist, step_sec)
             time.sleep(0.12)
         return False
+
+    def _dump_camera_offset_ratio(self, depth_m):
+        lateral_offset_m = float(
+            self.get_parameter('dump_camera_lateral_offset_m').value
+        )
+        if not math.isfinite(depth_m) or depth_m <= 0.0:
+            depth_m = max(
+                0.01,
+                float(self.get_parameter('dump_align_target_depth_m').value),
+            )
+        hfov = abs(float(self.get_parameter('dump_camera_horizontal_fov_rad').value))
+        if hfov <= 0.0:
+            return 0.0
+        return lateral_offset_m / (float(depth_m) * math.tan(hfov * 0.5))
 
     def _align_dump_bucket_depth(self, goal_handle):
         attempts = max(1, int(self.get_parameter('dump_align_max_attempts').value))
@@ -1572,6 +1741,11 @@ class RobotTaskServer(Node):
         if self._latest_odom_yaw is not None:
             return self._latest_odom_yaw
         return self._latest_imu_yaw
+
+    def _current_map_xy(self):
+        if self._latest_map_pose is None:
+            return None
+        return self._latest_map_pose.x, self._latest_map_pose.y
 
     def _load_dump_bucket_poses(self):
         path = Path(str(self.get_parameter('dump_pose_store_path').value))
