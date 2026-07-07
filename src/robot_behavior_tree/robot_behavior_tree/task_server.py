@@ -1,8 +1,6 @@
 """高层行为树任务调度节点。"""
 
-import math
 import threading
-import time
 
 import rclpy
 from geometry_msgs.msg import PoseWithCovarianceStamped, Twist
@@ -23,14 +21,14 @@ from robot_interfaces.srv import (
     SetCameraTfPreset,
     SetGripper,
 )
-from sensor_msgs.msg import Imu, LaserScan
+from sensor_msgs.msg import Imu
 from std_srvs.srv import Trigger
 
 from .task_clean_region import CleanRegionTaskMixin
 from .task_clean_trash import CleanTrashTaskMixin
 from .task_dump_trash import DumpTrashTaskMixin
 from .task_hardware import HardwareTaskMixin
-from .task_models import MapPose, ScanCameraObstacle
+from .task_models import MapPose
 from .task_motion import MotionMixin
 from .task_navigation import NavigationTaskMixin
 from .task_ros_utils import RosTaskUtilsMixin
@@ -41,7 +39,6 @@ SUBSCRIPTIONS = (
     ('_odom_sub', Odometry, 'odom_topic', '_handle_odom'),
     ('_amcl_pose_sub', PoseWithCovarianceStamped, 'amcl_pose_topic', '_handle_amcl_pose'),
     ('_imu_sub', Imu, 'imu_topic', '_handle_imu'),
-    ('_scan_camera_sub', LaserScan, 'scan_camera_topic', '_handle_scan_camera'),
 )
 
 SERVICE_CLIENTS = (
@@ -104,7 +101,6 @@ class RobotTaskServer(
         self._latest_odom_yaw = None
         self._latest_imu_yaw = None
         self._latest_map_pose = None
-        self._latest_scan_camera_obstacle = None
         self._load_dump_bucket_poses()
         self._load_clean_regions()
         for attr, msg_type, topic_param, callback_name in SUBSCRIPTIONS:
@@ -174,47 +170,6 @@ class RobotTaskServer(
             x=float(pose.position.x),
             y=float(pose.position.y),
             yaw=self._yaw_from_quaternion(pose.orientation),
-        )
-
-    def _handle_scan_camera(self, msg):
-        if not bool(
-            self.get_parameter('dump_scan_camera_bucket_check_enabled').value
-        ):
-            return
-
-        min_range = max(
-            0.0,
-            float(self.get_parameter('dump_scan_camera_obstacle_min_range_m').value),
-        )
-        max_range = max(
-            min_range,
-            float(self.get_parameter('dump_scan_camera_obstacle_max_range_m').value),
-        )
-        front_angle = abs(
-            float(self.get_parameter('dump_scan_camera_front_angle_rad').value)
-        )
-
-        best_range = None
-        best_angle = None
-        for index, range_m in enumerate(msg.ranges):
-            if not math.isfinite(range_m):
-                continue
-            range_m = float(range_m)
-            if range_m < min_range or range_m > max_range:
-                continue
-            angle = float(msg.angle_min + index * msg.angle_increment)
-            if abs(angle) > front_angle:
-                continue
-            if best_range is None or range_m < best_range:
-                best_range = range_m
-                best_angle = angle
-
-        if best_range is None:
-            return
-        self._latest_scan_camera_obstacle = ScanCameraObstacle(
-            range_m=best_range,
-            bearing_rad=best_angle,
-            seen_at=time.monotonic(),
         )
 
     def _handle_goal(self, goal_request):

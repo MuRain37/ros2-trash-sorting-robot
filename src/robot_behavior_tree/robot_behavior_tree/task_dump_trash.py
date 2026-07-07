@@ -40,7 +40,19 @@ PARAMETER_DEFAULTS = (
     # 视觉对中失败时是否终止倒垃圾任务。
     ('dump_visual_align_required', False),
     # 导航到卸载桶前方时与桶保持的距离。
-    ('dump_approach_distance_m', 1.15),
+    ('dump_approach_distance_m', 0.75),
+    # 导航去卸载桶前方时 YOLO 检测间隔。
+    ('dump_detect_interval_sec', 0.5),
+    # 卸载桶深度对齐最多前进修正次数。
+    ('dump_align_max_attempts', 8),
+    # 卸载桶中心点深度对齐目标距离。
+    ('dump_align_target_depth_m', 0.35),
+    # 卸载桶深度对齐容差。
+    ('dump_align_depth_tolerance_m', 0.04),
+    # 卸载桶深度对齐单次最大前进距离。
+    ('dump_align_step_m', 0.05),
+    # 卸载桶深度对齐前进速度。
+    ('dump_align_linear_speed', 0.05),
     # 倒垃圾前原地转身使用的角速度。
     ('dump_rotate_angular_speed', 0.8),
     # 卸载桶视觉居中允许的图像中心偏移比例。
@@ -48,31 +60,13 @@ PARAMETER_DEFAULTS = (
     # 卸载桶视觉居中最多旋转修正次数。
     ('dump_center_max_attempts', 8),
     # 卸载桶视觉居中单步旋转角速度。
-    ('dump_center_angular_speed', 0.2),
+    ('dump_center_angular_speed', 0.20),
     # 卸载桶视觉居中每次旋转持续时间。
     ('dump_center_step_sec', 0.30),
     # 原地转身结束时允许的 yaw 误差。
     ('dump_rotate_tolerance_rad', 0.04),
     # 原地转身动作超时时间。
     ('dump_rotate_timeout_sec', 12.0),
-    # 是否启用 scan_camera 障碍物辅助确认卸载桶。
-    ('dump_scan_camera_bucket_check_enabled', True),
-    # scan_camera 认为有效障碍物的最近距离。
-    ('dump_scan_camera_obstacle_min_range_m', 0.05),
-    # scan_camera 认为有效障碍物的最远距离。
-    ('dump_scan_camera_obstacle_max_range_m', 1.4),
-    # scan_camera 只检查正前方该角度范围内的障碍物。
-    ('dump_scan_camera_front_angle_rad', 0.8),
-    # scan_camera 障碍物数据超过该时间后视为过期。
-    ('dump_scan_camera_obstacle_stale_sec', 1.0),
-    # 导航去卸载桶前方时 scan_camera 辅助检查间隔。
-    ('dump_scan_camera_check_interval_sec', 0.5),
-    # 视觉估计桶位置与已标定桶位置允许的地图误差。
-    ('dump_scan_camera_bucket_map_tolerance_m', 0.75),
-    # 卸载桶相机水平视场角，用于把图像偏移换算为方位角。
-    ('dump_camera_horizontal_fov_rad', 1.21),
-    # 卸载桶相机相对机器人中心的横向偏移。
-    ('dump_camera_lateral_offset_m', 0.033),
 )
 
 
@@ -104,6 +98,9 @@ class DumpTrashTaskMixin:
             return True, f'dump bucket {bucket_ids[0]} completed'
         return True, 'dump buckets 1 and 2 completed'
 
+    def _dump_progress(self, base_progress, span, ratio):
+        return base_progress + span * ratio
+
     def _dump_single_bucket(self, goal_handle, bucket_id, base_progress=0.0, span=1.0):
         pose = self._dump_bucket_poses.get(bucket_id)
         if pose is None:
@@ -112,14 +109,14 @@ class DumpTrashTaskMixin:
         self._feedback(
             goal_handle,
             f'dump_trash: arm mapping pose for bucket {bucket_id}',
-            base_progress + span * 0.05,
+            self._dump_progress(base_progress, span, 0.05),
         )
         self._send_arm_preset(goal_handle, ArmPreset.Goal.ARM_MAPPING)
 
         self._feedback(
             goal_handle,
             f'dump_trash: navigate to bucket {bucket_id} front',
-            base_progress + span * 0.10,
+            self._dump_progress(base_progress, span, 0.20),
         )
         nav_result, nav_message = self._navigate_to_dump_front(goal_handle, pose)
         if not nav_result:
@@ -128,11 +125,11 @@ class DumpTrashTaskMixin:
         if bool(self.get_parameter('require_dump_bucket_detect').value):
             self._feedback(
                 goal_handle,
-                f'dump_trash: center bucket {bucket_id}',
-                base_progress + span * 0.45,
+                f'dump_trash: visual align bucket {bucket_id}',
+                self._dump_progress(base_progress, span, 0.45),
             )
-            if not self._center_dump_bucket(goal_handle):
-                message = f'dump bucket {bucket_id} visual center align failed'
+            if not self._align_dump_bucket(goal_handle):
+                message = f'dump bucket {bucket_id} visual align failed'
                 if bool(self.get_parameter('dump_visual_align_required').value):
                     return False, message
                 self.get_logger().warning(f'{message}; continue to dump')
@@ -140,14 +137,14 @@ class DumpTrashTaskMixin:
         self._feedback(
             goal_handle,
             f'dump_trash: rotate before dumping bucket {bucket_id}',
-            base_progress + span * 0.65,
+            self._dump_progress(base_progress, span, 0.60),
         )
         self._rotate_in_place_180(goal_handle)
 
         self._feedback(
             goal_handle,
             f'dump_trash: pick onboard bucket {bucket_id}',
-            base_progress + span * 0.76,
+            self._dump_progress(base_progress, span, 0.70),
         )
         success, message = self._call_dump_bucket_service(
             goal_handle,
@@ -161,7 +158,7 @@ class DumpTrashTaskMixin:
         self._feedback(
             goal_handle,
             f'dump_trash: backup bucket {bucket_id}',
-            base_progress + span * 0.80,
+            self._dump_progress(base_progress, span, 0.78),
         )
         self._drive_backward_step(
             goal_handle,
@@ -172,7 +169,7 @@ class DumpTrashTaskMixin:
         self._feedback(
             goal_handle,
             f'dump_trash: pour bucket {bucket_id}',
-            base_progress + span * 0.84,
+            self._dump_progress(base_progress, span, 0.84),
         )
         success, message = self._call_dump_bucket_service(
             goal_handle,
@@ -186,7 +183,7 @@ class DumpTrashTaskMixin:
         self._feedback(
             goal_handle,
             f'dump_trash: place bucket {bucket_id}',
-            base_progress + span * 0.88,
+            self._dump_progress(base_progress, span, 0.90),
         )
         success, message = self._call_dump_bucket_service(
             goal_handle,
@@ -200,7 +197,7 @@ class DumpTrashTaskMixin:
         self._feedback(
             goal_handle,
             f'dump_trash: move forward after bucket {bucket_id}',
-            base_progress + span * 0.92,
+            self._dump_progress(base_progress, span, 0.95),
         )
         self._drive_forward_step(
             goal_handle,
@@ -211,7 +208,7 @@ class DumpTrashTaskMixin:
         self._feedback(
             goal_handle,
             'dump_trash: home dump mechanism',
-            base_progress + span * 0.96,
+            self._dump_progress(base_progress, span, 0.98),
         )
         return self._call_dump_trigger(
             goal_handle,
@@ -290,7 +287,7 @@ class DumpTrashTaskMixin:
         deadline = time.monotonic() + timeout_sec
         check_interval = max(
             0.1,
-            float(self.get_parameter('dump_scan_camera_check_interval_sec').value),
+            float(self.get_parameter('dump_detect_interval_sec').value),
         )
         next_bucket_check = time.monotonic()
 
@@ -313,23 +310,21 @@ class DumpTrashTaskMixin:
 
             if time.monotonic() >= next_bucket_check:
                 next_bucket_check = time.monotonic() + check_interval
-                accepted, reason = self._scan_camera_obstacle_matches_dump_bucket(
-                    goal_handle,
-                    pose,
-                )
-                if accepted:
-                    self.get_logger().warning(
-                        'scan_camera obstacle matches dump bucket; '
-                        f'cancel nav and continue to visual alignment: {reason}'
+                detection = self._detect_dump_bucket(goal_handle)
+                if detection is not None and detection.detected:
+                    self.get_logger().info(
+                        'dump bucket detected during navigation; '
+                        'cancel nav and continue to visual alignment: '
+                        f'center_depth_m={detection.center_depth_m:.3f}, '
+                        f'offset_x_ratio={detection.offset_x_ratio:.4f}, '
+                        f'message={detection.message}'
                     )
                     self._cancel_action_goal(action_goal_handle)
                     self._publish_stop()
                     return (
                         True,
-                        f'dump bucket {pose.bucket_id} found by scan_camera obstacle',
+                        f'dump bucket {pose.bucket_id} found by YOLO',
                     )
-                if reason:
-                    self.get_logger().debug(f'dump scan_camera check skipped: {reason}')
 
             time.sleep(0.05)
 
@@ -341,90 +336,6 @@ class DumpTrashTaskMixin:
                 f'status={wrapped.status}',
             )
         return True, f'navigated to dump bucket {pose.bucket_id} front'
-
-    def _recent_scan_camera_obstacle(self):
-        obstacle = self._latest_scan_camera_obstacle
-        if obstacle is None:
-            return None
-        stale_sec = max(
-            0.0,
-            float(self.get_parameter('dump_scan_camera_obstacle_stale_sec').value),
-        )
-        if time.monotonic() - obstacle.seen_at > stale_sec:
-            return None
-        return obstacle
-
-    def _scan_camera_obstacle_matches_dump_bucket(self, goal_handle, pose):
-        if not bool(
-            self.get_parameter('dump_scan_camera_bucket_check_enabled').value
-        ):
-            return False, ''
-        if not bool(self.get_parameter('require_dump_bucket_detect').value):
-            return False, ''
-        if self._is_canceling(goal_handle):
-            return False, 'task canceling'
-
-        obstacle = self._recent_scan_camera_obstacle()
-        if obstacle is None:
-            return False, ''
-
-        detection = self._detect_dump_bucket(goal_handle)
-        if detection is None:
-            return False, 'dump bucket contour detection unavailable'
-        if not detection.detected:
-            return False, f'scan obstacle has no usable contour: {detection.message}'
-
-        accepted, reason = self._dump_detection_matches_pose(detection, pose)
-        if not accepted:
-            return False, reason
-        return (
-            True,
-            f'scan_range={obstacle.range_m:.3f}, '
-            f'scan_bearing={obstacle.bearing_rad:.3f}; {reason}',
-        )
-
-    def _dump_detection_matches_pose(self, detection, pose):
-        robot_pose = self._latest_map_pose
-        if robot_pose is None:
-            return False, 'map pose unavailable'
-        if not math.isfinite(detection.mean_depth_m) or detection.mean_depth_m <= 0.0:
-            return False, f'invalid depth={detection.mean_depth_m}'
-        if not math.isfinite(detection.offset_x_ratio):
-            return False, f'invalid offset={detection.offset_x_ratio}'
-
-        hfov = abs(float(self.get_parameter('dump_camera_horizontal_fov_rad').value))
-        if hfov <= 0.0:
-            return False, f'invalid camera hfov={hfov}'
-
-        offset_ratio = detection.offset_x_ratio - self._dump_camera_offset_ratio(
-            detection.mean_depth_m
-        )
-        bearing = math.atan(math.tan(hfov * 0.5) * offset_ratio)
-        bucket_x = robot_pose.x + detection.mean_depth_m * math.cos(
-            robot_pose.yaw + bearing
-        )
-        bucket_y = robot_pose.y + detection.mean_depth_m * math.sin(
-            robot_pose.yaw + bearing
-        )
-        bucket_error = math.hypot(bucket_x - pose.x, bucket_y - pose.y)
-        bucket_tolerance = abs(
-            float(self.get_parameter('dump_scan_camera_bucket_map_tolerance_m').value)
-        )
-
-        if bucket_error <= bucket_tolerance:
-            return (
-                True,
-                f'est_bucket=({bucket_x:.3f}, {bucket_y:.3f}), '
-                f'set_bucket=({pose.x:.3f}, {pose.y:.3f}), '
-                f'bucket_error={bucket_error:.3f}',
-            )
-
-        return (
-            False,
-            f'est_bucket=({bucket_x:.3f}, {bucket_y:.3f}), '
-            f'set_bucket=({pose.x:.3f}, {pose.y:.3f}), '
-            f'bucket_error={bucket_error:.3f}>{bucket_tolerance:.3f}',
-        )
 
     def _detect_dump_bucket(self, goal_handle):
         request = DetectDumpBucket.Request()
@@ -442,10 +353,17 @@ class DumpTrashTaskMixin:
             detected=bool(response.detected),
             within_depth=int(response.signal) == 1,
             mask_pixels=int(response.mask_pixels),
-            mean_depth_m=float(response.mean_depth_m),
+            center_depth_m=float(response.mean_depth_m),
             offset_x_px=float(response.offset_x_px),
             offset_x_ratio=float(response.offset_x_ratio),
             message=str(response.message),
+        )
+
+    def _align_dump_bucket(self, goal_handle):
+        return (
+            self._center_dump_bucket(goal_handle)
+            and self._align_dump_bucket_depth(goal_handle)
+            and self._center_dump_bucket(goal_handle)
         )
 
     def _center_dump_bucket(self, goal_handle):
@@ -471,7 +389,7 @@ class DumpTrashTaskMixin:
                         'dump center detect '
                         f'{attempt + 1}/{attempts}: not detected, '
                         f'mask_pixels={detection.mask_pixels}, '
-                        f'mean_depth_m={detection.mean_depth_m:.3f}, '
+                        f'center_depth_m={detection.center_depth_m:.3f}, '
                         f'offset_x_ratio={detection.offset_x_ratio:.4f}, '
                         f'message={detection.message}'
                     )
@@ -483,7 +401,7 @@ class DumpTrashTaskMixin:
                     'dump center detect '
                     f'{attempt + 1}/{attempts}: invalid offset, '
                     f'mask_pixels={detection.mask_pixels}, '
-                    f'mean_depth_m={detection.mean_depth_m:.3f}, '
+                    f'center_depth_m={detection.center_depth_m:.3f}, '
                     f'offset_x_ratio={detection.offset_x_ratio}, '
                     f'message={detection.message}'
                 )
@@ -492,7 +410,7 @@ class DumpTrashTaskMixin:
                 'dump center detect '
                 f'{attempt + 1}/{attempts}: detected, '
                 f'mask_pixels={detection.mask_pixels}, '
-                f'mean_depth_m={detection.mean_depth_m:.3f}, '
+                f'center_depth_m={detection.center_depth_m:.3f}, '
                 f'offset_x_ratio={detection.offset_x_ratio:.4f}, '
                 f'tolerance={tolerance:.4f}, '
                 f'message={detection.message}'
@@ -511,16 +429,64 @@ class DumpTrashTaskMixin:
             time.sleep(0.12)
         return False
 
-    def _dump_camera_offset_ratio(self, depth_m):
-        lateral_offset_m = float(
-            self.get_parameter('dump_camera_lateral_offset_m').value
+    def _align_dump_bucket_depth(self, goal_handle):
+        attempts = max(1, int(self.get_parameter('dump_align_max_attempts').value))
+        target_depth = max(
+            0.0,
+            float(self.get_parameter('dump_align_target_depth_m').value),
         )
-        if not math.isfinite(depth_m) or depth_m <= 0.0:
-            return 0.0
-        hfov = abs(float(self.get_parameter('dump_camera_horizontal_fov_rad').value))
-        if hfov <= 0.0:
-            return 0.0
-        return lateral_offset_m / (float(depth_m) * math.tan(hfov * 0.5))
+        tolerance = abs(
+            float(self.get_parameter('dump_align_depth_tolerance_m').value)
+        )
+        for attempt in range(attempts):
+            if self._is_canceling(goal_handle):
+                return False
+            detection = self._detect_dump_bucket(goal_handle)
+            if (
+                detection is not None
+                and detection.detected
+                and math.isfinite(detection.center_depth_m)
+                and detection.center_depth_m > 0.0
+                and abs(detection.center_depth_m - target_depth) <= tolerance
+            ):
+                self.get_logger().info(
+                    'dump depth align detect '
+                    f'{attempt + 1}/{attempts}: reached target depth, '
+                    f'mask_pixels={detection.mask_pixels}, '
+                    f'center_depth_m={detection.center_depth_m:.3f}, '
+                    f'target_depth_m={target_depth:.3f}, '
+                    f'offset_x_ratio={detection.offset_x_ratio:.4f}, '
+                    f'message={detection.message}'
+                )
+                return True
+            if detection is None:
+                self.get_logger().warning(
+                    'dump depth align detect '
+                    f'{attempt + 1}/{attempts}: no response'
+                )
+            else:
+                self.get_logger().warning(
+                    'dump depth align detect '
+                    f'{attempt + 1}/{attempts}: not within depth, '
+                    f'detected={detection.detected}, '
+                    f'within_depth={detection.within_depth}, '
+                    f'mask_pixels={detection.mask_pixels}, '
+                    f'center_depth_m={detection.center_depth_m:.3f}, '
+                    f'target_depth_m={target_depth:.3f}, '
+                    f'offset_x_ratio={detection.offset_x_ratio:.4f}, '
+                    f'message={detection.message}'
+                )
+            if attempt < attempts - 1:
+                step_m = float(self.get_parameter('dump_align_step_m').value)
+                if detection is not None and math.isfinite(detection.center_depth_m):
+                    remaining_m = detection.center_depth_m - target_depth
+                    step_m = min(step_m, max(0.0, remaining_m))
+                self._drive_forward_step(
+                    goal_handle,
+                    step_m,
+                    float(self.get_parameter('dump_align_linear_speed').value),
+                )
+        return False
 
     def _drive_forward_step(self, goal_handle, distance_m, speed):
         speed = abs(float(speed))

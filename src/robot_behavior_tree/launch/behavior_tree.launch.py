@@ -3,7 +3,7 @@
 import os
 
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, ExecuteProcess
+from launch.actions import DeclareLaunchArgument
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
@@ -21,11 +21,12 @@ def generate_launch_description():
             'dump_bucket_poses.json',
         ),
     )
-    dump_task_script = os.path.join(
+    dump_model_path = os.path.join(
         ros_src_root,
-        'robot_manipulation',
-        'robot_manipulation',
-        'dump_task.py',
+        'robot_vision_grasp',
+        'robot_vision_grasp',
+        'models',
+        'trash_bin.pt',
     )
 
     robot_task_server = Node(
@@ -43,41 +44,24 @@ def generate_launch_description():
         }],
     )
 
-    if os.path.exists(dump_task_script):
-        dump_task = ExecuteProcess(
-            cmd=[
-                'python3',
-                dump_task_script,
-                '--ros-args',
-                '-p',
-                'service_name:=/detect_dump_bucket',
-                '-p',
-                'color_topic:=/camera/real_camera/color/image_raw',
-                '-p',
-                'depth_topic:=/camera/real_camera/aligned_depth_to_color/image_raw',
-            ],
-            name='dump_task',
-            output='screen',
-            emulate_tty=True,
-            respawn=True,
-            respawn_delay=1.0,
-        )
-    else:
-        dump_task = Node(
-            package='robot_manipulation',
-            executable='dump_task',
-            name='dump_task',
-            output='screen',
-            emulate_tty=True,
-            respawn=True,
-            respawn_delay=1.0,
-            parameters=[{
-                'use_sim_time': use_sim_time,
-                'service_name': '/detect_dump_bucket',
-                'color_topic': '/camera/real_camera/color/image_raw',
-                'depth_topic': '/camera/real_camera/aligned_depth_to_color/image_raw',
-            }],
-        )
+    dump_task = Node(
+        package='robot_vision_grasp',
+        executable='dump_task',
+        name='dump_task',
+        output='screen',
+        emulate_tty=True,
+        respawn=True,
+        respawn_delay=1.0,
+        parameters=[{
+            'use_sim_time': use_sim_time,
+            'service_name': '/detect_dump_bucket',
+            'model_path': dump_model_path,
+            'color_topic': '/camera/real_camera/color/image_raw',
+            'depth_topic': '/camera/real_camera/aligned_depth_to_color/image_raw',
+            'class_name': 'bin',
+            'confidence_threshold': 0.75,
+        }],
+    )
 
     dump_trash_node = Node(
         package='robot_manipulation',

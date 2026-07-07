@@ -17,10 +17,14 @@ PARAMETER_DEFAULTS = (
     ('coverage_path_service', 'generate_coverage_path'),
     # 区域清扫任务最长运行时间。
     ('clean_region_timeout_sec', 360.0),
-    # 覆盖清扫导航中视觉检测抓取目标的间隔。
+    # 旧版时间触发视觉检测间隔，保留参数兼容已有配置。
     ('coverage_detect_interval_sec', 0.3),
     # 区域清扫每次向前推进并重新扫描的距离。
     ('coverage_scan_forward_step_m', 0.30),
+    # 区域清扫导航中触发一次视觉检测的最小位移。
+    ('coverage_detect_distance_m', 0.30),
+    # 区域清扫导航中触发一次视觉检测的最小转角。
+    ('coverage_detect_yaw_rad', math.radians(45.0)),
     # 动态调整 controller_server 参数的服务名。
     (
         'coverage_controller_set_parameters_service',
@@ -51,7 +55,7 @@ class CleanRegionTaskMixin:
         if preview_path is None:
             return False, message
 
-        start_pose = preview_path.poses[0]
+        start_pose = self._nearest_region_entry_pose(region, preview_path)
         self._feedback(goal_handle, 'clean_region: navigate to start pose', 0.15)
         start_result = self._navigate_pose_with_visual_interrupt(
             goal_handle,
@@ -93,6 +97,20 @@ class CleanRegionTaskMixin:
             0.0,
             float(self.get_parameter('coverage_scan_forward_step_m').value),
         )
+        current_xy = self._current_map_xy()
+        if current_xy is None:
+            return picked
+
+        path, message = self._generate_coverage_path(
+            goal_handle,
+            region,
+            start_position=current_xy,
+        )
+        if path is None:
+            raise RuntimeError(message)
+
+        scan_distance_m = forward_step_m
+        step_m = forward_step_m if forward_step_m > 0.0 else 0.30
 
         while time.monotonic() < deadline:
             if self._is_canceling_without_pause(goal_handle):
@@ -104,57 +122,131 @@ class CleanRegionTaskMixin:
             if not keep_waiting:
                 return None
 
-            self._feedback(goal_handle, 'clean_region: detect at current pose', 0.30)
-            target = self._detect_reachable_target(goal_handle)
-            if target is not None:
-                self._feedback(
-                    goal_handle,
-                    f'clean_region: grasping {target.class_name}',
-                    0.45,
-                )
-                bucket_id, bucket_level = self._grasp_target(goal_handle, target)
-                picked += 1
-                success, message = self._maybe_auto_dump_full_bucket(
-                    goal_handle,
-                    bucket_id,
-                    bucket_level,
-                )
-                if not success:
-                    raise RuntimeError(message)
-
-                if self._is_canceling(goal_handle):
-                    return None
-                self._feedback(goal_handle, 'clean_region: arm center after grasp', 0.60)
-                self._send_arm_preset(goal_handle, ArmPreset.Goal.ARM_CENTER)
-                continue
-
             current_xy = self._current_map_xy()
             if current_xy is None:
                 return picked
+            current_yaw = self._current_yaw()
 
-            path, message = self._generate_coverage_path(
-                goal_handle,
-                region,
-                start_position=current_xy,
-            )
-            if path is None:
-                raise RuntimeError(message)
-
-            next_pose = self._next_coverage_pose(path, forward_step_m)
+            next_pose = self._coverage_pose_at_distance(path, scan_distance_m)
             if next_pose is None:
                 return picked
+            scan_distance_m += step_m
 
             self._feedback(goal_handle, 'clean_region: move forward to next scan', 0.70)
             result = self._navigate_pose_with_visual_interrupt(
                 goal_handle,
                 next_pose,
                 'clean region next scan pose',
-                detect_enabled=False,
+                detect_enabled=True,
             )
             if result is None:
                 return None
+            if result or self._coverage_detect_due(
+                current_xy,
+                current_yaw,
+                forward_step_m,
+                float(self.get_parameter('coverage_detect_yaw_rad').value),
+            ):
+                picked = self._handle_clean_region_detection(goal_handle, picked)
+                if picked is None:
+                    return None
 
         return picked
+
+    def _coverage_pose_at_distance(self, path, target_distance_m):
+        if not path.poses:
+            return None
+        if target_distance_m <= 0.0:
+            return path.poses[0]
+
+        previous = path.poses[0]
+        travelled = 0.0
+        for pose in path.poses[1:]:
+            dx = pose.pose.position.x - previous.pose.position.x
+            dy = pose.pose.position.y - previous.pose.position.y
+            segment = math.hypot(dx, dy)
+            if segment <= 1e-6:
+                previous = pose
+                continue
+            if travelled + segment >= target_distance_m:
+                ratio = (target_distance_m - travelled) / segment
+                next_pose = PoseStamped()
+                next_pose.header = pose.header
+                next_pose.pose.position.x = (
+                    previous.pose.position.x + dx * ratio
+                )
+                next_pose.pose.position.y = (
+                    previous.pose.position.y + dy * ratio
+                )
+                next_pose.pose.position.z = 0.0
+                next_pose.pose.orientation = pose.pose.orientation
+                return next_pose
+            travelled += segment
+            previous = pose
+        return None
+
+    def _handle_clean_region_detection(self, goal_handle, picked):
+        target = self._detect_reachable_target(goal_handle)
+        if target is None:
+            self.get_logger().warning(
+                'clean_region visual trigger had no reachable target; '
+                'continue coverage path'
+            )
+            return picked
+
+        self._feedback(
+            goal_handle,
+            f'clean_region: grasping {target.class_name}',
+            0.45,
+        )
+        bucket_id, bucket_level = self._grasp_target(goal_handle, target)
+        picked += 1
+        success, message = self._maybe_auto_dump_full_bucket(
+            goal_handle,
+            bucket_id,
+            bucket_level,
+        )
+        if not success:
+            raise RuntimeError(message)
+
+        if self._is_canceling(goal_handle):
+            return None
+        self._feedback(goal_handle, 'clean_region: arm center after grasp', 0.60)
+        self._send_arm_preset(goal_handle, ArmPreset.Goal.ARM_CENTER)
+        return picked
+
+    def _nearest_region_entry_pose(self, region, fallback_path):
+        current_xy = self._current_map_xy()
+        if current_xy is None:
+            return fallback_path.poses[0]
+
+        x, y = current_xy
+        clamped_x = max(region.min_x, min(region.max_x, x))
+        clamped_y = max(region.min_y, min(region.max_y, y))
+        candidates = (
+            (region.min_x, clamped_y),
+            (region.max_x, clamped_y),
+            (clamped_x, region.min_y),
+            (clamped_x, region.max_y),
+        )
+        entry_x, entry_y = min(
+            candidates,
+            key=lambda point: math.hypot(point[0] - x, point[1] - y),
+        )
+
+        pose = PoseStamped()
+        pose.header = fallback_path.poses[0].header
+        pose.pose.position.x = float(entry_x)
+        pose.pose.position.y = float(entry_y)
+        pose.pose.position.z = 0.0
+        yaw = math.atan2(entry_y - y, entry_x - x)
+        if math.hypot(entry_x - x, entry_y - y) <= 1e-6:
+            current_yaw = self._current_yaw()
+            yaw = current_yaw if current_yaw is not None else 0.0
+        qz, qw = self._yaw_to_quaternion_z_w(yaw)
+        pose.pose.orientation.z = qz
+        pose.pose.orientation.w = qw
+        return pose
 
     def _next_coverage_pose(self, path, step_m):
         if not path.poses:

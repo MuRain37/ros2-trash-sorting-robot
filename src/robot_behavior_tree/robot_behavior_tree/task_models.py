@@ -43,12 +43,12 @@ class CleanRegion:
 
 @dataclass
 class DumpBucketDetection:
-    """卸载桶视觉检测结果：中心偏移、深度和是否到达倾倒距离。"""
+    """卸载桶视觉检测结果：中心偏移、中心点深度和是否识别到。"""
 
     detected: bool
     within_depth: bool
     mask_pixels: int
-    mean_depth_m: float
+    center_depth_m: float
     offset_x_px: float
     offset_x_ratio: float
     message: str
@@ -61,12 +61,3 @@ class MapPose:
     x: float
     y: float
     yaw: float
-
-
-@dataclass
-class ScanCameraObstacle:
-    """scan_camera 最近看到的前方近距离障碍。"""
-
-    range_m: float
-    bearing_rad: float
-    seen_at: float

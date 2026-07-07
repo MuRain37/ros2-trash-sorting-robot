@@ -21,8 +21,6 @@ PARAMETER_DEFAULTS = (
     ('amcl_pose_topic', '/amcl_pose'),
     # IMU 话题名，用作 yaw 的兜底来源。
     ('imu_topic', '/imu/data'),
-    # 前向或相机方向激光话题名，用于卸载桶附近障碍确认。
-    ('scan_camera_topic', '/scan_camera'),
     # 普通服务调用和短等待的超时时间。
     ('service_timeout_sec', 3.0),
     # 导航任务和导航相关等待的超时时间。
@@ -195,14 +193,17 @@ class RosTaskUtilsMixin:
         }
         return names.get(task_type, f'task_{task_type}')
 
+    @staticmethod
     def _yaw_to_quaternion_z_w(yaw):
         half_yaw = float(yaw) * 0.5
         return math.sin(half_yaw), math.cos(half_yaw)
 
+    @staticmethod
     def _yaw_from_quaternion(q):
         siny_cosp = 2.0 * (q.w * q.z + q.x * q.y)
         cosy_cosp = 1.0 - 2.0 * (q.y * q.y + q.z * q.z)
         return math.atan2(siny_cosp, cosy_cosp)
 
+    @staticmethod
     def _normalize_angle(angle):
         return math.atan2(math.sin(angle), math.cos(angle))
