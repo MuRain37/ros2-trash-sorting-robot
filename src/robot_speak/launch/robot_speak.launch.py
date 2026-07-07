@@ -22,7 +22,7 @@ def generate_launch_description():
     return LaunchDescription([
         DeclareLaunchArgument(
             'port',
-            default_value='/dev/ttyUSB0',
+            default_value='/dev/ttyUSB2',
             description='Serial port connected to the WonderEcho module.',
         ),
         DeclareLaunchArgument(

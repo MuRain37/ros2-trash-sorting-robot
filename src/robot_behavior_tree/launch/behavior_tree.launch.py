@@ -38,7 +38,7 @@ def generate_launch_description():
             'detect_dump_service': '/detect_dump_bucket',
             'service_timeout_sec': 8.0,
             'require_dump_bucket_detect': True,
-            'dump_visual_align_required': True,
+            'dump_visual_align_required': False,
             'dump_pose_store_path': dump_pose_store_path,
         }],
     )
