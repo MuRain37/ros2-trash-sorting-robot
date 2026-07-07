@@ -48,5 +48,5 @@
         regulated_linear_scaling_min_speed: 0.03
         use_rotate_to_heading: true
         allow_reversing: false
-        rotate_to_heading_min_angle: 0.6
-        max_angular_accel: 2.2
+        rotate_to_heading_min_angle: 1.1
+        max_angular_accel: 3.0

@@ -32,6 +32,7 @@ class DumpTaskNode(Node):
         self.declare_parameter('mask_min_pixels', 100)
         self.declare_parameter('depth_threshold_m', 0.35)
         self.declare_parameter('depth_scale', 0.001)
+        self.declare_parameter('center_depth_window_px', 10)
 
         self._lock = threading.Lock()
         self._latest_color = None
@@ -165,8 +166,13 @@ class DumpTaskNode(Node):
         center_x_px = float(np.mean(xs))
         center_y_px = float(np.mean(ys))
 
-        masked_depth = depth_m[component]
-        valid_depth = masked_depth[np.isfinite(masked_depth) & (masked_depth > 0.0)]
+        valid_depth = center_window_depth_values(
+            depth_m,
+            component,
+            center_x_px,
+            center_y_px,
+            int(self.get_parameter('center_depth_window_px').value),
+        )
         if valid_depth.size == 0:
             return detection_result(
                 color.shape,
@@ -176,6 +182,14 @@ class DumpTaskNode(Node):
             )
 
         mean_depth_m = float(np.mean(valid_depth))
+        min_depth_m = float(np.min(valid_depth))
+        max_depth_m = float(np.max(valid_depth))
+        self.get_logger().info(
+            'dump depth stats: '
+            f'center_mean={mean_depth_m:.3f}m, '
+            f'min={min_depth_m:.3f}m, max={max_depth_m:.3f}m, '
+            f'valid_pixels={valid_depth.size}'
+        )
         depth_threshold_m = float(self.get_parameter('depth_threshold_m').value)
         return detection_result(
             color.shape,
@@ -258,6 +272,33 @@ def largest_contour_component(color):
 
     cv2.drawContours(component, [contour], -1, 255, thickness=cv2.FILLED)
     return component.astype(bool)
+
+
+def center_window_depth_values(depth_m, component, center_x_px, center_y_px, window_px):
+    """Return valid depth samples near the detected contour center."""
+    height, width = depth_m.shape[:2]
+    window_px = max(1, int(window_px))
+    if window_px % 2 == 0:
+        window_px += 1
+    radius = window_px // 2
+
+    center_x = int(round(center_x_px))
+    center_y = int(round(center_y_px))
+    x0 = max(0, center_x - radius)
+    x1 = min(width, center_x + radius + 1)
+    y0 = max(0, center_y - radius)
+    y1 = min(height, center_y + radius + 1)
+
+    depth_roi = depth_m[y0:y1, x0:x1]
+    mask_roi = component[y0:y1, x0:x1]
+    values = depth_roi[
+        mask_roi & np.isfinite(depth_roi) & (depth_roi > 0.0)
+    ]
+    if values.size:
+        return values
+
+    depth_roi = depth_m[y0:y1, x0:x1]
+    return depth_roi[np.isfinite(depth_roi) & (depth_roi > 0.0)]
 
 
 def image_to_rgb_array(msg):
@@ -344,3 +385,4 @@ def main(args=None):
 
 if __name__ == '__main__':
     main()
+s

@@ -33,12 +33,15 @@ else:
     ROS_IMPORT_ERROR = None
 
 try:
-    from nav2_msgs.srv import LoadMap
+    from nav2_msgs.srv import LoadMap, ManageLifecycleNodes
 except Exception as exc:
     LoadMap = None
+    ManageLifecycleNodes = None
     LOAD_MAP_IMPORT_ERROR = exc
+    MANAGE_LIFECYCLE_IMPORT_ERROR = exc
 else:
     LOAD_MAP_IMPORT_ERROR = None
+    MANAGE_LIFECYCLE_IMPORT_ERROR = None
 
 try:
     from lifecycle_msgs.msg import State, Transition
@@ -203,8 +206,16 @@ class FlaskRosNode(Node):
                 LoadMap,
                 config["map_server_load_map_service"],
             )
+        self.localization_manager_client = None
+        if ManageLifecycleNodes is not None:
+            self.localization_manager_client = self.create_client(
+                ManageLifecycleNodes,
+                config["localization_lifecycle_manager_service"],
+            )
         self.amcl_get_state_client = None
         self.amcl_change_state_client = None
+        self.map_server_get_state_client = None
+        self.map_server_change_state_client = None
         if GetState is not None and ChangeState is not None:
             amcl_node = config["amcl_lifecycle_node"]
             self.amcl_get_state_client = self.create_client(
@@ -214,6 +225,15 @@ class FlaskRosNode(Node):
             self.amcl_change_state_client = self.create_client(
                 ChangeState,
                 f"{amcl_node}/change_state",
+            )
+            map_server_node = config["map_server_lifecycle_node"]
+            self.map_server_get_state_client = self.create_client(
+                GetState,
+                f"{map_server_node}/get_state",
+            )
+            self.map_server_change_state_client = self.create_client(
+                ChangeState,
+                f"{map_server_node}/change_state",
             )
         self.cmd_vel_pub = self.create_publisher(Twist, config["cmd_vel_topic"], 10)
         self._velocity_lock = threading.Lock()
@@ -450,6 +470,7 @@ class RosBridge:
         self.accept_live_map = True
         self.mapping_active = False
         self.robot_pose = None
+        self.mapping_pose_jump_started_at = None
         self.last_scan = None
         self.target_point = None
         self.latest_velocity_command_session = None
@@ -722,13 +743,30 @@ class RosBridge:
     def set_robot_pose(self, x, y, theta, source, stamp):
         with self.lock:
             current = self.robot_pose
+            now = time.time()
             if (
                 source != "tf"
                 and current
                 and current.get("source") == "tf"
-                and time.time() - current.get("received_at", 0.0) < 0.5
+                and now - current.get("received_at", 0.0) < 0.5
             ):
                 return
+            if source == "tf" and self.mapping_active and current:
+                jump_m = math.hypot(float(x) - current["x"], float(y) - current["y"])
+                reject_threshold = float(
+                    self.config.get("mapping_pose_jump_reject_m", 1.2)
+                )
+                reject_sec = float(
+                    self.config.get("mapping_pose_jump_reject_sec", 2.0)
+                )
+                if reject_threshold > 0.0 and jump_m > reject_threshold:
+                    if self.mapping_pose_jump_started_at is None:
+                        self.mapping_pose_jump_started_at = now
+                        return
+                    if now - self.mapping_pose_jump_started_at < reject_sec:
+                        return
+                else:
+                    self.mapping_pose_jump_started_at = None
             self.robot_pose = {
                 "x": float(x),
                 "y": float(y),
@@ -736,8 +774,9 @@ class RosBridge:
                 "theta_deg": math.degrees(float(theta)),
                 "source": source,
                 "stamp": stamp,
-                "received_at": time.time(),
+                "received_at": now,
             }
+            self.mapping_pose_jump_started_at = None
 
     def prefers_tf_pose(self):
         with self.lock:
@@ -1202,25 +1241,30 @@ class RosBridge:
                 }
             return prepare_result
 
-        amcl_result = self.deactivate_amcl_for_mapping()
-        if not amcl_result.get("success"):
+        localization_result = self.pause_localization_for_mapping()
+        if not localization_result.get("success"):
             with self.lock:
                 self.nav_status = {
                     "state": "mapping_prepare_failed",
-                    "message": amcl_result.get("message", "AMCL 停止失败"),
+                    "message": localization_result.get(
+                        "message",
+                        "定位栈暂停失败",
+                    ),
                     "updated_at": _now_iso(),
                 }
-            return amcl_result
+            return localization_result
 
         process_result = self.start_mapping_process()
         if not process_result.get("success"):
-            self.activate_amcl_after_mapping()
+            self.resume_localization_after_mapping()
         with self.lock:
             self.mapping_active = bool(process_result.get("success"))
             self.accept_live_map = True
             self.map = None
             self.map_png = None
             self.map_version += 1
+            self.robot_pose = None
+            self.mapping_pose_jump_started_at = None
             self.target_point = None
             self.nav_status = {
                 "state": "mapping",
@@ -1232,7 +1276,7 @@ class RosBridge:
             "success": process_result["success"],
             "message": process_result["message"],
             "command": process_result.get("command"),
-            "amcl_lifecycle": amcl_result,
+            "localization_lifecycle": localization_result,
         }
 
     def prepare_mapping_camera_pose(self):
@@ -1385,6 +1429,96 @@ class RosBridge:
                 "message": "真实相机 TF preset 调用超时",
             }
         return result
+
+    def _call_localization_lifecycle_manager(self, command, label):
+        if not self.started or not self.node:
+            return {
+                "success": False,
+                "message": self.start_error or "ROS bridge 未启动",
+            }
+        if (
+            ManageLifecycleNodes is None
+            or self.node.localization_manager_client is None
+        ):
+            return {
+                "success": False,
+                "message": (
+                    "Nav2 lifecycle manager 接口未加载: "
+                    f"{MANAGE_LIFECYCLE_IMPORT_ERROR}"
+                ),
+            }
+
+        timeout_sec = float(
+            self.config.get("localization_lifecycle_manager_timeout_sec", 8.0)
+        )
+        client = self.node.localization_manager_client
+        service_name = self.config["localization_lifecycle_manager_service"]
+        if not client.wait_for_service(timeout_sec=timeout_sec):
+            return {
+                "success": False,
+                "message": f"定位 lifecycle manager 服务不可用: {service_name}",
+            }
+
+        request = ManageLifecycleNodes.Request()
+        request.command = int(command)
+        done_event = threading.Event()
+        result = {}
+
+        def on_response(done):
+            try:
+                response = done.result()
+                result.update(
+                    {
+                        "success": bool(response.success),
+                        "message": (
+                            f"定位栈已{label}"
+                            if response.success
+                            else f"定位栈{label}请求被拒绝"
+                        ),
+                        "service": service_name,
+                    }
+                )
+            except Exception as exc:
+                result.update(
+                    {
+                        "success": False,
+                        "message": f"定位栈{label}调用失败: {exc}",
+                        "service": service_name,
+                    }
+                )
+            finally:
+                done_event.set()
+
+        client.call_async(request).add_done_callback(on_response)
+        if not done_event.wait(timeout_sec):
+            return {
+                "success": False,
+                "message": f"定位栈{label}调用超时",
+                "service": service_name,
+            }
+        return result
+
+    def pause_localization_for_mapping(self):
+        command = (
+            getattr(ManageLifecycleNodes.Request, "PAUSE", 1)
+            if ManageLifecycleNodes is not None
+            else 0
+        )
+        return self._call_localization_lifecycle_manager(
+            command,
+            "暂停",
+        )
+
+    def resume_localization_after_mapping(self):
+        command = (
+            getattr(ManageLifecycleNodes.Request, "RESUME", 2)
+            if ManageLifecycleNodes is not None
+            else 0
+        )
+        return self._call_localization_lifecycle_manager(
+            command,
+            "恢复",
+        )
 
     def _lifecycle_service_ready(self):
         if not self.started or not self.node:
@@ -1559,6 +1693,185 @@ class RosBridge:
         result["state_before"] = state
         return result
 
+    def _map_server_lifecycle_service_ready(self):
+        if not self.started or not self.node:
+            return {
+                "success": False,
+                "message": self.start_error or "ROS bridge 未启动",
+            }
+        if (
+            GetState is None
+            or ChangeState is None
+            or State is None
+            or Transition is None
+            or self.node.map_server_get_state_client is None
+            or self.node.map_server_change_state_client is None
+        ):
+            return {
+                "success": False,
+                "message": f"Lifecycle 接口未加载: {LIFECYCLE_IMPORT_ERROR}",
+            }
+        return {"success": True}
+
+    def _call_map_server_get_state(self, timeout_sec):
+        ready = self._map_server_lifecycle_service_ready()
+        if not ready.get("success"):
+            return ready
+
+        client = self.node.map_server_get_state_client
+        if not client.wait_for_service(timeout_sec=timeout_sec):
+            return {
+                "success": False,
+                "message": (
+                    "map_server get_state 服务不可用: "
+                    f"{self.config['map_server_lifecycle_node']}/get_state"
+                ),
+            }
+
+        done_event = threading.Event()
+        result = {}
+
+        def on_response(done):
+            try:
+                response = done.result()
+                result.update(
+                    {
+                        "success": True,
+                        "state_id": int(response.current_state.id),
+                        "state_label": response.current_state.label,
+                    }
+                )
+            except Exception as exc:
+                result.update(
+                    {
+                        "success": False,
+                        "message": f"map_server get_state 调用失败: {exc}",
+                    }
+                )
+            finally:
+                done_event.set()
+
+        client.call_async(GetState.Request()).add_done_callback(on_response)
+        if not done_event.wait(float(timeout_sec)):
+            return {
+                "success": False,
+                "message": "map_server get_state 调用超时",
+            }
+        return result
+
+    def _change_map_server_state(self, transition_id, label, timeout_sec):
+        ready = self._map_server_lifecycle_service_ready()
+        if not ready.get("success"):
+            return ready
+
+        client = self.node.map_server_change_state_client
+        if not client.wait_for_service(timeout_sec=timeout_sec):
+            return {
+                "success": False,
+                "message": (
+                    "map_server change_state 服务不可用: "
+                    f"{self.config['map_server_lifecycle_node']}/change_state"
+                ),
+            }
+
+        request = ChangeState.Request()
+        request.transition.id = int(transition_id)
+        done_event = threading.Event()
+        result = {}
+
+        def on_response(done):
+            try:
+                response = done.result()
+                result.update(
+                    {
+                        "success": bool(response.success),
+                        "message": (
+                            f"map_server 已{label}"
+                            if response.success
+                            else f"map_server {label}请求被拒绝"
+                        ),
+                    }
+                )
+            except Exception as exc:
+                result.update(
+                    {
+                        "success": False,
+                        "message": f"map_server {label}调用失败: {exc}",
+                    }
+                )
+            finally:
+                done_event.set()
+
+        client.call_async(request).add_done_callback(on_response)
+        if not done_event.wait(float(timeout_sec)):
+            return {
+                "success": False,
+                "message": f"map_server {label}调用超时",
+            }
+        return result
+
+    def deactivate_map_server_for_mapping(self):
+        timeout_sec = float(self.config.get("amcl_lifecycle_timeout_sec", 5.0))
+        state = self._call_map_server_get_state(timeout_sec)
+        if not state.get("success"):
+            return state
+
+        state_id = state.get("state_id")
+        if state_id == State.PRIMARY_STATE_INACTIVE:
+            return {
+                "success": True,
+                "message": "map_server 已处于 inactive，建图可继续",
+                "state_before": state,
+            }
+        if state_id != State.PRIMARY_STATE_ACTIVE:
+            return {
+                "success": False,
+                "message": (
+                    "map_server 当前状态不能直接 deactivate: "
+                    f"{state.get('state_label')}"
+                ),
+                "state_before": state,
+            }
+
+        result = self._change_map_server_state(
+            Transition.TRANSITION_DEACTIVATE,
+            "切换到 inactive",
+            timeout_sec,
+        )
+        result["state_before"] = state
+        return result
+
+    def activate_map_server_after_mapping(self):
+        timeout_sec = float(self.config.get("amcl_lifecycle_timeout_sec", 5.0))
+        state = self._call_map_server_get_state(timeout_sec)
+        if not state.get("success"):
+            return state
+
+        state_id = state.get("state_id")
+        if state_id == State.PRIMARY_STATE_ACTIVE:
+            return {
+                "success": True,
+                "message": "map_server 已处于 active",
+                "state_before": state,
+            }
+        if state_id != State.PRIMARY_STATE_INACTIVE:
+            return {
+                "success": False,
+                "message": (
+                    "map_server 当前状态不能直接 activate: "
+                    f"{state.get('state_label')}"
+                ),
+                "state_before": state,
+            }
+
+        result = self._change_map_server_state(
+            Transition.TRANSITION_ACTIVATE,
+            "切换到 active",
+            timeout_sec,
+        )
+        result["state_before"] = state
+        return result
+
     def reload_nav2_map_server(self, yaml_path):
         if not self.started or not self.node:
             return {
@@ -1641,14 +1954,16 @@ class RosBridge:
                 with self.lock:
                     self.mapping_active = False
             if not result.get("success"):
-                amcl_result = self.activate_amcl_after_mapping()
-                result["amcl_lifecycle"] = amcl_result
-                result.setdefault("replace", {})["amcl_lifecycle"] = amcl_result
-                if not amcl_result.get("success"):
+                localization_result = self.resume_localization_after_mapping()
+                result["localization_lifecycle"] = localization_result
+                result.setdefault("replace", {})[
+                    "localization_lifecycle"
+                ] = localization_result
+                if not localization_result.get("success"):
                     result["message"] = (
                         f"{result.get('message', '地图保存失败')}；"
-                        f"同时 AMCL 恢复失败: "
-                        f"{amcl_result.get('message', 'unknown')}"
+                        f"同时恢复定位失败: "
+                        f"{localization_result.get('message')}"
                     )
                 return result
             if result.get("success"):
@@ -1659,14 +1974,29 @@ class RosBridge:
                     or result.get("replace", {}).get("yaml_path")
                     or self.map_file_paths(result.get("map_prefix", ""))["yaml"]
                 )
-                nav2_load_result = self.reload_nav2_map_server(yaml_path)
+                localization_result = self.resume_localization_after_mapping()
+                result["localization_lifecycle"] = localization_result
+                result.setdefault("replace", {})[
+                    "localization_lifecycle"
+                ] = localization_result
+                if localization_result.get("success"):
+                    nav2_load_result = self.reload_nav2_map_server(yaml_path)
+                else:
+                    nav2_load_result = {
+                        "success": False,
+                        "message": (
+                            localization_result.get("message")
+                            or "定位栈恢复失败，未重新加载 Nav2 地图"
+                        ),
+                        "yaml_path": yaml_path,
+                    }
                 result["nav2_map_load"] = nav2_load_result
                 result.setdefault("replace", {})["nav2_map_load"] = nav2_load_result
-                amcl_result = self.activate_amcl_after_mapping()
-                result["amcl_lifecycle"] = amcl_result
-                result.setdefault("replace", {})["amcl_lifecycle"] = amcl_result
-                if nav2_load_result.get("success") and amcl_result.get("success"):
-                    result["message"] = "地图已保存并重新加载到 Nav2，AMCL 已恢复"
+                if (
+                    nav2_load_result.get("success")
+                    and localization_result.get("success")
+                ):
+                    result["message"] = "地图已保存并重新加载到 Nav2，定位栈已恢复"
                     with self.lock:
                         self.nav_status = {
                             "state": "mapping_saved",
@@ -1681,9 +2011,9 @@ class RosBridge:
                             "地图已保存，但 Nav2 map_server 重新加载失败",
                         )
                     else:
-                        result["message"] = amcl_result.get(
+                        result["message"] = localization_result.get(
                             "message",
-                            "地图已保存，但 AMCL 恢复失败",
+                            "地图已保存，但定位栈恢复失败",
                         )
                     with self.lock:
                         self.nav_status = {
@@ -1720,25 +2050,25 @@ class RosBridge:
                 "message": "已放弃本次建图，恢复使用原保存地图",
                 "updated_at": _now_iso(),
             }
-        amcl_result = self.activate_amcl_after_mapping()
-        if not amcl_result.get("success"):
+        localization_result = self.resume_localization_after_mapping()
+        if not localization_result.get("success"):
             with self.lock:
                 self.nav_status = {
                     "state": "mapping_discard_failed",
-                    "message": amcl_result.get("message", "AMCL 恢复失败"),
+                    "message": localization_result.get("message") or "定位恢复失败",
                     "updated_at": _now_iso(),
                 }
             return {
                 "success": False,
-                "message": amcl_result.get("message", "AMCL 恢复失败"),
+                "message": localization_result.get("message") or "定位恢复失败",
                 "map_load": load_result,
-                "amcl_lifecycle": amcl_result,
+                "localization_lifecycle": localization_result,
             }
         return {
             "success": True,
-            "message": "已放弃本次建图，已从文件恢复原保存地图，AMCL 已恢复",
+            "message": "已放弃本次建图，已从文件恢复原保存地图，定位栈已恢复",
             "map_load": load_result,
-            "amcl_lifecycle": amcl_result,
+            "localization_lifecycle": localization_result,
             "map": self.get_map_data().get("map"),
         }
 
@@ -1930,7 +2260,9 @@ class RosBridge:
             final_dir = os.path.dirname(final_paths["yaml"])
             if final_dir:
                 os.makedirs(final_dir, exist_ok=True)
-            shutil.copyfile(temp_paths["pgm"], final_paths["pgm"])
+            tmp_pgm = final_paths["pgm"] + ".tmp"
+            tmp_yaml = final_paths["yaml"] + ".tmp"
+            shutil.copyfile(temp_paths["pgm"], tmp_pgm)
             yaml_text = open(temp_yaml, "r", encoding="utf-8").read()
             final_image = os.path.basename(final_paths["pgm"])
             lines = []
@@ -1943,14 +2275,28 @@ class RosBridge:
                     lines.append(line)
             if not replaced_image:
                 lines.insert(0, f"image: {final_image}")
-            with open(final_paths["yaml"], "w", encoding="utf-8") as yaml_file:
+            with open(tmp_yaml, "w", encoding="utf-8") as yaml_file:
                 yaml_file.write("\n".join(lines).rstrip() + "\n")
+            os.replace(tmp_pgm, final_paths["pgm"])
+            os.replace(tmp_yaml, final_paths["yaml"])
             self.remove_temp_map_files()
             return {
                 "success": True,
                 "message": "临时地图已替换正式地图",
                 "yaml_path": final_paths["yaml"],
                 "image_path": final_paths["pgm"],
+            }
+        except PermissionError as exc:
+            final_dir = os.path.dirname(final_paths["yaml"]) or "."
+            return {
+                "success": False,
+                "message": (
+                    "替换正式地图失败: 没有写权限。请确认运行前端的用户"
+                    f"可写目录 {final_dir}，并可替换 {final_paths['pgm']} / "
+                    f"{final_paths['yaml']}: {exc}"
+                ),
+                "temp_prefix": temp_prefix,
+                "map_prefix": final_prefix,
             }
         except Exception as exc:
             return {

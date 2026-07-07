@@ -1,5 +1,7 @@
 """启动机器人高层行为树调度节点。"""
 
+import os
+
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
 from launch.substitutions import LaunchConfiguration
@@ -9,6 +11,16 @@ from launch_ros.actions import Node
 def generate_launch_description():
     """生成行为树调度 launch。"""
     use_sim_time = LaunchConfiguration('use_sim_time')
+    ros_src_root = os.getenv('ROS_SRC_ROOT', '/ws/ros2_xjw/src')
+    dump_pose_store_path = os.getenv(
+        'ROS_DUMP_POSE_STORE_PATH',
+        os.path.join(
+            ros_src_root,
+            'robot_behavior_tree',
+            'config',
+            'dump_bucket_poses.json',
+        ),
+    )
 
     robot_task_server = Node(
         package='robot_behavior_tree',
@@ -17,6 +29,9 @@ def generate_launch_description():
         output='screen',
         parameters=[{
             'use_sim_time': use_sim_time,
+            'require_dump_bucket_detect': True,
+            'dump_visual_align_required': True,
+            'dump_pose_store_path': dump_pose_store_path,
         }],
     )
 

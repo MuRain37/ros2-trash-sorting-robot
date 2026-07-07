@@ -233,6 +233,7 @@
     let lastPoseStamp = null;
     let lastVelocityErrorAt = 0;
     let velocityRequestsInFlight = 0;
+    let pendingVelocityTwist = null;
     const velocityCommandSession = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
     let velocityCommandSeq = 0;
     let lastSentTwist = { linear_x: 0, angular_z: 0 };
@@ -515,6 +516,8 @@
         }
         mapData.has_map = false;
         mapData.map = null;
+        smoothPose = null;
+        lastPoseStamp = null;
         updateStatus();
         updateMapImage();
         drawMap();
@@ -534,6 +537,8 @@
             return;
         }
         await refreshMapData();
+        smoothPose = null;
+        lastPoseStamp = null;
         showToast(data.message || (save ? '地图已保存' : '已放弃本次建图'), 'success');
     }
 
@@ -557,6 +562,7 @@
             label.textContent = '未启动';
             label.className = 'status-pill dark';
             pressedKeys.clear();
+            pendingVelocityTwist = null;
             updateKeyDisplay();
             publishVelocity({ linear_x: 0, angular_z: 0 }, true);
         }
@@ -585,8 +591,11 @@
             Math.abs(twist.linear_x - lastSentTwist.linear_x) > 1e-6 ||
             Math.abs(twist.angular_z - lastSentTwist.angular_z) > 1e-6
         );
-        if (!force && !changed && now - lastVelocitySentAt < 250) return;
-        if (velocityRequestsInFlight > 0 && !force) return;
+        if (!force && !changed && now - lastVelocitySentAt < 100) return;
+        if (velocityRequestsInFlight > 0 && !force) {
+            pendingVelocityTwist = { ...twist };
+            return;
+        }
         const commandSeq = ++velocityCommandSeq;
         velocityRequestsInFlight += 1;
         try {
@@ -615,6 +624,11 @@
             }
         } finally {
             velocityRequestsInFlight = Math.max(0, velocityRequestsInFlight - 1);
+            if (pendingVelocityTwist && controlMode && velocityRequestsInFlight === 0) {
+                const pending = pendingVelocityTwist;
+                pendingVelocityTwist = null;
+                publishVelocity(pending, true);
+            }
         }
     }
 
@@ -624,6 +638,7 @@
 
     function stopRobot() {
         pressedKeys.clear();
+        pendingVelocityTwist = null;
         updateKeyDisplay();
         publishVelocity({ linear_x: 0, angular_z: 0 }, true);
     }
@@ -750,6 +765,6 @@
     setInterval(refreshMapData, 1000);
     setInterval(refreshRobotPose, 60);
     setInterval(() => drawMap(), 60);
-    setInterval(publishCurrentVelocity, 250);
+    setInterval(publishCurrentVelocity, 120);
 </script>
 {% endblock %}

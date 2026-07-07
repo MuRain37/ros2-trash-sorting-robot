@@ -148,6 +148,8 @@
     let stagedWaypoints = [];
     let waypointDragStart = null;
     let waypointDragCurrent = null;
+    let isDraggingWaypoint = false;
+    let isDraggingDumpPose = false;
     let isDragging = false;
     let isDraggingView = false;
     let viewDragMode = null;
@@ -577,6 +579,12 @@
         ctx.fillStyle = dumpPoseBucketId === 1 ? '#f59e0b' : '#ef4444';
         ctx.strokeStyle = '#101615';
         ctx.lineWidth = 2;
+        ctx.setLineDash([7, 5]);
+        ctx.beginPath();
+        ctx.moveTo(dumpPoseDragStart.x, dumpPoseDragStart.y);
+        ctx.lineTo(dumpPoseDragCurrent.x, dumpPoseDragCurrent.y);
+        ctx.stroke();
+        ctx.setLineDash([]);
         ctx.beginPath();
         ctx.arc(dumpPoseDragStart.x, dumpPoseDragStart.y, 13, 0, Math.PI * 2);
         ctx.fill();
@@ -628,6 +636,9 @@
 
     function setMode(nextMode) {
         mode = nextMode;
+        isDragging = false;
+        isDraggingWaypoint = false;
+        isDraggingDumpPose = false;
         dragStart = null;
         dragCurrent = null;
         dumpPoseBucketId = null;
@@ -669,6 +680,9 @@
         mode = 'dump_pose';
         pathEditing = false;
         stagedWaypoints = [];
+        isDragging = false;
+        isDraggingWaypoint = false;
+        isDraggingDumpPose = false;
         waypointDragStart = null;
         waypointDragCurrent = null;
         dragStart = null;
@@ -684,11 +698,13 @@
     }
 
     function resetWaypointDraft() {
+        isDraggingWaypoint = false;
         waypointDragStart = null;
         waypointDragCurrent = null;
     }
 
     function resetDumpPoseDraft() {
+        isDraggingDumpPose = false;
         dumpPoseDragStart = null;
         dumpPoseDragCurrent = null;
     }
@@ -801,17 +817,17 @@
         showToast(data.message || '导航路径已发送', 'success');
     }
 
-    async function submitDumpBucketPose() {
-        const startWorld = canvasToWorld(dumpPoseDragStart);
-        const currentWorld = canvasToWorld(dumpPoseDragCurrent);
+    async function submitDumpBucketPose(startPoint, currentPoint, bucketId) {
+        const startWorld = canvasToWorld(startPoint);
+        const currentWorld = canvasToWorld(currentPoint);
         if (!startWorld || !currentWorld) {
             showToast('请在地图有效区域内拖拽设置桶位方向', 'warning');
             resetDumpPoseDraft();
             drawMap();
             return;
         }
-        const dx = dumpPoseDragCurrent.x - dumpPoseDragStart.x;
-        const dy = dumpPoseDragCurrent.y - dumpPoseDragStart.y;
+        const dx = currentPoint.x - startPoint.x;
+        const dy = currentPoint.y - startPoint.y;
         if (Math.hypot(dx, dy) < 8) {
             showToast('请拖拽一小段距离来设置卸载桶朝向', 'warning');
             resetDumpPoseDraft();
@@ -821,7 +837,7 @@
 
         startWorld.theta = Math.atan2(currentWorld.y - startWorld.y, currentWorld.x - startWorld.x);
         startWorld.yaw = startWorld.theta;
-        startWorld.bucket_id = dumpPoseBucketId;
+        startWorld.bucket_id = bucketId;
         startWorld.frame_id = 'map';
 
         const response = await fetch('/api/map/dump_bucket_pose', {
@@ -1008,13 +1024,16 @@
 
     canvas.addEventListener('mousedown', event => {
         if (startViewDrag(event)) return;
+        if (event.button !== 0) return;
         if (mode === 'dump_pose' && dumpPoseBucketId) {
+            isDraggingDumpPose = true;
             dumpPoseDragStart = eventPoint(event);
             dumpPoseDragCurrent = dumpPoseDragStart;
             drawMap();
             return;
         }
         if (mode === 'target' && pathEditing) {
+            isDraggingWaypoint = true;
             waypointDragStart = eventPoint(event);
             waypointDragCurrent = waypointDragStart;
             drawMap();
@@ -1029,12 +1048,12 @@
 
     canvas.addEventListener('mousemove', event => {
         if (updateViewDrag(event)) return;
-        if (mode === 'dump_pose' && dumpPoseBucketId && dumpPoseDragStart) {
+        if (mode === 'dump_pose' && dumpPoseBucketId && isDraggingDumpPose) {
             dumpPoseDragCurrent = eventPoint(event);
             drawMap();
             return;
         }
-        if (mode === 'target' && pathEditing && waypointDragStart) {
+        if (mode === 'target' && pathEditing && isDraggingWaypoint) {
             waypointDragCurrent = eventPoint(event);
             drawMap();
             return;
@@ -1046,10 +1065,14 @@
 
     canvas.addEventListener('mouseup', async event => {
         if (endViewDrag()) return;
-        if (mode === 'dump_pose' && dumpPoseBucketId && dumpPoseDragStart) {
-            dumpPoseDragCurrent = eventPoint(event);
+        if (mode === 'dump_pose' && dumpPoseBucketId && isDraggingDumpPose) {
+            const startPoint = dumpPoseDragStart;
+            const currentPoint = eventPoint(event);
+            const bucketId = dumpPoseBucketId;
+            dumpPoseDragCurrent = currentPoint;
+            isDraggingDumpPose = false;
             try {
-                await submitDumpBucketPose();
+                await submitDumpBucketPose(startPoint, currentPoint, bucketId);
             } catch (error) {
                 showToast(error.message || '卸载桶位置保存失败', 'error');
                 resetDumpPoseDraft();
@@ -1057,8 +1080,9 @@
             }
             return;
         }
-        if (mode === 'target' && pathEditing && waypointDragStart) {
+        if (mode === 'target' && pathEditing && isDraggingWaypoint) {
             waypointDragCurrent = eventPoint(event);
+            isDraggingWaypoint = false;
             addDraggedWaypoint();
             return;
         }
@@ -1078,12 +1102,22 @@
 
     canvas.addEventListener('mouseleave', () => {
         if (endViewDrag()) return;
+        let changed = false;
         if (isDragging) {
             dragStart = null;
             dragCurrent = null;
-            drawMap();
+            changed = true;
+        }
+        if (isDraggingDumpPose) {
+            resetDumpPoseDraft();
+            changed = true;
+        }
+        if (isDraggingWaypoint) {
+            resetWaypointDraft();
+            changed = true;
         }
         isDragging = false;
+        if (changed) drawMap();
     });
 
     canvas.addEventListener('contextmenu', event => event.preventDefault());

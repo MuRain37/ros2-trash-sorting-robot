@@ -25,8 +25,8 @@ LEFT_BUCKET_CLASSES = {'paper', 'yan', 'bottle'}
 RIGHT_BUCKET_CLASSES = {'usb', 'charger', 'pen'}
 TARGET_OFFSETS_CM = {
     'bottle': (0.0, 0.0, -6.0),
-    'charger': (1.0, 0.0, -4.5),
-    'paper': (1.0, 0.0, -3.5),
+    'charger': (1.0, 0.0, -2.5),
+    'paper': (1.0, 0.0, -2.0),
 }
 
 
@@ -92,7 +92,7 @@ class VisionGraspNode(Node):
         self._base_frame = self._param('base_frame', 'arm_link0')
         self._camera_frame = self._param('camera_frame', 'camera_optical_link')
         self._detect_service = self._param('detect_service', 'vision_grasp/detect')
-        self._target_y_scale = float(self._param('target_y_scale', 1.3))
+        self._target_y_scale = float(self._param('target_y_scale', 1.0))
 
     def _load_model(self):
         model_path = Path(self._model_path) if self._model_path else (
@@ -261,11 +261,11 @@ class VisionGraspNode(Node):
         target_cm = (
             object_arm_m * 100.0
             + np.array(
-                TARGET_OFFSETS_CM.get(class_name, (0.0, 0.0, -3.0)),
+                TARGET_OFFSETS_CM.get(class_name, (0.0, 0.0, 0.0)),
                 dtype=float,
             )
         )
-        target_cm[1] *= getattr(self, '_target_y_scale', 1.3)
+        target_cm[1] *= getattr(self, '_target_y_scale', 1.0)
         return target_cm
 
     @staticmethod

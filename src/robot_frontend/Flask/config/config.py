@@ -140,6 +140,17 @@ ROS_CONFIG = {
         'ROS_MAP_SERVER_LOAD_MAP_SERVICE',
         '/map_server/load_map',
     ),
+    'map_server_lifecycle_node': os.getenv(
+        'ROS_MAP_SERVER_LIFECYCLE_NODE',
+        '/map_server',
+    ),
+    'localization_lifecycle_manager_service': os.getenv(
+        'ROS_LOCALIZATION_LIFECYCLE_MANAGER_SERVICE',
+        '/lifecycle_manager_localization/manage_nodes',
+    ),
+    'localization_lifecycle_manager_timeout_sec': float(
+        os.getenv('ROS_LOCALIZATION_LIFECYCLE_MANAGER_TIMEOUT_SEC', '8.0')
+    ),
     'amcl_lifecycle_node': os.getenv('ROS_AMCL_LIFECYCLE_NODE', '/amcl'),
     'amcl_lifecycle_timeout_sec': float(
         os.getenv('ROS_AMCL_LIFECYCLE_TIMEOUT_SEC', '5.0')
@@ -196,7 +207,13 @@ ROS_CONFIG = {
     ),
     'dump_timeout_sec': float(os.getenv('ROS_DUMP_TIMEOUT_SEC', '60.0')),
     'velocity_command_timeout_sec': float(
-        os.getenv('ROS_VELOCITY_COMMAND_TIMEOUT_SEC', '0.6')
+        os.getenv('ROS_VELOCITY_COMMAND_TIMEOUT_SEC', '1.2')
+    ),
+    'mapping_pose_jump_reject_m': float(
+        os.getenv('ROS_MAPPING_POSE_JUMP_REJECT_M', '1.2')
+    ),
+    'mapping_pose_jump_reject_sec': float(
+        os.getenv('ROS_MAPPING_POSE_JUMP_REJECT_SEC', '2.0')
     ),
 }
 ROS_CONFIG['depth_camera_topic'] = ROS_CONFIG['depth_camera_topics'][0]

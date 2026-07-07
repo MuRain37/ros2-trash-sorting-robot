@@ -646,6 +646,9 @@ def dump_bucket_pose():
             yaw,
             frame_id,
         )
+        DUMP_BUCKET_POSES[str(bucket_id)] = nav_goal
+        save_dump_bucket_poses()
+
         result = ROS_BRIDGE.set_dump_bucket_pose(
             bucket_id,
             nav_goal["x"],
@@ -653,10 +656,8 @@ def dump_bucket_pose():
             nav_goal["yaw"],
             frame_id,
         )
-        success = bool(result.get("success"))
-        if success:
-            DUMP_BUCKET_POSES[str(bucket_id)] = nav_goal
-            save_dump_bucket_poses()
+        task_synced = bool(result.get("success"))
+        success = True
 
         add_log(
             "设定卸载桶位置",
@@ -665,7 +666,7 @@ def dump_bucket_pose():
                 f"({nav_goal['x']:.3f}, {nav_goal['y']:.3f}, "
                 f"theta={nav_goal['yaw']:.3f})"
             ),
-            status="完成" if success else "失败",
+            status="完成" if task_synced else "完成（待行为树同步）",
             success=success,
             metadata={
                 "input_pose": {
@@ -679,15 +680,25 @@ def dump_bucket_pose():
                 "nav_goal": nav_goal,
                 "pose": DUMP_BUCKET_POSES.get(str(bucket_id)),
                 "task_result": result,
+                "task_synced": task_synced,
             },
         )
+        message = "卸载桶位置已保存"
+        if not task_synced:
+            message = (
+                "卸载桶位置已保存；行为树 Action 暂不可用，"
+                "启动 robot_task_server 后会从配置文件读取"
+            )
         return jsonify(
             {
-                **result,
+                "success": True,
+                "message": result.get("message") if task_synced else message,
+                "task_synced": task_synced,
+                "task_result": result,
                 "pose": DUMP_BUCKET_POSES.get(str(bucket_id)),
                 "poses": DUMP_BUCKET_POSES,
             }
-        ), 200 if success else 503
+        ), 200
     except Exception as exc:
         app.logger.exception("dump bucket pose save failed")
         message = f"卸载桶位置保存失败: {exc}"

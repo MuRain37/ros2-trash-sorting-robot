@@ -81,6 +81,32 @@ def _source_rviz_path(robot_launch_pkg, filename):
     return os.path.join(robot_launch_pkg, 'rviz', filename)
 
 
+def _source_nav2_map_path(robot_launch_pkg, filename):
+    """优先使用源码目录中的地图，避免重启后读取 install/share 旧地图。"""
+    workspace = os.path.dirname(
+        os.path.dirname(
+            os.path.dirname(
+                os.path.dirname(robot_launch_pkg)
+            )
+        )
+    )
+    source_path = os.path.join(
+        workspace,
+        'src',
+        'robot_nav2',
+        'maps',
+        filename,
+    )
+    if os.path.exists(source_path):
+        return source_path
+
+    return os.path.join(
+        get_package_share_directory('robot_nav2'),
+        'maps',
+        filename,
+    )
+
+
 def launch_setup(context):
     """根据 mode 和功能开关组装实际启动动作。"""
     mode = LaunchConfiguration('mode').perform(context)
@@ -181,9 +207,8 @@ def launch_setup(context):
             )
 
     if _as_bool(LaunchConfiguration('use_nav2').perform(context)):
-        nav2_map = os.path.join(
-            get_package_share_directory('robot_nav2'),
-            'maps',
+        nav2_map = _source_nav2_map_path(
+            robot_launch_pkg,
             'gazebo.yaml' if mode == 'gazebo' else 'custom.yaml',
         )
         if mode == 'custom' and not os.path.exists(nav2_map):
