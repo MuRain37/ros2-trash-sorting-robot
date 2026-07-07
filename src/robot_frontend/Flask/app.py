@@ -243,6 +243,7 @@ class RuntimeData:
     @staticmethod
     def robot_status():
         map_data = ROS_BRIDGE.get_map_data()
+        ros_status = ROS_BRIDGE.status()
         nav_state = map_data["nav_status"].get("state")
         status_map = {
             "idle": "待机",
@@ -260,6 +261,7 @@ class RuntimeData:
             "position": map_data.get("robot_position"),
             "target_point": map_data.get("target_point"),
             "nav_status": map_data.get("nav_status"),
+            "robot_task_status": ros_status.get("robot_task_status", {}),
             "last_update": datetime.now().isoformat(),
         }
 
@@ -341,8 +343,8 @@ def control_robot():
     labels = {
         "standby": "待机",
         "start": "启动",
-        "grasp_start": "视觉抓取启动",
-        "grasp_stop": "视觉抓取停止",
+        "grasp_start": "启动清扫工作",
+        "grasp_stop": "停止清扫工作",
     }
     if command_type not in labels:
         return jsonify({"success": False, "error": "不支持的控制命令"}), 400

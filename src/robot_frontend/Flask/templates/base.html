@@ -368,7 +368,6 @@
                 <ul class="state-list">
                     <li><span>运行模式</span><span class="status-pill ok">ROS2</span></li>
                     <li><span>ROS</span><span id="ros-status" class="status-pill warn">检测中</span></li>
-                    <li><span>MySQL</span><span id="mysql-status" class="status-pill warn">检测中</span></li>
                 </ul>
             </div>
         </aside>
@@ -434,21 +433,11 @@
                     ros.textContent = data.ros_connected ? '已启动' : '未启动';
                     ros.className = data.ros_connected ? 'status-pill ok' : 'status-pill warn';
                 }
-                const mysql = document.getElementById('mysql-status');
-                if (mysql) {
-                    mysql.textContent = data.database_connected ? '已接入' : '未接入';
-                    mysql.className = data.database_connected ? 'status-pill ok' : 'status-pill warn';
-                }
             } catch (error) {
                 const ros = document.getElementById('ros-status');
                 if (ros) {
                     ros.textContent = '检测失败';
                     ros.className = 'status-pill warn';
-                }
-                const mysql = document.getElementById('mysql-status');
-                if (mysql) {
-                    mysql.textContent = '检测失败';
-                    mysql.className = 'status-pill warn';
                 }
             }
         }
