@@ -22,7 +22,7 @@ def generate_launch_description():
     return LaunchDescription([
         DeclareLaunchArgument(
             'port',
-            default_value='/dev/ttyUSB2',
+            default_value='/dev/myvoice',
             description='Serial port connected to the WonderEcho module.',
         ),
         DeclareLaunchArgument(
@@ -67,7 +67,7 @@ def generate_launch_description():
         ),
         DeclareLaunchArgument(
             'audio_play_cmd',
-            default_value="mpg123 -q '{path}'",
+            default_value="mpg123 -q -a plughw:1,0 '{path}'",
             description='Shell command to play audio files. Use {path} as placeholder.',
         ),
         Node(

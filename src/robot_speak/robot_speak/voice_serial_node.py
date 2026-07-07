@@ -98,7 +98,7 @@ class VoiceSerialNode(Node):
     def __init__(self):
         super().__init__('voice_serial_node')
 
-        self.declare_parameter('port', '/dev/ttyUSB2')
+        self.declare_parameter('port', '/dev/myvoice')
         self.declare_parameter('baudrate', 115200)
         self.declare_parameter('read_period_sec', 0.01)
         self.declare_parameter('commands_config', self._default_config_path())
@@ -116,7 +116,7 @@ class VoiceSerialNode(Node):
         )
         self.declare_parameter(
             'audio_play_cmd',
-            "mpg123 -q '{path}'",
+            "mpg123 -q -a plughw:1,0 '{path}'",
         )
 
         self.declare_parameter('raw_frame_topic', 'voice/raw_frame')
