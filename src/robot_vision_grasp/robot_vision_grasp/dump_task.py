@@ -1,10 +1,12 @@
-"""YOLO dump-bin detection service for dump-trash behavior."""
+"""OpenVINO dump-bin detection service for dump-trash behavior."""
 
 import math
 import threading
 from pathlib import Path
 
+import cv2
 import numpy as np
+import openvino as ov
 import rclpy
 from cv_bridge import CvBridge
 from rclpy.callback_groups import ReentrantCallbackGroup
@@ -20,7 +22,9 @@ DEFAULT_DEPTH_TOPIC = '/camera/real_camera/aligned_depth_to_color/image_raw'
 DEFAULT_SERVICE_NAME = 'detect_dump_bucket'
 DEFAULT_CLASS_NAME = 'bin'
 DEFAULT_CONFIDENCE = 0.75
+DEFAULT_IOU = 0.45
 DEFAULT_DEPTH_SCALE = 0.001
+DEFAULT_MODEL_DEVICE = 'CPU'
 
 
 class DumpTaskNode(Node):
@@ -44,9 +48,16 @@ class DumpTaskNode(Node):
         self._confidence_threshold = float(
             self._param('confidence_threshold', DEFAULT_CONFIDENCE)
         )
+        self._iou_threshold = float(self._param('iou_threshold', DEFAULT_IOU))
         self._depth_scale = float(self._param('depth_scale', DEFAULT_DEPTH_SCALE))
+        self._model_device = str(self._param('model_device', DEFAULT_MODEL_DEVICE))
 
-        self._model = self._load_model()
+        self._model = None
+        self._input_name = ''
+        self._output_name = ''
+        self._input_height = 640
+        self._input_width = 640
+        self._load_model()
 
         self.create_subscription(
             Image,
@@ -70,10 +81,12 @@ class DumpTaskNode(Node):
         )
 
         self.get_logger().info(
-            'Dump bin YOLO detector ready: '
+            'Dump bin OpenVINO detector ready: '
             f'service={self._service_name}, '
             f'color_topic={self._color_topic}, '
             f'depth_topic={self._depth_topic}, '
+            f'model={self._model_path or "trash_bin.xml"}, '
+            f'device={self._model_device}, '
             f'class={self._class_name}, '
             f'confidence={self._confidence_threshold:.2f}'
         )
@@ -84,15 +97,21 @@ class DumpTaskNode(Node):
 
     def _load_model(self):
         model_path = Path(self._model_path) if self._model_path else (
-            Path(__file__).parent / 'models' / 'trash_bin.pt'
+            Path(__file__).parent / 'models' / 'trash_bin.xml'
         )
         try:
-            from ultralytics import YOLO
-
-            return YOLO(str(model_path))
+            core = ov.Core()
+            model = core.read_model(str(model_path))
+            compiled = core.compile_model(model, self._model_device)
+            self._model = compiled
+            self._input_name = model.input(0).get_any_name()
+            self._output_name = model.output(0).get_any_name()
+            shape = model.input(0).shape
+            self._input_height = int(shape[2])
+            self._input_width = int(shape[3])
         except Exception as exc:
-            self.get_logger().error(f'Dump bin YOLO model load failed: {exc}')
-            return None
+            self.get_logger().error(f'Dump bin OpenVINO model load failed: {exc}')
+            self._model = None
 
     def _on_color_image(self, msg):
         try:
@@ -171,37 +190,97 @@ class DumpTaskNode(Node):
         return response
 
     def _detect_bin(self, color, depth, depth_encoding):
-        result = self._model.predict(
-            source=color,
-            conf=self._confidence_threshold,
-            verbose=False,
-        )[0]
-        boxes = getattr(result, 'boxes', None)
-        if boxes is None or len(boxes) == 0:
+        detections = self._infer_boxes(color)
+        if not detections:
             return None
 
-        names = getattr(result, 'names', {}) or {}
         best = None
-        for box in boxes:
-            cls_id = int(box.cls[0])
-            class_name = str(names.get(cls_id, cls_id))
-            confidence = float(box.conf[0])
-            if class_name != self._class_name:
-                continue
-            if confidence < self._confidence_threshold:
-                continue
-            xyxy = box.xyxy[0].detach().cpu().numpy().astype(float)
+        for xyxy, confidence in detections:
             candidate = self._detection_from_box(
                 color,
                 depth,
                 depth_encoding,
                 xyxy,
-                class_name,
+                self._class_name,
                 confidence,
             )
             if best is None or candidate['confidence'] > best['confidence']:
                 best = candidate
         return best
+
+    def _infer_boxes(self, color):
+        blob, scale, pad_w, pad_h = self._preprocess(color)
+        request = self._model.create_infer_request()
+        raw = request.infer({self._input_name: blob})[self._output_name]
+        pred = np.asarray(raw)
+        if pred.ndim == 3:
+            pred = pred[0]
+        if pred.shape[0] == 5:
+            pred = pred.T
+        if pred.ndim != 2 or pred.shape[1] < 5:
+            raise ValueError(f'unexpected OpenVINO output shape: {raw.shape}')
+
+        boxes = []
+        scores = []
+        for row in pred:
+            score = float(row[4])
+            if score < self._confidence_threshold:
+                continue
+            xc, yc, bw, bh = [float(value) for value in row[:4]]
+            x1 = (xc - bw * 0.5 - pad_w) / scale
+            y1 = (yc - bh * 0.5 - pad_h) / scale
+            x2 = (xc + bw * 0.5 - pad_w) / scale
+            y2 = (yc + bh * 0.5 - pad_h) / scale
+            if x2 <= x1 or y2 <= y1:
+                continue
+            boxes.append([x1, y1, x2, y2])
+            scores.append(score)
+
+        if not boxes:
+            return []
+
+        boxes_arr = np.asarray(boxes, dtype=np.float32)
+        scores_arr = np.asarray(scores, dtype=np.float32)
+        indices = self._nms(boxes_arr, scores_arr)
+        return [(boxes_arr[index], float(scores_arr[index])) for index in indices]
+
+    def _preprocess(self, color):
+        height, width = color.shape[:2]
+        scale = min(self._input_height / height, self._input_width / width)
+        new_h = int(round(height * scale))
+        new_w = int(round(width * scale))
+        pad_h = (self._input_height - new_h) // 2
+        pad_w = (self._input_width - new_w) // 2
+
+        resized = cv2.resize(color, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
+        canvas = np.full(
+            (self._input_height, self._input_width, 3),
+            114,
+            dtype=np.uint8,
+        )
+        canvas[pad_h:pad_h + new_h, pad_w:pad_w + new_w] = resized
+        blob = np.transpose(canvas.astype(np.float32) / 255.0, (2, 0, 1))
+        return blob[np.newaxis, :, :, :], scale, pad_w, pad_h
+
+    def _nms(self, boxes, scores):
+        x1, y1, x2, y2 = boxes[:, 0], boxes[:, 1], boxes[:, 2], boxes[:, 3]
+        areas = np.maximum(0.0, x2 - x1) * np.maximum(0.0, y2 - y1)
+        order = scores.argsort()[::-1]
+        keep = []
+        while order.size > 0:
+            index = order[0]
+            keep.append(index)
+            if order.size == 1:
+                break
+            xx1 = np.maximum(x1[index], x1[order[1:]])
+            yy1 = np.maximum(y1[index], y1[order[1:]])
+            xx2 = np.minimum(x2[index], x2[order[1:]])
+            yy2 = np.minimum(y2[index], y2[order[1:]])
+            inter = np.maximum(0.0, xx2 - xx1) * np.maximum(0.0, yy2 - yy1)
+            union = areas[index] + areas[order[1:]] - inter
+            iou = inter / np.maximum(union, 1e-6)
+            order = order[1:][iou <= self._iou_threshold]
+        return keep
 
     def _detection_from_box(self, color, depth, depth_encoding, xyxy, class_name, confidence):
         height, width = color.shape[:2]

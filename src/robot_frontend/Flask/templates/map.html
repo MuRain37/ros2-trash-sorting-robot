@@ -14,6 +14,9 @@
             <button class="btn btn-sm btn-primary" type="button" onclick="handleTargetButton()" id="target-mode-btn">
                 <i class="fas fa-location-dot me-1"></i><span id="target-mode-text">设定目标点</span>
             </button>
+            <button class="btn btn-sm btn-outline-info" type="button" onclick="setRobotPoseMode()" id="robot-pose-mode-btn">
+                <i class="fas fa-location-crosshairs me-1"></i>设定机器人位姿
+            </button>
             <button class="btn btn-sm btn-outline-warning" type="button" onclick="setDumpBucketPoseMode(1)" id="dump-bucket-1-btn">
                 <i class="fas fa-dumpster me-1"></i>设定卸载桶1位置
             </button>
@@ -144,12 +147,15 @@
     let dumpPoseBucketId = null;
     let dumpPoseDragStart = null;
     let dumpPoseDragCurrent = null;
+    let robotPoseDragStart = null;
+    let robotPoseDragCurrent = null;
     let pathEditing = false;
     let stagedWaypoints = [];
     let waypointDragStart = null;
     let waypointDragCurrent = null;
     let isDraggingWaypoint = false;
     let isDraggingDumpPose = false;
+    let isDraggingRobotPose = false;
     let isDragging = false;
     let isDraggingView = false;
     let viewDragMode = null;
@@ -293,6 +299,7 @@
     function editGestureActive() {
         return (
             (mode === 'dump_pose' && dumpPoseBucketId) ||
+            mode === 'robot_pose' ||
             (mode === 'target' && pathEditing) ||
             mode === 'region'
         );
@@ -376,6 +383,7 @@
         drawStagedPath();
         drawWaypointDraft();
         drawDumpPoseDraft();
+        drawRobotPoseDraft();
         drawTargetPath();
         drawRobot();
         drawDraftRect();
@@ -598,6 +606,35 @@
         ctx.restore();
     }
 
+    function drawRobotPoseDraft() {
+        if (!robotPoseDragStart || !robotPoseDragCurrent) return;
+        const startWorld = canvasToWorld(robotPoseDragStart);
+        const currentWorld = canvasToWorld(robotPoseDragCurrent);
+        if (!startWorld || !currentWorld) return;
+        const theta = Math.atan2(currentWorld.y - startWorld.y, currentWorld.x - startWorld.x);
+        ctx.save();
+        ctx.fillStyle = '#0dcaf0';
+        ctx.strokeStyle = '#101615';
+        ctx.lineWidth = 2;
+        ctx.setLineDash([7, 5]);
+        ctx.beginPath();
+        ctx.moveTo(robotPoseDragStart.x, robotPoseDragStart.y);
+        ctx.lineTo(robotPoseDragCurrent.x, robotPoseDragCurrent.y);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.beginPath();
+        ctx.arc(robotPoseDragStart.x, robotPoseDragStart.y, 13, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+        drawDirectionArrow({ ...robotPoseDragStart, theta }, 42);
+        ctx.fillStyle = '#101615';
+        ctx.font = '800 10px Microsoft YaHei';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('机器人', robotPoseDragStart.x, robotPoseDragStart.y);
+        ctx.restore();
+    }
+
     function drawRobot() {
         const pose = mapData.robot_position;
         const pos = worldToCanvas(pose);
@@ -639,11 +676,14 @@
         isDragging = false;
         isDraggingWaypoint = false;
         isDraggingDumpPose = false;
+        isDraggingRobotPose = false;
         dragStart = null;
         dragCurrent = null;
         dumpPoseBucketId = null;
         dumpPoseDragStart = null;
         dumpPoseDragCurrent = null;
+        robotPoseDragStart = null;
+        robotPoseDragCurrent = null;
         if (mode !== 'target') {
             pathEditing = false;
             stagedWaypoints = [];
@@ -654,6 +694,7 @@
             pathEditing ? 'btn btn-sm btn-warning' : (mode === 'target' ? 'btn btn-sm btn-primary' : 'btn btn-sm btn-outline-primary');
         document.getElementById('region-mode-btn').className =
             mode === 'region' ? 'btn btn-sm btn-primary' : 'btn btn-sm btn-outline-primary';
+        updateRobotPoseButton();
         updateDumpBucketButtons();
         updateTargetButton();
         updateModeLabel();
@@ -697,6 +738,31 @@
         showToast(`按下并拖拽地图设定卸载桶${bucketId}位置和朝向`, 'info');
     }
 
+    function setRobotPoseMode() {
+        mode = 'robot_pose';
+        pathEditing = false;
+        stagedWaypoints = [];
+        isDragging = false;
+        isDraggingWaypoint = false;
+        isDraggingDumpPose = false;
+        isDraggingRobotPose = false;
+        waypointDragStart = null;
+        waypointDragCurrent = null;
+        dumpPoseBucketId = null;
+        dumpPoseDragStart = null;
+        dumpPoseDragCurrent = null;
+        robotPoseDragStart = null;
+        robotPoseDragCurrent = null;
+        dragStart = null;
+        dragCurrent = null;
+        updateRobotPoseButton();
+        updateDumpBucketButtons();
+        updateTargetButton();
+        updateModeLabel();
+        drawMap();
+        showToast('按下并拖拽地图设定机器人在 map 中的位置和朝向', 'info');
+    }
+
     function resetWaypointDraft() {
         isDraggingWaypoint = false;
         waypointDragStart = null;
@@ -707,6 +773,12 @@
         isDraggingDumpPose = false;
         dumpPoseDragStart = null;
         dumpPoseDragCurrent = null;
+    }
+
+    function resetRobotPoseDraft() {
+        isDraggingRobotPose = false;
+        robotPoseDragStart = null;
+        robotPoseDragCurrent = null;
     }
 
     function addDraggedWaypoint() {
@@ -758,6 +830,14 @@
         });
     }
 
+    function updateRobotPoseButton() {
+        const button = document.getElementById('robot-pose-mode-btn');
+        if (!button) return;
+        button.className = mode === 'robot_pose'
+            ? 'btn btn-sm btn-info'
+            : 'btn btn-sm btn-outline-info';
+    }
+
     function updateModeLabel() {
         const label = document.getElementById('map-mode-label');
         if (!mapData.has_map) {
@@ -767,6 +847,8 @@
         }
         if (mode === 'region') {
             label.textContent = '拖拽框选区域';
+        } else if (mode === 'robot_pose') {
+            label.textContent = '拖拽设定机器人位置和方向';
         } else if (mode === 'dump_pose' && dumpPoseBucketId) {
             label.textContent = `拖拽设定卸载桶${dumpPoseBucketId}位置和方向`;
         } else if (pathEditing) {
@@ -866,6 +948,52 @@
         updateModeLabel();
         drawMap();
         showToast(data.message || '卸载桶位置已保存', 'success');
+    }
+
+    async function submitRobotInitialPose(startPoint, currentPoint) {
+        const startWorld = canvasToWorld(startPoint);
+        const currentWorld = canvasToWorld(currentPoint);
+        if (!startWorld || !currentWorld) {
+            showToast('请在地图有效区域内拖拽设置机器人方向', 'warning');
+            resetRobotPoseDraft();
+            drawMap();
+            return;
+        }
+        const dx = currentPoint.x - startPoint.x;
+        const dy = currentPoint.y - startPoint.y;
+        if (Math.hypot(dx, dy) < 8) {
+            showToast('请拖拽一小段距离来设置机器人朝向', 'warning');
+            resetRobotPoseDraft();
+            drawMap();
+            return;
+        }
+
+        startWorld.theta = Math.atan2(currentWorld.y - startWorld.y, currentWorld.x - startWorld.x);
+        startWorld.yaw = startWorld.theta;
+        startWorld.frame_id = 'map';
+
+        const response = await fetch('/api/robot/initial_pose', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(startWorld)
+        });
+        const data = await response.json();
+        if (!response.ok || !data.success) {
+            throw new Error(data.error || data.message || '机器人位姿发布失败');
+        }
+        mapData.robot_position = data.pose || {
+            x: startWorld.x,
+            y: startWorld.y,
+            theta: startWorld.theta,
+        };
+        mode = 'target';
+        resetRobotPoseDraft();
+        updateRobotPoseButton();
+        updateDumpBucketButtons();
+        updateTargetButton();
+        updateModeLabel();
+        drawMap();
+        showToast(data.message || '机器人初始位姿已发布', 'success');
     }
 
     async function createRegionFromDrag() {
@@ -1032,6 +1160,13 @@
             drawMap();
             return;
         }
+        if (mode === 'robot_pose') {
+            isDraggingRobotPose = true;
+            robotPoseDragStart = eventPoint(event);
+            robotPoseDragCurrent = robotPoseDragStart;
+            drawMap();
+            return;
+        }
         if (mode === 'target' && pathEditing) {
             isDraggingWaypoint = true;
             waypointDragStart = eventPoint(event);
@@ -1050,6 +1185,11 @@
         if (updateViewDrag(event)) return;
         if (mode === 'dump_pose' && dumpPoseBucketId && isDraggingDumpPose) {
             dumpPoseDragCurrent = eventPoint(event);
+            drawMap();
+            return;
+        }
+        if (mode === 'robot_pose' && isDraggingRobotPose) {
+            robotPoseDragCurrent = eventPoint(event);
             drawMap();
             return;
         }
@@ -1076,6 +1216,20 @@
             } catch (error) {
                 showToast(error.message || '卸载桶位置保存失败', 'error');
                 resetDumpPoseDraft();
+                drawMap();
+            }
+            return;
+        }
+        if (mode === 'robot_pose' && isDraggingRobotPose) {
+            const startPoint = robotPoseDragStart;
+            const currentPoint = eventPoint(event);
+            robotPoseDragCurrent = currentPoint;
+            isDraggingRobotPose = false;
+            try {
+                await submitRobotInitialPose(startPoint, currentPoint);
+            } catch (error) {
+                showToast(error.message || '机器人位姿发布失败', 'error');
+                resetRobotPoseDraft();
                 drawMap();
             }
             return;
@@ -1112,6 +1266,10 @@
             resetDumpPoseDraft();
             changed = true;
         }
+        if (isDraggingRobotPose) {
+            resetRobotPoseDraft();
+            changed = true;
+        }
         if (isDraggingWaypoint) {
             resetWaypointDraft();
             changed = true;
@@ -1146,6 +1304,7 @@
     resizeCanvas();
     updateModeLabel();
     updateTargetButton();
+    updateRobotPoseButton();
     updateDumpBucketButtons();
     updateMapImage();
     setInterval(refreshMapData, 1500);

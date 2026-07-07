@@ -156,6 +156,7 @@ ROS_CONFIG = {
         os.getenv('ROS_AMCL_LIFECYCLE_TIMEOUT_SEC', '5.0')
     ),
     'amcl_pose_topic': os.getenv('ROS_AMCL_POSE_TOPIC', '/amcl_pose'),
+    'initial_pose_topic': os.getenv('ROS_INITIAL_POSE_TOPIC', '/initialpose'),
     'scan_topic': os.getenv('ROS_SCAN_TOPIC', '/scan'),
     'cmd_vel_topic': os.getenv('ROS_CMD_VEL_TOPIC', '/cmd_vel'),
     'static_map_yaml': os.getenv(

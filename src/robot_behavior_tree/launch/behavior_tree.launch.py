@@ -26,7 +26,7 @@ def generate_launch_description():
         'robot_vision_grasp',
         'robot_vision_grasp',
         'models',
-        'trash_bin.pt',
+        'trash_bin.xml',
     )
 
     robot_task_server = Node(

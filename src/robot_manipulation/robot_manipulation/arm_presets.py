@@ -54,7 +54,7 @@ def joint_position_to_servo_raw(index, joint_position):
 
 
 PRESET_SERVO_RAW = {
-    ACTION_ARM_CENTER: [500.0, 650.0, 200.0, 100.0, 500.0],
+    ACTION_ARM_CENTER: [500.0, 700.0, 100.0, 100.0, 500.0],
     ACTION_LEFT_BUCKET: [900.0, 650.0, 240.0, 150.0, 500.0],
     ACTION_RIGHT_BUCKET: [100.0, 650.0, 240.0, 150.0, 500.0],
     ACTION_ARM_MAPPING: [500.0, 650.0, 210.0, 160.0, 500.0],

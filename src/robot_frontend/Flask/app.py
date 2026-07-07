@@ -501,6 +501,32 @@ def robot_pose():
     return jsonify(ROS_BRIDGE.get_robot_pose_data())
 
 
+@app.route("/api/robot/initial_pose", methods=["POST"])
+def set_robot_initial_pose():
+    data = request.get_json(silent=True) or {}
+    try:
+        x = float(data.get("x"))
+        y = float(data.get("y"))
+        yaw = float(data.get("yaw", data.get("theta", 0.0)))
+    except (TypeError, ValueError):
+        return jsonify({"success": False, "error": "机器人位姿坐标无效"}), 400
+
+    frame_id = data.get("frame_id") or ROS_CONFIG["map_frame"]
+    result = ROS_BRIDGE.publish_initial_pose(x, y, yaw, frame_id=frame_id)
+    success = bool(result.get("success"))
+    add_log(
+        "设定机器人位姿",
+        f"发布机器人初始位姿：({x:.3f}, {y:.3f}, theta={yaw:.3f})",
+        status="完成" if success else "失败",
+        success=success,
+        metadata={
+            "pose": {"x": x, "y": y, "theta": yaw, "yaw": yaw, "frame_id": frame_id},
+            "result": result,
+        },
+    )
+    return jsonify(result), 200 if success else 503
+
+
 @app.route("/api/map/rebuild", methods=["POST"])
 def rebuild_map():
     result = ROS_BRIDGE.reset_mapping()

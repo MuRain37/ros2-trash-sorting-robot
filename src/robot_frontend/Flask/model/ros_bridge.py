@@ -235,6 +235,11 @@ class FlaskRosNode(Node):
                 ChangeState,
                 f"{map_server_node}/change_state",
             )
+        self.initial_pose_pub = self.create_publisher(
+            PoseWithCovarianceStamped,
+            config["initial_pose_topic"],
+            10,
+        )
         self.cmd_vel_pub = self.create_publisher(Twist, config["cmd_vel_topic"], 10)
         self._velocity_lock = threading.Lock()
         self._velocity_command = Twist()
@@ -382,6 +387,23 @@ class FlaskRosNode(Node):
 
     def publish_velocity(self, linear_x, angular_z):
         self.set_velocity_command(linear_x, angular_z)
+
+    def publish_initial_pose(self, x, y, yaw, frame_id=None):
+        msg = PoseWithCovarianceStamped()
+        msg.header.frame_id = frame_id or self.map_frame
+        msg.header.stamp = self.get_clock().now().to_msg()
+        msg.pose.pose.position.x = float(x)
+        msg.pose.pose.position.y = float(y)
+        msg.pose.pose.position.z = 0.0
+        orientation = _quaternion_from_yaw(float(yaw))
+        msg.pose.pose.orientation.x = orientation["x"]
+        msg.pose.pose.orientation.y = orientation["y"]
+        msg.pose.pose.orientation.z = orientation["z"]
+        msg.pose.pose.orientation.w = orientation["w"]
+        msg.pose.covariance[0] = 0.25
+        msg.pose.covariance[7] = 0.25
+        msg.pose.covariance[35] = 0.06853891945200942
+        self.initial_pose_pub.publish(msg)
 
     def set_velocity_command(self, linear_x, angular_z):
         msg = Twist()
@@ -2329,6 +2351,25 @@ class RosBridge:
         with self.lock:
             self.target_point = {"x": float(x), "y": float(y), "theta": float(yaw)}
         return result
+
+    def publish_initial_pose(self, x, y, yaw, frame_id=None):
+        if not self.started or not self.node:
+            return {"success": False, "error": self.start_error or "ROS bridge 未启动"}
+
+        frame_id = frame_id or self.config["map_frame"]
+        self.node.publish_initial_pose(x, y, yaw, frame_id=frame_id)
+        self.set_robot_pose(x, y, yaw, source="initialpose", stamp=time.time())
+        return {
+            "success": True,
+            "message": "机器人初始位姿已发布",
+            "pose": {
+                "x": float(x),
+                "y": float(y),
+                "theta": float(yaw),
+                "yaw": float(yaw),
+                "frame_id": frame_id,
+            },
+        }
 
     def send_navigation_path(self, waypoints):
         if not self.started or not self.node:
