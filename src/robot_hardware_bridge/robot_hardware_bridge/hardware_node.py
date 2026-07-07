@@ -11,12 +11,7 @@ from rclpy.node import Node
 from rclpy.parameter import Parameter
 
 from robot_hardware_bridge.arm_bridge import ArmBridge
-from robot_hardware_bridge.lift_dump_bridge import (
-    DUMP_GRIPPER_DURATION_MS,
-    DUMP_SETTLE_SEC,
-    DUMP_STEPPER_WAIT_SEC,
-    LiftDumpBridge,
-)
+from robot_hardware_bridge.lift_dump_bridge import LiftDumpBridge
 from robot_hardware_bridge.motor_bridge import MotorBridge
 from robot_hardware_bridge.serial_feedback_dispatcher import (
     SerialFeedbackDispatcher,
@@ -51,16 +46,6 @@ class HardwareNode(Node):
         self.declare_parameter('arm_servo_send_rate', 10.0)
         # 舵机运动完成时间（ms）
         self.declare_parameter('arm_servo_duration_ms', 100.0)
-        # 倒垃圾流程参数：夹爪时长、步进电机开环等待和稳定等待
-        self.declare_parameter(
-            'dump_gripper_duration_ms',
-            DUMP_GRIPPER_DURATION_MS,
-        )
-        self.declare_parameter(
-            'dump_stepper_wait_sec',
-            DUMP_STEPPER_WAIT_SEC,
-        )
-        self.declare_parameter('dump_settle_sec', DUMP_SETTLE_SEC)
         # 可选参数（dynamic_typing），未设置时回退到 open_loop_control
         optional_parameter = ParameterDescriptor(dynamic_typing=True)
         # 电机开环反馈：True 时直接回传轮速指令
@@ -84,15 +69,6 @@ class HardwareNode(Node):
         )
         arm_servo_duration_ms = float(
             self.get_parameter('arm_servo_duration_ms').value
-        )
-        dump_gripper_duration_ms = float(
-            self.get_parameter('dump_gripper_duration_ms').value
-        )
-        dump_stepper_wait_sec = float(
-            self.get_parameter('dump_stepper_wait_sec').value
-        )
-        dump_settle_sec = float(
-            self.get_parameter('dump_settle_sec').value
         )
         self._debug = debug
 
@@ -134,9 +110,6 @@ class HardwareNode(Node):
         self._lift_dump = LiftDumpBridge(
             self,
             cmd_callback=self._serial.write_frame,
-            dump_gripper_duration_ms=dump_gripper_duration_ms,
-            dump_stepper_wait_sec=dump_stepper_wait_sec,
-            dump_settle_sec=dump_settle_sec,
         )
 
         # 串口反馈分发器
@@ -154,8 +127,7 @@ class HardwareNode(Node):
             f'motor_open_loop_control: {self._motor_open_loop_control}, '
             f'arm_open_loop_control: {self._arm_open_loop_control}, '
             f'arm_servo_send_rate: {arm_servo_send_rate}Hz, '
-            f'arm_servo_duration_ms: {arm_servo_duration_ms}, '
-            f'dump_stepper_wait_sec: {dump_stepper_wait_sec})'
+            f'arm_servo_duration_ms: {arm_servo_duration_ms})'
         )
 
     def _optional_bool_parameter(self, name, default_value):

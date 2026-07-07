@@ -5,7 +5,6 @@ import math
 from pathlib import Path
 
 from robot_interfaces.srv import (
-    DumpTrash,
     SetGripper,
     SetLiftSteps,
     SetServoAngle,
@@ -358,8 +357,9 @@ def make_lift_steps_request(
     return request
 
 
-def make_servo_angle_request(angle, duration_ms=100.0):
+def make_servo_angle_request(servo_id, angle, duration_ms=100.0):
     request = SetServoAngle.Request()
+    request.servo_id = servo_id
     request.angle = angle
     request.duration_ms = duration_ms
     return request
@@ -372,12 +372,6 @@ def make_gripper_request(open_ratio, duration_ms=100.0):
     return request
 
 
-def make_dump_trash_request(bucket_id):
-    request = DumpTrash.Request()
-    request.bucket_id = bucket_id
-    return request
-
-
 def test_lift_dump_bridge_does_not_send_default_targets_on_startup():
     sent = []
     node = FakeNode()
@@ -387,14 +381,6 @@ def test_lift_dump_bridge_does_not_send_default_targets_on_startup():
     ))
 
     assert sent == []
-
-
-def test_lift_dump_bridge_registers_dump_trash_service():
-    node = FakeNode()
-
-    LiftDumpBridge(node, cmd_callback=lambda cmd, payload: None)
-
-    assert 'dump_trash' in node.services
 
 
 def test_lift_dump_bridge_lift_steps_service_sends_stepper_once():
@@ -438,40 +424,40 @@ def test_lift_dump_bridge_repeated_lift_steps_service_sends_each_request():
     assert unpack_stepper_payload(sent[1][1]) == -250.0
 
 
-def test_lift_dump_bridge_horizontal_rotation_service_sends_servo_once():
+def test_lift_dump_bridge_servo_angle_service_sends_servo_once():
     sent = []
     node = FakeNode()
     bridge = LiftDumpBridge(
         node,
         cmd_callback=lambda cmd, payload: sent.append((cmd, payload)),
     )
-    request = make_servo_angle_request(0.0, duration_ms=350.0)
+    request = make_servo_angle_request(7, 500.0, duration_ms=350.0)
     response = SetServoAngle.Response()
 
-    result = bridge._on_horizontal_rotation_command(request, response)
+    result = bridge._on_servo_angle_command(request, response)
 
     assert result.success is True
-    assert result.message == 'lift horizontal rotation command accepted'
+    assert result.message == 'lift servo command accepted'
     assert [cmd for cmd, payload in sent] == [PACKET_CMD_SERVO]
     assert unpack_servo_payload(sent[0][1])[1] == 7
     assert unpack_servo_payload(sent[0][1])[2] == 500
     assert unpack_servo_payload(sent[0][1])[3] == 350
 
 
-def test_lift_dump_bridge_gripper_rotation_service_sends_servo_once():
+def test_lift_dump_bridge_servo_angle_service_uses_requested_servo_id():
     sent = []
     node = FakeNode()
     bridge = LiftDumpBridge(
         node,
         cmd_callback=lambda cmd, payload: sent.append((cmd, payload)),
     )
-    request = make_servo_angle_request(0.0, duration_ms=360.0)
+    request = make_servo_angle_request(8, 500.0, duration_ms=360.0)
     response = SetServoAngle.Response()
 
-    result = bridge._on_gripper_rotation_command(request, response)
+    result = bridge._on_servo_angle_command(request, response)
 
     assert result.success is True
-    assert result.message == 'lift gripper rotation command accepted'
+    assert result.message == 'lift servo command accepted'
     assert [cmd for cmd, payload in sent] == [PACKET_CMD_SERVO]
     assert unpack_servo_payload(sent[0][1])[1] == 8
     assert unpack_servo_payload(sent[0][1])[2] == 500
@@ -504,118 +490,6 @@ def test_lift_dump_bridge_gripper_service_sends_servo_once():
     ]
 
 
-def test_lift_dump_bridge_dump_trash_service_runs_bucket_1_sequence():
-    sent = []
-    node = FakeNode()
-    bridge = LiftDumpBridge(
-        node,
-        cmd_callback=lambda cmd, payload: sent.append((cmd, payload)),
-        dump_stepper_wait_sec=0.0,
-        dump_settle_sec=0.0,
-        sleep_fn=lambda seconds: None,
-    )
-    request = make_dump_trash_request(1)
-
-    result = bridge._on_dump_trash_command(
-        request,
-        DumpTrash.Response(),
-    )
-
-    assert result.success is True
-    assert result.message == 'dump trash sequence completed for bucket 1'
-    assert [cmd for cmd, payload in sent] == [
-        PACKET_CMD_SERVO,
-        PACKET_CMD_SERVO,
-        PACKET_CMD_SERVO,
-        PACKET_CMD_SERVO,
-        PACKET_CMD_STEPPER,
-        PACKET_CMD_SERVO,
-        PACKET_CMD_STEPPER,
-        PACKET_CMD_SERVO,
-        PACKET_CMD_SERVO,
-        PACKET_CMD_SERVO,
-        PACKET_CMD_SERVO,
-        PACKET_CMD_STEPPER,
-        PACKET_CMD_SERVO,
-        PACKET_CMD_STEPPER,
-        PACKET_CMD_SERVO,
-        PACKET_CMD_SERVO,
-        PACKET_CMD_SERVO,
-    ]
-
-    servo_commands = [
-        unpack_servo_payload(payload)
-        for cmd, payload in sent
-        if cmd == PACKET_CMD_SERVO
-    ]
-    stepper_commands = [
-        unpack_stepper_payload(payload)
-        for cmd, payload in sent
-        if cmd == PACKET_CMD_STEPPER
-    ]
-
-    assert [(command[1], command[2]) for command in servo_commands] == [
-        (9, 1000),
-        (8, 500),
-        (7, 500),
-        (7, 100),
-        (9, 520),
-        (7, 500),
-        (8, 0),
-        (8, 500),
-        (7, 100),
-        (9, 1000),
-        (7, 500),
-        (8, 500),
-        (9, 1000),
-    ]
-    assert stepper_commands == [-250.0, 0.0, -250.0, 0.0]
-
-
-def test_lift_dump_bridge_dump_trash_service_uses_bucket_2_position():
-    sent = []
-    node = FakeNode()
-    bridge = LiftDumpBridge(
-        node,
-        cmd_callback=lambda cmd, payload: sent.append((cmd, payload)),
-        dump_stepper_wait_sec=0.0,
-        dump_settle_sec=0.0,
-        sleep_fn=lambda seconds: None,
-    )
-
-    result = bridge._on_dump_trash_command(
-        make_dump_trash_request(2),
-        DumpTrash.Response(),
-    )
-
-    servo_positions = [
-        (unpack_servo_payload(payload)[1], unpack_servo_payload(payload)[2])
-        for cmd, payload in sent
-        if cmd == PACKET_CMD_SERVO
-    ]
-    assert result.success is True
-    assert (7, 900) in servo_positions
-    assert (7, 100) not in servo_positions
-
-
-def test_lift_dump_bridge_dump_trash_service_rejects_invalid_bucket():
-    sent = []
-    node = FakeNode()
-    bridge = LiftDumpBridge(
-        node,
-        cmd_callback=lambda cmd, payload: sent.append((cmd, payload)),
-    )
-
-    result = bridge._on_dump_trash_command(
-        make_dump_trash_request(3),
-        DumpTrash.Response(),
-    )
-
-    assert result.success is False
-    assert result.message == 'bucket_id must be 1 or 2: 3'
-    assert sent == []
-
-
 def test_lift_dump_bridge_rejects_invalid_stepper_target():
     sent = []
     node = FakeNode()
@@ -640,14 +514,14 @@ def test_lift_dump_bridge_rejects_invalid_servo_angle():
         node,
         cmd_callback=lambda cmd, payload: sent.append((cmd, payload)),
     )
-    invalid_request = make_servo_angle_request(math.radians(181.0))
+    invalid_request = make_servo_angle_request(7, 1001.0)
     response = SetServoAngle.Response()
 
-    result = bridge._on_horizontal_rotation_command(invalid_request, response)
+    result = bridge._on_servo_angle_command(invalid_request, response)
 
     assert result.success is False
     assert result.message == (
-        'angle out of range: 181.0 not in [-180.0, 180.0] deg'
+        'servo raw must be in [0.0, 1000.0]: 1001.0'
     )
     assert sent == []
 

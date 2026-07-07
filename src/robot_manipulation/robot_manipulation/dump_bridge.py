@@ -17,8 +17,7 @@ from std_srvs.srv import Trigger
 
 # 硬件桥服务名
 LIFT_STEPS_SERVICE = 'set_lift_steps'
-HORIZONTAL_SERVICE = 'set_lift_horizontal_rotation'
-GRIPPER_ROTATION_SERVICE = 'set_lift_gripper_rotation'
+SERVO_ANGLE_SERVICE = 'set_lift_servo_angle'
 GRIPPER_SERVICE = 'set_lift_gripper'
 PICK_BUCKET_SERVICE = 'dump_pick_bucket'
 POUR_BUCKET_SERVICE = 'dump_pour_bucket'
@@ -27,6 +26,8 @@ HOME_SERVICE = 'dump_home'
 
 # 倒垃圾流程参数（与硬件桥校准值保持一致）
 SERVO_CENTER = 500.0
+HORIZONTAL_SERVO_ID = 7
+GRIPPER_ROTATE_SERVO_ID = 8
 LIFT_GRIPPER_OPEN_RAW = 500.0
 LIFT_GRIPPER_CLOSE_RAW = 595.0
 
@@ -87,8 +88,7 @@ class DumpTrashBridge:
         callback_group = ReentrantCallbackGroup()
 
         self._lift_steps_client = node.create_client(SetLiftSteps, LIFT_STEPS_SERVICE, callback_group=callback_group,)
-        self._horizontal_client = node.create_client(SetServoAngle, HORIZONTAL_SERVICE, callback_group=callback_group,)
-        self._gripper_rotation_client = node.create_client(SetServoAngle, GRIPPER_ROTATION_SERVICE, callback_group=callback_group,)
+        self._servo_angle_client = node.create_client(SetServoAngle, SERVO_ANGLE_SERVICE, callback_group=callback_group,)
         self._gripper_client = node.create_client(SetGripper, GRIPPER_SERVICE, callback_group=callback_group,)
         self._dump_trash_service = None
         if dump_trash_service:
@@ -250,19 +250,12 @@ class DumpTrashBridge:
 
     def _call_horizontal_async(self, raw_position):
         """调用水平旋转舵机服务，不等待动作完成。"""
-        request = SetServoAngle.Request()
-        request.angle = float(raw_position)
-        request.duration_ms = self._servo_duration_ms
         self._node.get_logger().info(
             'dump horizontal servo: '
             f'raw={float(raw_position):.1f}, '
-            f'duration_ms={request.duration_ms:.0f}'
+            f'duration_ms={self._servo_duration_ms:.0f}'
         )
-        self._call_required_service(
-            self._horizontal_client,
-            request,
-            'lift horizontal rotation',
-        )
+        self._call_servo(HORIZONTAL_SERVO_ID, raw_position, 'lift horizontal rotation')
 
     def _call_gripper_rotation(self, raw_position, wait_sec=None):
         """调用夹爪旋转舵机服务并等待动作完成."""
@@ -271,18 +264,27 @@ class DumpTrashBridge:
 
     def _call_gripper_rotation_async(self, raw_position):
         """调用夹爪旋转舵机服务，不等待动作完成。"""
-        request = SetServoAngle.Request()
-        request.angle = float(raw_position)
-        request.duration_ms = self._servo_duration_ms
         self._node.get_logger().info(
             'dump gripper rotation servo: '
             f'raw={float(raw_position):.1f}, '
-            f'duration_ms={request.duration_ms:.0f}'
+            f'duration_ms={self._servo_duration_ms:.0f}'
         )
-        self._call_required_service(
-            self._gripper_rotation_client,
-            request,
+        self._call_servo(
+            GRIPPER_ROTATE_SERVO_ID,
+            raw_position,
             'lift gripper rotation',
+        )
+
+    def _call_servo(self, servo_id, raw_position, label):
+        """调用通用升降-倾倒舵机服务。"""
+        request = SetServoAngle.Request()
+        request.servo_id = int(servo_id)
+        request.angle = float(raw_position)
+        request.duration_ms = self._servo_duration_ms
+        self._call_required_service(
+            self._servo_angle_client,
+            request,
+            label,
         )
 
     def _call_gripper(self, raw_position):
