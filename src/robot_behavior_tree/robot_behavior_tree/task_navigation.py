@@ -1,6 +1,5 @@
 """Navigation task behavior for RobotTaskServer."""
 
-import math
 import time
 
 import rclpy
@@ -124,15 +123,10 @@ class NavigationTaskMixin:
             raise RuntimeError(f'{label} goal rejected')
 
         result_future = nav_handle.get_result_async()
-        last_detect_xy = self._current_map_xy()
-        last_detect_yaw = self._current_yaw()
-        detect_distance_m = max(
-            0.0,
-            float(self.get_parameter('coverage_detect_distance_m').value),
-        )
-        detect_yaw_rad = max(
-            0.0,
-            float(self.get_parameter('coverage_detect_yaw_rad').value),
+        next_detect = time.monotonic()
+        detect_interval = max(
+            0.2,
+            float(self.get_parameter('coverage_detect_interval_sec').value),
         )
         deadline = time.monotonic() + self._navigation_timeout_sec()
 
@@ -154,15 +148,9 @@ class NavigationTaskMixin:
                 self._cancel_action_goal(nav_handle)
                 raise RuntimeError(f'{label} result timed out')
 
-            if detect_enabled and self._coverage_detect_due(
-                last_detect_xy,
-                last_detect_yaw,
-                detect_distance_m,
-                detect_yaw_rad,
-            ):
+            if detect_enabled and time.monotonic() >= next_detect:
                 target = self._detect_grasp_target(goal_handle)
-                last_detect_xy = self._current_map_xy()
-                last_detect_yaw = self._current_yaw()
+                next_detect = time.monotonic() + detect_interval
                 if target is not None:
                     self.get_logger().info(
                         f'clean_region detected {target.class_name}; '
@@ -178,35 +166,6 @@ class NavigationTaskMixin:
         if wrapped.status != GoalStatus.STATUS_SUCCEEDED:
             raise RuntimeError(f'{label} failed: status={wrapped.status}')
         return False
-
-    def _coverage_detect_due(
-        self,
-        last_detect_xy,
-        last_detect_yaw,
-        detect_distance_m,
-        detect_yaw_rad,
-    ):
-        current_xy = self._current_map_xy()
-        current_yaw = self._current_yaw()
-        if last_detect_xy is None or current_xy is None:
-            moved = False
-        else:
-            moved = (
-                math.hypot(
-                    current_xy[0] - last_detect_xy[0],
-                    current_xy[1] - last_detect_xy[1],
-                )
-                >= detect_distance_m
-            )
-
-        if last_detect_yaw is None or current_yaw is None:
-            turned = False
-        else:
-            turned = (
-                abs(self._normalize_angle(current_yaw - last_detect_yaw))
-                >= detect_yaw_rad
-            )
-        return moved or turned
 
     def _cancel_action_goal(self, action_goal_handle):
         try:

@@ -17,14 +17,10 @@ PARAMETER_DEFAULTS = (
     ('coverage_path_service', 'generate_coverage_path'),
     # 区域清扫任务最长运行时间。
     ('clean_region_timeout_sec', 360.0),
-    # 旧版时间触发视觉检测间隔，保留参数兼容已有配置。
+    # 覆盖清扫导航中视觉检测抓取目标的间隔。
     ('coverage_detect_interval_sec', 0.3),
     # 区域清扫每次向前推进并重新扫描的距离。
     ('coverage_scan_forward_step_m', 0.30),
-    # 区域清扫导航中触发一次视觉检测的最小位移。
-    ('coverage_detect_distance_m', 0.30),
-    # 区域清扫导航中触发一次视觉检测的最小转角。
-    ('coverage_detect_yaw_rad', math.radians(45.0)),
     # 动态调整 controller_server 参数的服务名。
     (
         'coverage_controller_set_parameters_service',
@@ -125,12 +121,10 @@ class CleanRegionTaskMixin:
             current_xy = self._current_map_xy()
             if current_xy is None:
                 return picked
-            current_yaw = self._current_yaw()
 
-            next_pose = self._coverage_pose_at_distance(path, scan_distance_m)
+            next_pose = self._next_coverage_pose(path, scan_distance_m)
             if next_pose is None:
                 return picked
-            scan_distance_m += step_m
 
             self._feedback(goal_handle, 'clean_region: move forward to next scan', 0.70)
             result = self._navigate_pose_with_visual_interrupt(
@@ -141,49 +135,15 @@ class CleanRegionTaskMixin:
             )
             if result is None:
                 return None
-            if result or self._coverage_detect_due(
-                current_xy,
-                current_yaw,
-                forward_step_m,
-                float(self.get_parameter('coverage_detect_yaw_rad').value),
-            ):
+            if result:
                 picked = self._handle_clean_region_detection(goal_handle, picked)
                 if picked is None:
                     return None
+                continue
+
+            scan_distance_m += step_m
 
         return picked
-
-    def _coverage_pose_at_distance(self, path, target_distance_m):
-        if not path.poses:
-            return None
-        if target_distance_m <= 0.0:
-            return path.poses[0]
-
-        previous = path.poses[0]
-        travelled = 0.0
-        for pose in path.poses[1:]:
-            dx = pose.pose.position.x - previous.pose.position.x
-            dy = pose.pose.position.y - previous.pose.position.y
-            segment = math.hypot(dx, dy)
-            if segment <= 1e-6:
-                previous = pose
-                continue
-            if travelled + segment >= target_distance_m:
-                ratio = (target_distance_m - travelled) / segment
-                next_pose = PoseStamped()
-                next_pose.header = pose.header
-                next_pose.pose.position.x = (
-                    previous.pose.position.x + dx * ratio
-                )
-                next_pose.pose.position.y = (
-                    previous.pose.position.y + dy * ratio
-                )
-                next_pose.pose.position.z = 0.0
-                next_pose.pose.orientation = pose.pose.orientation
-                return next_pose
-            travelled += segment
-            previous = pose
-        return None
 
     def _handle_clean_region_detection(self, goal_handle, picked):
         target = self._detect_reachable_target(goal_handle)
