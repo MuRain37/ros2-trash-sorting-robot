@@ -174,6 +174,13 @@ class DumpTaskNode(Node):
             int(self.get_parameter('center_depth_window_px').value),
         )
         if valid_depth.size == 0:
+            valid_depth = contour_depth_values(depth_m, component)
+        if valid_depth.size == 0:
+            self.get_logger().warning(
+                'dump depth stats: no valid depth near contour center '
+                f'or inside contour, mask_pixels={mask_pixels}, '
+                f'center=({center_x_px:.1f}, {center_y_px:.1f})'
+            )
             return detection_result(
                 color.shape,
                 mask_pixels,
@@ -181,7 +188,7 @@ class DumpTaskNode(Node):
                 center_y_px=center_y_px,
             )
 
-        mean_depth_m = float(np.mean(valid_depth))
+        mean_depth_m = robust_depth_m(valid_depth)
         min_depth_m = float(np.min(valid_depth))
         max_depth_m = float(np.max(valid_depth))
         self.get_logger().info(
@@ -280,25 +287,48 @@ def center_window_depth_values(depth_m, component, center_x_px, center_y_px, win
     window_px = max(1, int(window_px))
     if window_px % 2 == 0:
         window_px += 1
-    radius = window_px // 2
-
     center_x = int(round(center_x_px))
     center_y = int(round(center_y_px))
-    x0 = max(0, center_x - radius)
-    x1 = min(width, center_x + radius + 1)
-    y0 = max(0, center_y - radius)
-    y1 = min(height, center_y + radius + 1)
 
-    depth_roi = depth_m[y0:y1, x0:x1]
-    mask_roi = component[y0:y1, x0:x1]
-    values = depth_roi[
-        mask_roi & np.isfinite(depth_roi) & (depth_roi > 0.0)
-    ]
-    if values.size:
+    for scale in (1, 3, 5, 9):
+        radius = (window_px * scale) // 2
+        x0 = max(0, center_x - radius)
+        x1 = min(width, center_x + radius + 1)
+        y0 = max(0, center_y - radius)
+        y1 = min(height, center_y + radius + 1)
+
+        depth_roi = depth_m[y0:y1, x0:x1]
+        mask_roi = component[y0:y1, x0:x1]
+        values = depth_roi[
+            mask_roi & np.isfinite(depth_roi) & (depth_roi > 0.0)
+        ]
+        if values.size:
+            return values
+
+        values = depth_roi[np.isfinite(depth_roi) & (depth_roi > 0.0)]
+        if values.size:
+            return values
+    return np.asarray([], dtype=np.float32)
+
+
+def contour_depth_values(depth_m, component):
+    """Return robust valid depth samples inside the detected contour."""
+    values = depth_m[component & np.isfinite(depth_m) & (depth_m > 0.0)]
+    if not values.size:
         return values
+    high = np.percentile(values, 70)
+    near_values = values[values <= high]
+    return near_values if near_values.size else values
 
-    depth_roi = depth_m[y0:y1, x0:x1]
-    return depth_roi[np.isfinite(depth_roi) & (depth_roi > 0.0)]
+
+def robust_depth_m(values):
+    """Prefer the near surface of the bucket over background depth."""
+    values = np.asarray(values, dtype=np.float32)
+    values = values[np.isfinite(values) & (values > 0.0)]
+    if not values.size:
+        return math.nan
+    near = values[values <= np.percentile(values, 40)]
+    return float(np.median(near if near.size else values))
 
 
 def image_to_rgb_array(msg):
@@ -385,4 +415,3 @@ def main(args=None):
 
 if __name__ == '__main__':
     main()
-s

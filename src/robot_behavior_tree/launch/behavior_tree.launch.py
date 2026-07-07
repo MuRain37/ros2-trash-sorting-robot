@@ -3,7 +3,7 @@
 import os
 
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument
+from launch.actions import DeclareLaunchArgument, ExecuteProcess
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
@@ -21,6 +21,12 @@ def generate_launch_description():
             'dump_bucket_poses.json',
         ),
     )
+    dump_task_script = os.path.join(
+        ros_src_root,
+        'robot_manipulation',
+        'robot_manipulation',
+        'dump_task.py',
+    )
 
     robot_task_server = Node(
         package='robot_behavior_tree',
@@ -29,23 +35,49 @@ def generate_launch_description():
         output='screen',
         parameters=[{
             'use_sim_time': use_sim_time,
+            'detect_dump_service': '/detect_dump_bucket',
+            'service_timeout_sec': 8.0,
             'require_dump_bucket_detect': True,
             'dump_visual_align_required': True,
             'dump_pose_store_path': dump_pose_store_path,
         }],
     )
 
-    dump_task = Node(
-        package='robot_manipulation',
-        executable='dump_task',
-        name='dump_task',
-        output='screen',
-        parameters=[{
-            'use_sim_time': use_sim_time,
-            'color_topic': '/camera/real_camera/color/image_raw',
-            'depth_topic': '/camera/real_camera/aligned_depth_to_color/image_raw',
-        }],
-    )
+    if os.path.exists(dump_task_script):
+        dump_task = ExecuteProcess(
+            cmd=[
+                'python3',
+                dump_task_script,
+                '--ros-args',
+                '-p',
+                'service_name:=/detect_dump_bucket',
+                '-p',
+                'color_topic:=/camera/real_camera/color/image_raw',
+                '-p',
+                'depth_topic:=/camera/real_camera/aligned_depth_to_color/image_raw',
+            ],
+            name='dump_task',
+            output='screen',
+            emulate_tty=True,
+            respawn=True,
+            respawn_delay=1.0,
+        )
+    else:
+        dump_task = Node(
+            package='robot_manipulation',
+            executable='dump_task',
+            name='dump_task',
+            output='screen',
+            emulate_tty=True,
+            respawn=True,
+            respawn_delay=1.0,
+            parameters=[{
+                'use_sim_time': use_sim_time,
+                'service_name': '/detect_dump_bucket',
+                'color_topic': '/camera/real_camera/color/image_raw',
+                'depth_topic': '/camera/real_camera/aligned_depth_to_color/image_raw',
+            }],
+        )
 
     dump_trash_node = Node(
         package='robot_manipulation',

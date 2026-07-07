@@ -842,11 +842,11 @@ class RobotTaskServer(Node):
         if bool(self.get_parameter('require_dump_bucket_detect').value):
             self._feedback(
                 goal_handle,
-                f'dump_trash: visual align bucket {bucket_id}',
+                f'dump_trash: center bucket {bucket_id}',
                 base_progress + span * 0.45,
             )
-            if not self._align_dump_bucket_once(goal_handle):
-                message = f'dump bucket {bucket_id} visual align failed'
+            if not self._center_dump_bucket(goal_handle):
+                message = f'dump bucket {bucket_id} visual center align failed'
                 if bool(self.get_parameter('dump_visual_align_required').value):
                     return False, message
                 self.get_logger().warning(f'{message}; continue to dump')
@@ -1646,113 +1646,67 @@ class RobotTaskServer(Node):
         )
 
     def _center_dump_bucket(self, goal_handle):
+        attempts = max(1, int(self.get_parameter('dump_center_max_attempts').value))
         tolerance = abs(float(self.get_parameter('dump_center_tolerance_ratio').value))
         speed = abs(float(self.get_parameter('dump_center_angular_speed').value))
-        max_rotate = abs(
-            float(self.get_parameter('dump_center_max_rotate_rad').value)
-        )
+        step_sec = max(0.05, float(self.get_parameter('dump_center_step_sec').value))
         if speed <= 0.0:
             return False
 
-        if self._is_canceling(goal_handle):
-            return False
-        detection = self._detect_dump_bucket(goal_handle)
-        if not self._valid_dump_detection(detection, 'dump center detect'):
-            return False
+        for attempt in range(attempts):
+            if self._is_canceling(goal_handle):
+                return False
+            detection = self._detect_dump_bucket(goal_handle)
+            if detection is None or not detection.detected:
+                if detection is None:
+                    self.get_logger().warning(
+                        'dump center detect '
+                        f'{attempt + 1}/{attempts}: no response'
+                    )
+                else:
+                    self.get_logger().warning(
+                        'dump center detect '
+                        f'{attempt + 1}/{attempts}: not detected, '
+                        f'mask_pixels={detection.mask_pixels}, '
+                        f'mean_depth_m={detection.mean_depth_m:.3f}, '
+                        f'offset_x_ratio={detection.offset_x_ratio:.4f}, '
+                        f'message={detection.message}'
+                    )
+                self._publish_stop()
+                time.sleep(0.15)
+                continue
+            if not math.isfinite(detection.offset_x_ratio):
+                self.get_logger().warning(
+                    'dump center detect '
+                    f'{attempt + 1}/{attempts}: invalid offset, '
+                    f'mask_pixels={detection.mask_pixels}, '
+                    f'mean_depth_m={detection.mean_depth_m:.3f}, '
+                    f'offset_x_ratio={detection.offset_x_ratio}, '
+                    f'message={detection.message}'
+                )
+                return False
+            self.get_logger().info(
+                'dump center detect '
+                f'{attempt + 1}/{attempts}: detected, '
+                f'mask_pixels={detection.mask_pixels}, '
+                f'mean_depth_m={detection.mean_depth_m:.3f}, '
+                f'offset_x_ratio={detection.offset_x_ratio:.4f}, '
+                f'tolerance={tolerance:.4f}, '
+                f'message={detection.message}'
+            )
+            if abs(detection.offset_x_ratio) <= tolerance:
+                return True
 
-        target_offset_ratio = self._dump_camera_offset_ratio(detection.mean_depth_m)
-        center_error_ratio = detection.offset_x_ratio - target_offset_ratio
-        self.get_logger().info(
-            'dump center detect: detected, '
-            f'mask_pixels={detection.mask_pixels}, '
-            f'mean_depth_m={detection.mean_depth_m:.3f}, '
-            f'offset_x_ratio={detection.offset_x_ratio:.4f}, '
-            f'target_offset_ratio={target_offset_ratio:.4f}, '
-            f'center_error_ratio={center_error_ratio:.4f}, '
-            f'tolerance={tolerance:.4f}, '
-            f'message={detection.message}'
-        )
-        if abs(center_error_ratio) <= tolerance:
-            return True
-
-        rotate_rad = self._dump_bearing_from_offset_ratio(center_error_ratio)
-        rotate_rad = max(-max_rotate, min(max_rotate, rotate_rad))
-        if abs(rotate_rad) <= 0.001:
-            return True
-
-        twist = Twist()
-        twist.angular.z = -speed if rotate_rad > 0.0 else speed
-        self.get_logger().info(
-            'dump center rotate direct: '
-            f'rotate={rotate_rad:.3f} rad, angular_z={twist.angular.z:.3f}'
-        )
-        self._publish_twist_for(goal_handle, twist, abs(rotate_rad) / speed)
-        time.sleep(0.12)
-        return True
-
-    def _align_dump_bucket_once(self, goal_handle):
-        tolerance = abs(float(self.get_parameter('dump_center_tolerance_ratio').value))
-        rotate_speed = abs(float(self.get_parameter('dump_center_angular_speed').value))
-        max_rotate = abs(
-            float(self.get_parameter('dump_center_max_rotate_rad').value)
-        )
-        target_depth = max(
-            0.0,
-            float(self.get_parameter('dump_align_target_depth_m').value),
-        )
-        depth_tolerance = abs(
-            float(self.get_parameter('dump_align_depth_tolerance_m').value)
-        )
-        max_forward = max(
-            0.0,
-            float(self.get_parameter('dump_align_max_forward_step_m').value),
-        )
-
-        if self._is_canceling(goal_handle):
-            return False
-        detection = self._detect_dump_bucket(goal_handle)
-        if not self._valid_dump_detection(detection, 'dump visual align detect'):
-            return False
-
-        target_offset_ratio = self._dump_camera_offset_ratio(detection.mean_depth_m)
-        center_error_ratio = detection.offset_x_ratio - target_offset_ratio
-        rotate_rad = self._dump_bearing_from_offset_ratio(center_error_ratio)
-        rotate_rad = max(-max_rotate, min(max_rotate, rotate_rad))
-        forward_m = max(0.0, detection.mean_depth_m - target_depth)
-        if forward_m <= depth_tolerance:
-            forward_m = 0.0
-        else:
-            forward_m = min(max_forward, forward_m)
-
-        self.get_logger().info(
-            'dump visual align direct: '
-            f'mask_pixels={detection.mask_pixels}, '
-            f'mean_depth_m={detection.mean_depth_m:.3f}, '
-            f'target_depth_m={target_depth:.3f}, '
-            f'offset_x_ratio={detection.offset_x_ratio:.4f}, '
-            f'target_offset_ratio={target_offset_ratio:.4f}, '
-            f'center_error_ratio={center_error_ratio:.4f}, '
-            f'rotate={rotate_rad:.3f} rad, '
-            f'forward={forward_m:.3f} m'
-        )
-
-        if abs(center_error_ratio) > tolerance and rotate_speed > 0.0:
             twist = Twist()
-            twist.angular.z = -rotate_speed if rotate_rad > 0.0 else rotate_speed
-            self._publish_twist_for(
-                goal_handle,
-                twist,
-                abs(rotate_rad) / rotate_speed,
+            # 图像中心在左侧时 offset_x 为负，向左旋转；反之向右旋转。
+            twist.angular.z = -speed if detection.offset_x_ratio > 0.0 else speed
+            self.get_logger().info(
+                'dump center rotate step: '
+                f'angular_z={twist.angular.z:.3f}, step_sec={step_sec:.3f}'
             )
+            self._publish_twist_for(goal_handle, twist, step_sec)
             time.sleep(0.12)
-
-        if forward_m > 0.0:
-            self._drive_forward_step(
-                goal_handle,
-                forward_m,
-                float(self.get_parameter('dump_align_linear_speed').value),
-            )
-        return True
+        return False
 
     def _dump_camera_offset_ratio(self, depth_m):
         lateral_offset_m = float(
@@ -1767,12 +1721,6 @@ class RobotTaskServer(Node):
         if hfov <= 0.0:
             return 0.0
         return lateral_offset_m / (float(depth_m) * math.tan(hfov * 0.5))
-
-    def _dump_bearing_from_offset_ratio(self, offset_ratio):
-        hfov = abs(float(self.get_parameter('dump_camera_horizontal_fov_rad').value))
-        if hfov <= 0.0:
-            return 0.0
-        return math.atan(math.tan(hfov * 0.5) * float(offset_ratio))
 
     def _align_dump_bucket_depth(self, goal_handle):
         target_depth = max(
