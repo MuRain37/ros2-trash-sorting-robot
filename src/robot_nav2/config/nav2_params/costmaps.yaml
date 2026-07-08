@@ -25,7 +25,7 @@ local_costmap:
         z_voxels: 16
         max_obstacle_height: 2.0
         mark_threshold: 0
-        observation_sources: scan
+        observation_sources: scan scan_camera
         scan:
           topic: /scan
           max_obstacle_height: 2.0

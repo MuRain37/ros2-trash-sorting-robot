@@ -6,7 +6,6 @@ uint8 ARM_MAPPING=3
 uint8 action_type
 ---
 bool success
-string message
 float64[5] final_angles
 ---
 float64 progress

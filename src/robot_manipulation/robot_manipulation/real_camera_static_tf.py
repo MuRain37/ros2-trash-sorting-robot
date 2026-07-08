@@ -24,7 +24,7 @@ PRESET_CAMERA_TF = {
     },
     ACTION_ARM_MAPPING: {
         'parameter_prefix': 'arm_mapping',
-        'values': [0.23, 0.0, 0.28, 0.0, 0.7, 0.0],
+        'values': [0.23, 0.0, 0.28, 0.0, 0.66, 0.0],
     },
 }
 

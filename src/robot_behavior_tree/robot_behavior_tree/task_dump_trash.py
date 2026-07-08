@@ -28,7 +28,7 @@ PARAMETER_DEFAULTS = (
     # 倒垃圾硬件服务调用的超时时间。
     ('dump_timeout_sec', 240.0),
     # 取起车载垃圾桶后倒车的距离。
-    ('dump_backup_distance_m', 0.30),
+    ('dump_backup_distance_m', 0.31),
     # 取起车载垃圾桶后倒车的线速度。
     ('dump_backup_linear_speed', 0.1),
     # 倒完垃圾后向前恢复的距离。
@@ -42,29 +42,29 @@ PARAMETER_DEFAULTS = (
     # 导航到卸载桶前方时与桶保持的距离。
     ('dump_approach_distance_m', 0.7),
     # 导航去卸载桶前方时 YOLO 检测间隔。
-    ('dump_detect_interval_sec', 0.3),
+    ('dump_detect_interval_sec', 0.5),
     # 卸载桶深度对齐最多前进修正次数。
-    ('dump_align_max_attempts', 8),
+    ('dump_align_max_attempts', 10),
     # 卸载桶中心点深度对齐目标距离。
     ('dump_align_target_depth_m', 0.3),
     # 卸载桶深度对齐容差。
-    ('dump_align_depth_tolerance_m', 0.04),
+    ('dump_align_depth_tolerance_m', 0.03),
     # 卸载桶深度对齐单次最大前进距离。
-    ('dump_align_step_m', 0.08),
+    ('dump_align_step_m', 0.1),
     # 卸载桶深度对齐前进速度。
     ('dump_align_linear_speed', 0.1),
     # 倒垃圾前原地转身使用的角速度。
     ('dump_rotate_angular_speed', 0.8),
     # 倒垃圾前原地转身角度。
-    ('dump_rotate_angle_deg', 175.0),
+    ('dump_rotate_angle_deg', 176.0),
     # 卸载桶视觉居中允许的图像中心偏移比例。
     ('dump_center_tolerance_ratio', 0.04),
     # 卸载桶视觉居中最多旋转修正次数。
-    ('dump_center_max_attempts', 8),
+    ('dump_center_max_attempts', 10),
     # 卸载桶视觉居中单步旋转角速度。
     ('dump_center_angular_speed', 0.30),
-    # 卸载桶视觉居中每次旋转持续时间。
-    ('dump_center_step_sec', 0.30),
+    # 卸载桶视觉居中单次最大旋转角度。
+    ('dump_center_max_step_angle_deg', 2.0),
     # 相机相对倒桶机构中心的横向偏移；正值表示相机在左侧，桶应落在画面右侧。
     ('dump_camera_lateral_offset_m', 0.033),
     # 相机水平视场角，用于把横向偏移换算为图像偏移比例。
@@ -388,8 +388,12 @@ class DumpTrashTaskMixin:
         attempts = max(1, int(self.get_parameter('dump_center_max_attempts').value))
         tolerance = abs(float(self.get_parameter('dump_center_tolerance_ratio').value))
         speed = abs(float(self.get_parameter('dump_center_angular_speed').value))
-        step_sec = max(0.05, float(self.get_parameter('dump_center_step_sec').value))
+        max_step_angle = math.radians(
+            abs(float(self.get_parameter('dump_center_max_step_angle_deg').value))
+        )
         if speed <= 0.0:
+            return False
+        if max_step_angle <= 0.0:
             return False
 
         for attempt in range(attempts):
@@ -440,6 +444,10 @@ class DumpTrashTaskMixin:
             if abs(offset_error) <= tolerance:
                 return True
 
+            hfov = abs(float(self.get_parameter('dump_camera_horizontal_fov_rad').value))
+            desired_angle = abs(offset_error) * hfov * 0.5
+            step_angle = min(max_step_angle, desired_angle)
+            step_sec = max(0.05, step_angle / speed)
             twist = Twist()
             # offset_error 为负表示桶还不够靠右，继续向左旋转；反之向右旋转。
             twist.angular.z = -speed if offset_error > 0.0 else speed
@@ -447,6 +455,9 @@ class DumpTrashTaskMixin:
                 'dump center rotate step: '
                 f'angular_z={twist.angular.z:.3f}, '
                 f'offset_error_ratio={offset_error:.4f}, '
+                f'desired_angle_deg={math.degrees(desired_angle):.2f}, '
+                f'step_angle_deg={math.degrees(step_angle):.2f}, '
+                f'max_step_angle_deg={math.degrees(max_step_angle):.2f}, '
                 f'step_sec={step_sec:.3f}'
             )
             self._publish_twist_for(goal_handle, twist, step_sec)
@@ -466,7 +477,7 @@ class DumpTrashTaskMixin:
         return lateral_offset_m / (depth_m * math.tan(hfov * 0.5))
 
     def _align_dump_bucket_depth(self, goal_handle):
-        attempts = max(1, int(self.get_parameter('dump_align_max_attempts').value))
+        max_checks = max(1, int(self.get_parameter('dump_align_max_attempts').value))
         target_depth = max(
             0.0,
             float(self.get_parameter('dump_align_target_depth_m').value),
@@ -474,12 +485,13 @@ class DumpTrashTaskMixin:
         tolerance = abs(
             float(self.get_parameter('dump_align_depth_tolerance_m').value)
         )
-        for attempt in range(attempts):
+        check_count = 0
+        while rclpy.ok():
             if self._is_canceling(goal_handle):
                 return False
+            check_count += 1
             detection = self._detect_dump_bucket(goal_handle)
-            cached_depth = getattr(self, '_last_dump_bucket_depth_m', None)
-            current_depth = None
+
             if (
                 detection is not None
                 and detection.detected
@@ -487,93 +499,72 @@ class DumpTrashTaskMixin:
                 and detection.center_depth_m > 0.0
             ):
                 current_depth = float(detection.center_depth_m)
-                cached_depth = current_depth
-
-            if (
-                current_depth is not None
-                and abs(current_depth - target_depth) <= tolerance
-            ):
                 self.get_logger().info(
                     'dump depth align detect '
-                    f'{attempt + 1}/{attempts}: reached target depth, '
+                    f'{check_count}/{max_checks}: detected, '
                     f'mask_pixels={detection.mask_pixels}, '
                     f'center_depth_m={current_depth:.3f}, '
                     f'target_depth_m={target_depth:.3f}, '
                     f'offset_x_ratio={detection.offset_x_ratio:.4f}, '
                     f'message={detection.message}'
                 )
-                return True
+
+                if abs(current_depth - target_depth) <= tolerance:
+                    self.get_logger().info(
+                        'dump depth align reached target: '
+                        f'center_depth_m={current_depth:.3f}, '
+                        f'target_depth_m={target_depth:.3f}, '
+                        f'tolerance_m={tolerance:.3f}'
+                    )
+                    return True
+
+                if check_count >= max_checks:
+                    remaining_m = current_depth - target_depth
+                    step_m = max(0.0, remaining_m)
+                    if step_m > 0.0:
+                        self.get_logger().warning(
+                            'dump depth align max checks reached; '
+                            f'forward remaining_m={step_m:.3f}, '
+                            f'current_depth_m={current_depth:.3f}, '
+                            f'target_depth_m={target_depth:.3f}'
+                        )
+                        self._drive_forward_step(
+                            goal_handle,
+                            step_m,
+                            float(self.get_parameter('dump_align_linear_speed').value),
+                        )
+                    return True
+
+                time.sleep(0.1)
+                continue
+
+            cached_depth = getattr(self, '_last_dump_bucket_depth_m', None)
             if (
-                current_depth is None
-                and cached_depth is not None
-                and math.isfinite(cached_depth)
-                and abs(cached_depth - target_depth) <= tolerance
+                cached_depth is None
+                or not math.isfinite(cached_depth)
+                or cached_depth <= 0.0
             ):
-                self.get_logger().info(
-                    'dump depth align cached depth reached: '
-                    f'{attempt + 1}/{attempts}, '
-                    f'cached_depth_m={cached_depth:.3f}, '
-                    f'target_depth_m={target_depth:.3f}'
-                )
-                return True
-            if detection is None:
                 self.get_logger().warning(
-                    'dump depth align detect '
-                    f'{attempt + 1}/{attempts}: no response, '
-                    f'cached_depth_m='
-                    f'{cached_depth if cached_depth is not None else float("nan"):.3f}'
+                    'dump depth align lost target with no valid cached depth'
                 )
-            else:
-                self.get_logger().warning(
-                    'dump depth align detect '
-                    f'{attempt + 1}/{attempts}: not within depth, '
-                    f'detected={detection.detected}, '
-                    f'within_depth={detection.within_depth}, '
-                    f'mask_pixels={detection.mask_pixels}, '
-                    f'center_depth_m={detection.center_depth_m:.3f}, '
-                    f'target_depth_m={target_depth:.3f}, '
-                    f'offset_x_ratio={detection.offset_x_ratio:.4f}, '
-                    f'message={detection.message}'
-                )
-            if attempt < attempts - 1:
-                step_m = float(self.get_parameter('dump_align_step_m').value)
-                effective_depth = current_depth if current_depth is not None else cached_depth
-                if (
-                    effective_depth is None
-                    or not math.isfinite(effective_depth)
-                    or effective_depth <= 0.0
-                ):
-                    self.get_logger().warning(
-                        'dump depth align skip forward: no valid current or cached depth'
-                    )
-                    continue
+                return False
 
-                remaining_m = effective_depth - target_depth
-                step_m = min(step_m, max(0.0, remaining_m))
-                if step_m <= 0.0:
-                    self.get_logger().warning(
-                        'dump depth align skip forward: '
-                        f'effective_depth_m={effective_depth:.3f}, '
-                        f'target_depth_m={target_depth:.3f}'
-                    )
-                    continue
-
-                self.get_logger().info(
-                    'dump depth align forward by depth: '
-                    f'effective_depth_m={effective_depth:.3f}, '
-                    f'target_depth_m={target_depth:.3f}, '
-                    f'step_m={step_m:.3f}, '
-                    f'using_cached={current_depth is None}'
-                )
+            forward_m = max(0.0, cached_depth - target_depth)
+            self.get_logger().warning(
+                'dump depth align lost target; forward by last depth: '
+                f'cached_depth_m={cached_depth:.3f}, '
+                f'target_depth_m={target_depth:.3f}, '
+                f'forward_m={forward_m:.3f}, '
+                f'detected={detection.detected if detection is not None else False}'
+            )
+            if forward_m > 0.0:
                 self._drive_forward_step(
                     goal_handle,
-                    step_m,
+                    forward_m,
                     float(self.get_parameter('dump_align_linear_speed').value),
                 )
-                self._last_dump_bucket_depth_m = max(
-                    target_depth,
-                    effective_depth - step_m,
-                )
+            self._last_dump_bucket_depth_m = target_depth
+            return True
         return False
 
     def _drive_forward_step(self, goal_handle, distance_m, speed):
