@@ -42,11 +42,11 @@ PARAMETER_DEFAULTS = (
     # 导航到卸载桶前方时与桶保持的距离。
     ('dump_approach_distance_m', 0.75),
     # 导航去卸载桶前方时 YOLO 检测间隔。
-    ('dump_detect_interval_sec', 0.5),
+    ('dump_detect_interval_sec', 0.3),
     # 卸载桶深度对齐最多前进修正次数。
     ('dump_align_max_attempts', 8),
     # 卸载桶中心点深度对齐目标距离。
-    ('dump_align_target_depth_m', 0.35),
+    ('dump_align_target_depth_m', 0.32),
     # 卸载桶深度对齐容差。
     ('dump_align_depth_tolerance_m', 0.04),
     # 卸载桶深度对齐单次最大前进距离。
@@ -60,9 +60,13 @@ PARAMETER_DEFAULTS = (
     # 卸载桶视觉居中最多旋转修正次数。
     ('dump_center_max_attempts', 8),
     # 卸载桶视觉居中单步旋转角速度。
-    ('dump_center_angular_speed', 0.20),
+    ('dump_center_angular_speed', 0.30),
     # 卸载桶视觉居中每次旋转持续时间。
     ('dump_center_step_sec', 0.30),
+    # 相机相对倒桶机构中心的横向偏移；正值表示相机在左侧，桶应落在画面右侧。
+    ('dump_camera_lateral_offset_m', 0.033),
+    # 相机水平视场角，用于把横向偏移换算为图像偏移比例。
+    ('dump_camera_horizontal_fov_rad', 1.21),
     # 原地转身结束时允许的 yaw 误差。
     ('dump_rotate_tolerance_rad', 0.04),
     # 原地转身动作超时时间。
@@ -412,22 +416,40 @@ class DumpTrashTaskMixin:
                 f'mask_pixels={detection.mask_pixels}, '
                 f'center_depth_m={detection.center_depth_m:.3f}, '
                 f'offset_x_ratio={detection.offset_x_ratio:.4f}, '
+                f'target_offset_x_ratio='
+                f'{self._dump_camera_target_offset_ratio(detection):.4f}, '
                 f'tolerance={tolerance:.4f}, '
                 f'message={detection.message}'
             )
-            if abs(detection.offset_x_ratio) <= tolerance:
+            target_offset = self._dump_camera_target_offset_ratio(detection)
+            offset_error = detection.offset_x_ratio - target_offset
+            if abs(offset_error) <= tolerance:
                 return True
 
             twist = Twist()
-            # 图像中心在左侧时 offset_x 为负，向左旋转；反之向右旋转。
-            twist.angular.z = -speed if detection.offset_x_ratio > 0.0 else speed
+            # offset_error 为负表示桶还不够靠右，继续向左旋转；反之向右旋转。
+            twist.angular.z = -speed if offset_error > 0.0 else speed
             self.get_logger().info(
                 'dump center rotate step: '
-                f'angular_z={twist.angular.z:.3f}, step_sec={step_sec:.3f}'
+                f'angular_z={twist.angular.z:.3f}, '
+                f'offset_error_ratio={offset_error:.4f}, '
+                f'step_sec={step_sec:.3f}'
             )
             self._publish_twist_for(goal_handle, twist, step_sec)
             time.sleep(0.12)
         return False
+
+    def _dump_camera_target_offset_ratio(self, detection):
+        depth_m = detection.center_depth_m
+        if not math.isfinite(depth_m) or depth_m <= 0.0:
+            return 0.0
+        hfov = abs(float(self.get_parameter('dump_camera_horizontal_fov_rad').value))
+        if hfov <= 0.0:
+            return 0.0
+        lateral_offset_m = float(
+            self.get_parameter('dump_camera_lateral_offset_m').value
+        )
+        return lateral_offset_m / (depth_m * math.tan(hfov * 0.5))
 
     def _align_dump_bucket_depth(self, goal_handle):
         attempts = max(1, int(self.get_parameter('dump_align_max_attempts').value))
@@ -538,9 +560,9 @@ class DumpTrashTaskMixin:
         speed = abs(float(self.get_parameter('dump_rotate_angular_speed').value))
         if speed <= 0.0:
             return
-        start_yaw = self._current_yaw()
+        start_yaw = self._latest_imu_yaw
         if start_yaw is None:
-            self.get_logger().warning('no odom/imu yaw available; skip 180deg rotation')
+            self.get_logger().warning('no imu yaw available; skip 180deg rotation')
             return
         target_yaw = self._normalize_angle(start_yaw + math.pi)
         tolerance = abs(float(self.get_parameter('dump_rotate_tolerance_rad').value))
@@ -548,6 +570,7 @@ class DumpTrashTaskMixin:
         deadline = time.monotonic() + timeout_sec
 
         msg = Twist()
+        reached = False
         while time.monotonic() < deadline:
             if self._is_canceling_without_pause(goal_handle):
                 break
@@ -557,14 +580,38 @@ class DumpTrashTaskMixin:
             )
             if not keep_waiting:
                 break
-            current_yaw = self._current_yaw()
+            current_yaw = self._latest_imu_yaw
             if current_yaw is None:
                 break
             error = self._normalize_angle(target_yaw - current_yaw)
             if abs(error) <= tolerance:
+                reached = True
                 break
             msg.angular.z = speed if error > 0.0 else -speed
             self._cmd_vel_pub.publish(msg)
             time.sleep(0.05)
         self._publish_stop()
+        final_yaw = self._latest_imu_yaw
+        final_error = (
+            self._normalize_angle(target_yaw - final_yaw)
+            if final_yaw is not None
+            else float('nan')
+        )
+        if reached:
+            self.get_logger().info(
+                'dump rotate 180 imu reached: '
+                f'start_yaw={start_yaw:.3f}, '
+                f'target_yaw={target_yaw:.3f}, '
+                f'final_yaw={final_yaw:.3f}, '
+                f'error={final_error:.3f}'
+            )
+        else:
+            self.get_logger().warning(
+                'dump rotate 180 imu not reached: '
+                f'start_yaw={start_yaw:.3f}, '
+                f'target_yaw={target_yaw:.3f}, '
+                f'final_yaw={final_yaw if final_yaw is not None else float("nan"):.3f}, '
+                f'error={final_error:.3f}, '
+                f'tolerance={tolerance:.3f}'
+            )
         time.sleep(0.2)

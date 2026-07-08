@@ -59,7 +59,7 @@ def generate_launch_description():
             'color_topic': '/camera/real_camera/color/image_raw',
             'depth_topic': '/camera/real_camera/aligned_depth_to_color/image_raw',
             'class_name': 'bin',
-            'confidence_threshold': 0.75,
+            'confidence_threshold': 0.5,
         }],
     )
 

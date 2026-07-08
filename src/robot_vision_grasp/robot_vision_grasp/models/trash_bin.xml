@@ -7772,7 +7772,7 @@
 		<framework>
 			<author value="Ultralytics" />
 			<batch value="1" />
-			<date value="2026-07-08T07:29:32.254553" />
+			<date value="2026-07-08T12:39:47.685662" />
 			<description value="Ultralytics best model trained on m.yaml" />
 			<docs value="https://docs.ultralytics.com" />
 			<imgsz value="[640, 640]" />
