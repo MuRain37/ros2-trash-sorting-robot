@@ -148,7 +148,13 @@ class ArmPresetActionServer(Node):
         """构造固定格式的 action 结果."""
         result = ArmPreset.Result()
         result.success = bool(success)
-        result.message = str(message)
+        if hasattr(result, 'message'):
+            result.message = str(message)
+        elif message:
+            self.get_logger().warning(
+                'ArmPreset.Result has no message field; '
+                f'dropping result message: {message}'
+            )
         result.final_angles = self._fixed_angle_array(
             final_angles,
             self._angle_count('result'),

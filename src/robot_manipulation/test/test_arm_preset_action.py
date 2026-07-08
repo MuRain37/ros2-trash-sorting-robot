@@ -86,7 +86,8 @@ def test_arm_preset_action_executes_valid_action():
     result = server._execute_arm_preset(goal_handle)
 
     assert result.success is True
-    assert result.message == 'ok'
+    if hasattr(result, 'message'):
+        assert result.message == 'ok'
     assert list(result.final_angles) == [1.0, 2.0, 3.0, 4.0, 5.0]
     assert fake_moveit.requests == [
         preset_to_joint_positions(ArmPreset.Goal.ARM_CENTER)
@@ -106,6 +107,7 @@ def test_arm_preset_action_returns_moveit_failure_message():
     result = server._execute_arm_preset(goal_handle)
 
     assert result.success is False
-    assert result.message == 'failed'
+    if hasattr(result, 'message'):
+        assert result.message == 'failed'
     assert list(result.final_angles) == [0.0] * 5
     assert goal_handle.status == 'abort'

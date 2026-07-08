@@ -1,9 +1,7 @@
 """Clean-region task behavior for RobotTaskServer."""
 
-import math
 import time
 
-from geometry_msgs.msg import PoseStamped
 from rcl_interfaces.msg import Parameter, ParameterType, ParameterValue
 from rcl_interfaces.srv import SetParameters
 from robot_interfaces.action import ArmPreset
@@ -19,8 +17,6 @@ PARAMETER_DEFAULTS = (
     ('clean_region_timeout_sec', 360.0),
     # 覆盖清扫导航中视觉检测抓取目标的间隔。
     ('coverage_detect_interval_sec', 0.3),
-    # 区域清扫每次向前推进并重新扫描的距离。
-    ('coverage_scan_forward_step_m', 0.30),
     # 动态调整 controller_server 参数的服务名。
     (
         'coverage_controller_set_parameters_service',
@@ -47,11 +43,15 @@ class CleanRegionTaskMixin:
             return False, error
 
         self._feedback(goal_handle, 'clean_region: generate start path', 0.10)
-        preview_path, message = self._generate_coverage_path(goal_handle, region)
+        preview_path, message = self._generate_coverage_path(
+            goal_handle,
+            region,
+            start_position=self._current_map_xy(),
+        )
         if preview_path is None:
             return False, message
 
-        start_pose = self._nearest_region_entry_pose(region, preview_path)
+        start_pose = preview_path.poses[0]
         self._feedback(goal_handle, 'clean_region: navigate to start pose', 0.15)
         start_result = self._navigate_pose_with_visual_interrupt(
             goal_handle,
@@ -89,10 +89,6 @@ class CleanRegionTaskMixin:
             float(self.get_parameter('clean_region_timeout_sec').value),
         )
         deadline = time.monotonic() + timeout_sec
-        forward_step_m = max(
-            0.0,
-            float(self.get_parameter('coverage_scan_forward_step_m').value),
-        )
         current_xy = self._current_map_xy()
         if current_xy is None:
             return picked
@@ -105,8 +101,7 @@ class CleanRegionTaskMixin:
         if path is None:
             raise RuntimeError(message)
 
-        scan_distance_m = forward_step_m
-        step_m = forward_step_m if forward_step_m > 0.0 else 0.30
+        waypoint_index = 0
 
         while time.monotonic() < deadline:
             if self._is_canceling_without_pause(goal_handle):
@@ -122,15 +117,20 @@ class CleanRegionTaskMixin:
             if current_xy is None:
                 return picked
 
-            next_pose = self._next_coverage_pose(path, scan_distance_m)
-            if next_pose is None:
+            if waypoint_index >= len(path.poses):
                 return picked
+            next_pose = path.poses[waypoint_index]
 
-            self._feedback(goal_handle, 'clean_region: move forward to next scan', 0.70)
+            self._feedback(
+                goal_handle,
+                f'clean_region: coverage waypoint {waypoint_index + 1}/'
+                f'{len(path.poses)}',
+                0.70,
+            )
             result = self._navigate_pose_with_visual_interrupt(
                 goal_handle,
                 next_pose,
-                'clean region next scan pose',
+                f'coverage waypoint {waypoint_index + 1}',
                 detect_enabled=True,
             )
             if result is None:
@@ -141,7 +141,7 @@ class CleanRegionTaskMixin:
                     return None
                 continue
 
-            scan_distance_m += step_m
+            waypoint_index += 1
 
         return picked
 
@@ -174,71 +174,6 @@ class CleanRegionTaskMixin:
         self._feedback(goal_handle, 'clean_region: arm center after grasp', 0.60)
         self._send_arm_preset(goal_handle, ArmPreset.Goal.ARM_CENTER)
         return picked
-
-    def _nearest_region_entry_pose(self, region, fallback_path):
-        current_xy = self._current_map_xy()
-        if current_xy is None:
-            return fallback_path.poses[0]
-
-        x, y = current_xy
-        clamped_x = max(region.min_x, min(region.max_x, x))
-        clamped_y = max(region.min_y, min(region.max_y, y))
-        candidates = (
-            (region.min_x, clamped_y),
-            (region.max_x, clamped_y),
-            (clamped_x, region.min_y),
-            (clamped_x, region.max_y),
-        )
-        entry_x, entry_y = min(
-            candidates,
-            key=lambda point: math.hypot(point[0] - x, point[1] - y),
-        )
-
-        pose = PoseStamped()
-        pose.header = fallback_path.poses[0].header
-        pose.pose.position.x = float(entry_x)
-        pose.pose.position.y = float(entry_y)
-        pose.pose.position.z = 0.0
-        yaw = math.atan2(entry_y - y, entry_x - x)
-        if math.hypot(entry_x - x, entry_y - y) <= 1e-6:
-            current_yaw = self._current_yaw()
-            yaw = current_yaw if current_yaw is not None else 0.0
-        qz, qw = self._yaw_to_quaternion_z_w(yaw)
-        pose.pose.orientation.z = qz
-        pose.pose.orientation.w = qw
-        return pose
-
-    def _next_coverage_pose(self, path, step_m):
-        if not path.poses:
-            return None
-        if step_m <= 0.0:
-            return path.poses[0]
-
-        previous = path.poses[0]
-        travelled = 0.0
-        for pose in path.poses[1:]:
-            dx = pose.pose.position.x - previous.pose.position.x
-            dy = pose.pose.position.y - previous.pose.position.y
-            segment = math.hypot(dx, dy)
-            if segment <= 1e-6:
-                previous = pose
-                continue
-            if travelled + segment >= step_m:
-                ratio = (step_m - travelled) / segment
-                next_pose = PoseStamped()
-                next_pose.header = pose.header
-                next_pose.pose.position.x = (
-                    previous.pose.position.x + dx * ratio
-                )
-                next_pose.pose.position.y = (
-                    previous.pose.position.y + dy * ratio
-                )
-                next_pose.pose.position.z = 0.0
-                next_pose.pose.orientation = pose.pose.orientation
-                return next_pose
-            travelled += segment
-            previous = pose
-        return None
 
     def _generate_coverage_path(self, goal_handle, region, start_position=None):
         request = GenerateCoveragePath.Request()
