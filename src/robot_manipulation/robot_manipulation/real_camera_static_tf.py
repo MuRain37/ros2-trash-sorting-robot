@@ -20,11 +20,11 @@ CAMERA_TF_FIELDS = ('x', 'y', 'z', 'roll', 'pitch', 'yaw')
 PRESET_CAMERA_TF = {
     ACTION_ARM_CENTER: {
         'parameter_prefix': 'arm_center',
-        'values': [0.248, 0.0, 0.195, 0.0, 1.09, 0.0],
+        'values': [0.248, 0.015, 0.195, 0.0, 1.09, 0.0],
     },
     ACTION_ARM_MAPPING: {
         'parameter_prefix': 'arm_mapping',
-        'values': [0.23, 0.033, 0.28, 0.0, 0.7, 0.0],
+        'values': [0.23, 0.0, 0.28, 0.0, 0.7, 0.0],
     },
 }
 
@@ -38,7 +38,7 @@ class RealCameraStaticTf(Node):
         self.declare_parameter('parent_frame', 'base_link')
         self.declare_parameter('child_frame', 'real_camera_link')
         self.declare_parameter('x', 0.248)
-        self.declare_parameter('y', 0.0)
+        self.declare_parameter('y', 0.015)
         self.declare_parameter('z', 0.195)
         self.declare_parameter('roll', 0.0)
         self.declare_parameter('pitch', 1.09)
