@@ -1,8 +1,14 @@
 import os
+from pathlib import Path
 
 
 # 机器人控制系统配置
-ROS_SRC_ROOT = os.getenv('ROS_SRC_ROOT', '/ws/ros2_xjw/src')
+DEFAULT_ROS_SRC_ROOT = str(Path(__file__).resolve().parents[3])
+ROS_SRC_ROOT = os.getenv('ROS_SRC_ROOT', DEFAULT_ROS_SRC_ROOT)
+ROS_STATE_ROOT = os.getenv(
+    'ROS_STATE_ROOT',
+    os.path.join(os.path.expanduser('~'), '.ros2_robot'),
+)
 
 
 def _env_bool(name, default=False):
@@ -174,7 +180,7 @@ ROS_CONFIG = {
     'dump_pose_store_path': os.getenv(
         'ROS_DUMP_POSE_STORE_PATH',
         os.path.join(
-            ROS_SRC_ROOT,
+            ROS_STATE_ROOT,
             'robot_behavior_tree',
             'config',
             'dump_bucket_poses.json',

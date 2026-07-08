@@ -28,7 +28,7 @@ PARAMETER_DEFAULTS = (
     # 倒垃圾硬件服务调用的超时时间。
     ('dump_timeout_sec', 240.0),
     # 取起车载垃圾桶后倒车的距离。
-    ('dump_backup_distance_m', 0.31),
+    ('dump_backup_distance_m', 0.30),
     # 取起车载垃圾桶后倒车的线速度。
     ('dump_backup_linear_speed', 0.1),
     # 倒完垃圾后向前恢复的距离。
@@ -56,15 +56,15 @@ PARAMETER_DEFAULTS = (
     # 倒垃圾前原地转身使用的角速度。
     ('dump_rotate_angular_speed', 0.8),
     # 倒垃圾前原地转身角度。
-    ('dump_rotate_angle_deg', 176.0),
+    ('dump_rotate_angle_deg', 178.0),
     # 卸载桶视觉居中允许的图像中心偏移比例。
     ('dump_center_tolerance_ratio', 0.04),
     # 卸载桶视觉居中最多旋转修正次数。
-    ('dump_center_max_attempts', 8),
+    ('dump_center_max_attempts', 12),
     # 卸载桶视觉居中单步旋转角速度。
     ('dump_center_angular_speed', 0.30),
     # 卸载桶视觉居中单次最大旋转角度。
-    ('dump_center_max_step_angle_deg', 5.0),
+    ('dump_center_max_step_angle_deg', 3.0),
     # 相机相对倒桶机构中心的横向偏移；正值表示相机在左侧，桶应落在画面右侧。
     ('dump_camera_lateral_offset_m', 0.033),
     # 相机水平视场角，用于把横向偏移换算为图像偏移比例。

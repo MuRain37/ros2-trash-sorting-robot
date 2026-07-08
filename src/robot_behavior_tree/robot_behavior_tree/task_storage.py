@@ -1,21 +1,37 @@
 """Persistent task state helpers for RobotTaskServer."""
 
 import json
+import os
 from pathlib import Path
 
 from .task_models import CleanRegion, DumpBucketPose
 
 
+STATE_ROOT = os.getenv(
+    'ROS_STATE_ROOT',
+    os.path.join(os.path.expanduser('~'), '.ros2_robot'),
+)
+
 PARAMETER_DEFAULTS = (
     # 卸载桶标定位姿 JSON 文件保存路径。
     (
         'dump_pose_store_path',
-        '/home/xjw/ros2_robot/src/robot_behavior_tree/config/dump_bucket_poses.json',
+        os.path.join(
+            STATE_ROOT,
+            'robot_behavior_tree',
+            'config',
+            'dump_bucket_poses.json',
+        ),
     ),
     # 区域清扫边界 JSON 文件保存路径。
     (
         'clean_region_store_path',
-        '/home/xjw/ros2_robot/src/robot_behavior_tree/config/clean_regions.json',
+        os.path.join(
+            STATE_ROOT,
+            'robot_behavior_tree',
+            'config',
+            'clean_regions.json',
+        ),
     ),
 )
 
@@ -144,3 +160,4 @@ class TaskStorageMixin:
             )
         except Exception as exc:
             self.get_logger().warning(f'save clean regions failed: {exc}')
+    

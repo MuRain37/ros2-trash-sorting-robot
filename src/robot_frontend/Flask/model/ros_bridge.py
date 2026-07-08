@@ -1363,10 +1363,17 @@ class RosBridge:
             try:
                 wrapped = done.result()
                 action_result = wrapped.result
+                message = getattr(action_result, "message", "")
+                if not message:
+                    message = (
+                        "ArmPreset 建图姿态执行完成"
+                        if action_result.success
+                        else "ArmPreset 建图姿态执行失败"
+                    )
                 result.update(
                     {
                         "success": bool(action_result.success),
-                        "message": action_result.message,
+                        "message": message,
                     }
                 )
             except Exception as exc:

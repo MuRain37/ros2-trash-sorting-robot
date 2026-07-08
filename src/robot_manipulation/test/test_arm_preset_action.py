@@ -111,3 +111,4 @@ def test_arm_preset_action_returns_moveit_failure_message():
         assert result.message == 'failed'
     assert list(result.final_angles) == [0.0] * 5
     assert goal_handle.status == 'abort'
+    

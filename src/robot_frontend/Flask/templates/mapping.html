@@ -511,7 +511,7 @@
         const response = await fetch('/api/map/rebuild', { method: 'POST' });
         const data = await response.json();
         if (!response.ok || !data.success) {
-            showToast(data.error || '重新建图启动失败', 'error');
+            showToast(data.error || data.message || '重新建图启动失败', 'error');
             return;
         }
         mapData.has_map = false;

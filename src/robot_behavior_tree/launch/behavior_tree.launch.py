@@ -12,10 +12,14 @@ def generate_launch_description():
     """生成行为树调度 launch。"""
     use_sim_time = LaunchConfiguration('use_sim_time')
     ros_src_root = os.getenv('ROS_SRC_ROOT', '/ws/ros2_xjw/src')
+    ros_state_root = os.getenv(
+        'ROS_STATE_ROOT',
+        os.path.join(os.path.expanduser('~'), '.ros2_robot'),
+    )
     dump_pose_store_path = os.getenv(
         'ROS_DUMP_POSE_STORE_PATH',
         os.path.join(
-            ros_src_root,
+            ros_state_root,
             'robot_behavior_tree',
             'config',
             'dump_bucket_poses.json',
