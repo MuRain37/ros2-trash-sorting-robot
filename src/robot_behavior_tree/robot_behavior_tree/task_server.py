@@ -5,7 +5,7 @@ import threading
 import rclpy
 from geometry_msgs.msg import PoseWithCovarianceStamped, Twist
 from nav_msgs.msg import Odometry
-from nav2_msgs.action import NavigateToPose
+from nav2_msgs.action import NavigateThroughPoses, NavigateToPose
 from rcl_interfaces.srv import SetParameters
 from rclpy.action import ActionClient, ActionServer
 from rclpy.action import CancelResponse, GoalResponse
@@ -62,6 +62,7 @@ ACTION_CLIENTS = (
     ('_arm_target_client', ArmTarget, 'arm_target_action'),
     ('_arm_preset_client', ArmPreset, 'arm_preset_action'),
     ('_navigate_client', NavigateToPose, 'navigate_to_pose_action'),
+    ('_navigate_through_client', NavigateThroughPoses, 'navigate_through_poses_action'),
 )
 
 

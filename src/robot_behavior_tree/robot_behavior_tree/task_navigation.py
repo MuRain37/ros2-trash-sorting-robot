@@ -5,13 +5,15 @@ import time
 import rclpy
 from action_msgs.msg import GoalStatus
 from geometry_msgs.msg import PoseStamped
-from nav2_msgs.action import NavigateToPose
+from nav2_msgs.action import NavigateThroughPoses, NavigateToPose
 from robot_interfaces.action import ArmPreset
 
 
 PARAMETER_DEFAULTS = (
     # Nav2 单点导航 Action 名称。
     ('navigate_to_pose_action', 'navigate_to_pose'),
+    # Nav2 多点导航 Action 名称。
+    ('navigate_through_poses_action', 'navigate_through_poses'),
 )
 
 
@@ -57,40 +59,31 @@ class NavigationTaskMixin:
         self._feedback(goal_handle, 'navigate_path: arm mapping pose', 0.05)
         self._send_arm_preset(goal_handle, ArmPreset.Goal.ARM_MAPPING)
         total = len(path.poses)
-        timeout_sec = self._navigation_timeout_sec()
-        for index, pose in enumerate(path.poses, start=1):
-            if self._is_canceling(goal_handle):
-                return False, 'navigate path canceled'
+        frame_id = goal.frame_id or str(self.get_parameter('map_frame').value)
+        for pose in path.poses:
+            pose.header.stamp = self.get_clock().now().to_msg()
+            if not pose.header.frame_id:
+                pose.header.frame_id = frame_id
 
-            progress = 0.10 + 0.85 * ((index - 1) / max(1, total))
-            self._feedback(
-                goal_handle,
-                f'navigate_path: sending point {index}/{total}',
-                progress,
-            )
-            nav_goal = NavigateToPose.Goal()
-            nav_goal.pose = pose
-            nav_goal.pose.header.stamp = self.get_clock().now().to_msg()
-            if not nav_goal.pose.header.frame_id:
-                nav_goal.pose.header.frame_id = (
-                    goal.frame_id or str(self.get_parameter('map_frame').value)
-                )
+        self._feedback(
+            goal_handle,
+            f'navigate_path: sending {total} points',
+            0.10,
+        )
+        nav_goal = NavigateThroughPoses.Goal()
+        nav_goal.poses = path.poses
 
-            wrapped = self._send_action_goal_wrapped(
-                self._navigate_client,
-                nav_goal,
-                timeout_sec=timeout_sec,
-                goal_handle=goal_handle,
-                label=f'navigate path point {index}/{total}',
-            )
-            if wrapped is None:
-                return False, f'navigate path point {index}/{total} failed'
-            if wrapped.status != GoalStatus.STATUS_SUCCEEDED:
-                return (
-                    False,
-                    f'navigate path point {index}/{total} failed: '
-                    f'status={wrapped.status}',
-                )
+        wrapped = self._send_action_goal_wrapped(
+            self._navigate_through_client,
+            nav_goal,
+            timeout_sec=self._navigation_timeout_sec(),
+            goal_handle=goal_handle,
+            label=f'navigate path ({total} points)',
+        )
+        if wrapped is None:
+            return False, 'navigate path failed'
+        if wrapped.status != GoalStatus.STATUS_SUCCEEDED:
+            return False, f'navigate path failed: status={wrapped.status}'
 
         return True, f'navigate path completed: points={total}'
 
