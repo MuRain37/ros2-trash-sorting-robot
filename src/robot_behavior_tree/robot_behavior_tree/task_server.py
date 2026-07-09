@@ -23,6 +23,7 @@ from robot_interfaces.srv import (
     SetGripper,
 )
 from sensor_msgs.msg import Imu
+from std_msgs.msg import String
 from std_srvs.srv import SetBool, Trigger
 
 from .task_clean_region import CleanRegionTaskMixin
@@ -160,6 +161,11 @@ class RobotTaskServer(
             self.get_parameter('cmd_vel_topic').value,
             10,
         )
+        self._speak_command_pub = self.create_publisher(
+            String,
+            'voice/speak_command',
+            10,
+        )
         self._action_server = ActionServer(
             self,
             RobotTask,
@@ -265,10 +271,16 @@ class RobotTaskServer(
             result.message = f'{task_name} canceled'
         elif success:
             self._feedback(goal_handle, f'{task_name}: completed', 1.0)
+            self._speak_sleep()
             goal_handle.succeed()
         else:
             goal_handle.abort()
         return result
+
+    def _speak_sleep(self):
+        msg = String()
+        msg.data = 'sleep'
+        self._speak_command_pub.publish(msg)
 
     def _dispatch_task(self, goal_handle, goal):
         task_type = int(goal.task_type)

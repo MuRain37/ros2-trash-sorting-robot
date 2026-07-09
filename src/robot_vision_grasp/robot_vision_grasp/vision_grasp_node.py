@@ -25,7 +25,7 @@ LEFT_BUCKET_CLASSES = {'paper', 'yan', 'bottle'}
 RIGHT_BUCKET_CLASSES = {'usb', 'charger', 'pen'}
 TARGET_OFFSETS_CM = {
     'bottle': (0.0, 0.0, -6.0),
-    'charger': (1.0, 0.0, -2.5),
+    'charger': (1.0, 0.0, -3.0),
     'paper': (1.0, 0.0, -2.0),
 }
 

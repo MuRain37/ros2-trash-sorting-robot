@@ -40,8 +40,12 @@ PARAMETER_DEFAULTS = (
     ),
     # 覆盖清扫时临时降低到的 Nav2 线速度。
     ('coverage_linear_speed', 0.12),
+    # 覆盖清扫时临时降低到的 Nav2 角速度。
+    ('coverage_angular_speed', 0.24),
     # 覆盖清扫结束后恢复的 Nav2 线速度。
-    ('coverage_restore_linear_speed', 0.24),
+    ('coverage_restore_linear_speed', 0.2),
+    # 覆盖清扫结束后恢复的 Nav2 角速度。
+    ('coverage_restore_angular_speed', 0.8),
 )
 
 
@@ -78,24 +82,19 @@ class CleanRegionTaskMixin:
         if start_result is None:
             return False, 'clean region start pose canceled'
 
-        self._feedback(goal_handle, 'clean_region: arm center for coverage', 0.20)
-        self._send_arm_preset(goal_handle, ArmPreset.Goal.ARM_CENTER)
-
-        self._set_coverage_linear_speed(
-            goal_handle,
-            float(self.get_parameter('coverage_linear_speed').value),
-            'set coverage slow speed',
-        )
+        self._set_coverage_scan_camera_costmap_enabled(goal_handle, False)
         try:
+            self._feedback(goal_handle, 'clean_region: arm center for coverage', 0.20)
+            self._send_arm_preset(goal_handle, ArmPreset.Goal.ARM_CENTER)
+            self._clear_coverage_costmaps(goal_handle)
+
+            self._set_coverage_slow_speed(goal_handle)
             picked = self._run_clean_region_scan_loop(goal_handle, region)
             if picked is None:
                 return False, 'clean region canceled'
         finally:
-            self._set_coverage_linear_speed(
-                None,
-                float(self.get_parameter('coverage_restore_linear_speed').value),
-                'restore coverage normal speed',
-        )
+            self._restore_coverage_normal_speed(None)
+            self._set_coverage_scan_camera_costmap_enabled(None, True)
         return True, f'clean region completed: picked={picked}'
 
     def _run_clean_region_scan_loop(self, goal_handle, region):
@@ -163,39 +162,39 @@ class CleanRegionTaskMixin:
         return picked
 
     def _handle_clean_region_detection(self, goal_handle, picked):
-        self._set_coverage_scan_camera_costmap_enabled(goal_handle, False)
-        self._clear_coverage_costmaps(goal_handle)
-        try:
-            target = self._detect_reachable_target(goal_handle)
-            if target is None:
-                self.get_logger().warning(
-                    'clean_region visual trigger had no reachable target; '
-                    'continue coverage path'
-                )
-                return picked
-
-            self._feedback(
-                goal_handle,
-                f'clean_region: grasping {target.class_name}',
-                0.45,
+        target = self._detect_reachable_target(goal_handle)
+        if target is None:
+            self.get_logger().warning(
+                'clean_region visual trigger had no reachable target; '
+                'continue coverage path'
             )
-            bucket_id, bucket_level = self._grasp_target(goal_handle, target)
-            picked += 1
-            success, message = self._maybe_auto_dump_full_bucket(
-                goal_handle,
-                bucket_id,
-                bucket_level,
-            )
-            if not success:
-                raise RuntimeError(message)
-
-            if self._is_canceling(goal_handle):
-                return None
-            self._feedback(goal_handle, 'clean_region: arm center after grasp', 0.60)
-            self._send_arm_preset(goal_handle, ArmPreset.Goal.ARM_CENTER)
             return picked
-        finally:
-            self._set_coverage_scan_camera_costmap_enabled(None, True)
+
+        self._feedback(
+            goal_handle,
+            f'clean_region: grasping {target.class_name}',
+            0.45,
+        )
+        bucket_id, bucket_level = self._grasp_target(goal_handle, target)
+        picked += 1
+        if bucket_level >= 100:
+            self._restore_coverage_normal_speed(goal_handle)
+        success, message = self._maybe_auto_dump_full_bucket(
+            goal_handle,
+            bucket_id,
+            bucket_level,
+        )
+        if not success:
+            raise RuntimeError(message)
+        if bucket_level >= 100:
+            self._set_coverage_slow_speed(goal_handle)
+
+        if self._is_canceling(goal_handle):
+            return None
+        self._feedback(goal_handle, 'clean_region: arm center after grasp', 0.60)
+        self._send_arm_preset(goal_handle, ArmPreset.Goal.ARM_CENTER)
+        self._clear_coverage_costmaps(goal_handle)
+        return picked
 
     def _generate_coverage_path(self, goal_handle, region, start_position=None):
         request = GenerateCoveragePath.Request()
@@ -273,14 +272,43 @@ class CleanRegionTaskMixin:
         self.get_logger().info(label)
         return True
 
-    def _set_coverage_linear_speed(self, goal_handle, speed, label):
+    def _set_coverage_slow_speed(self, goal_handle):
+        return self._set_coverage_speed_limits(
+            goal_handle,
+            float(self.get_parameter('coverage_linear_speed').value),
+            float(self.get_parameter('coverage_angular_speed').value),
+            'set coverage slow speed',
+        )
+
+    def _restore_coverage_normal_speed(self, goal_handle):
+        return self._set_coverage_speed_limits(
+            goal_handle,
+            float(self.get_parameter('coverage_restore_linear_speed').value),
+            float(self.get_parameter('coverage_restore_angular_speed').value),
+            'restore coverage normal speed',
+        )
+
+    def _set_coverage_speed_limits(
+        self,
+        goal_handle,
+        linear_speed,
+        angular_speed,
+        label,
+    ):
         request = SetParameters.Request()
-        parameter = Parameter()
-        parameter.name = 'FollowPath.desired_linear_vel'
-        parameter.value = ParameterValue()
-        parameter.value.type = ParameterType.PARAMETER_DOUBLE
-        parameter.value.double_value = float(max(0.01, speed))
-        request.parameters = [parameter]
+        linear_parameter = Parameter()
+        linear_parameter.name = 'FollowPath.vx_max'
+        linear_parameter.value = ParameterValue()
+        linear_parameter.value.type = ParameterType.PARAMETER_DOUBLE
+        linear_parameter.value.double_value = float(max(0.01, linear_speed))
+
+        angular_parameter = Parameter()
+        angular_parameter.name = 'FollowPath.wz_max'
+        angular_parameter.value = ParameterValue()
+        angular_parameter.value.type = ParameterType.PARAMETER_DOUBLE
+        angular_parameter.value.double_value = float(max(0.01, angular_speed))
+
+        request.parameters = [linear_parameter, angular_parameter]
 
         response = self._call_service(
             self._coverage_controller_params_client,
@@ -299,7 +327,9 @@ class CleanRegionTaskMixin:
                 )
                 return False
         self.get_logger().info(
-            f'{label}: FollowPath.desired_linear_vel={parameter.value.double_value:.3f}'
+            f'{label}: '
+            f'FollowPath.vx_max={linear_parameter.value.double_value:.3f}, '
+            f'FollowPath.wz_max={angular_parameter.value.double_value:.3f}'
         )
         return True
 
