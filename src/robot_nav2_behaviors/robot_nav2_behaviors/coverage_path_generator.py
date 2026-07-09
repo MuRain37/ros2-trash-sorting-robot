@@ -18,6 +18,8 @@ class CoveragePathGenerator(Node):
         self.declare_parameter('frame_id', 'map')
         # 往返扫描线间距（m）
         self.declare_parameter('zigzag_spacing', 1.0)
+        # 覆盖路线相对矩形边界的内缩距离（m）
+        self.declare_parameter('zigzag_edge_inset', 0.10)
         # 覆盖路径生成服务名
         self.declare_parameter(
             'coverage_path_service',
@@ -170,6 +172,16 @@ class CoveragePathGenerator(Node):
         height = max_y - min_y
         if width <= 0.0 or height <= 0.0:
             return []
+
+        inset = max(0.0, float(self.get_parameter('zigzag_edge_inset').value))
+        max_inset = max(0.0, min(width, height) / 2.0 - 1e-6)
+        inset = min(inset, max_inset)
+        min_x += inset
+        min_y += inset
+        max_x -= inset
+        max_y -= inset
+        width = max_x - min_x
+        height = max_y - min_y
 
         if width >= height:
             # 宽区域沿 x 方向扫，扫描线在 y 方向排列。

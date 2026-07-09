@@ -37,7 +37,7 @@ local_costmap:
           obstacle_max_range: 3.0
           obstacle_min_range: 0.0
         scan_camera:
-          topic: /scan_camera
+          topic: /scan_camera_costmap
           max_obstacle_height: 2.0
           clearing: True
           marking: True
@@ -80,7 +80,7 @@ global_costmap:
           obstacle_max_range: 8.0
           obstacle_min_range: 0.0
         scan_camera:
-          topic: /scan_camera
+          topic: /scan_camera_costmap
           max_obstacle_height: 2.0
           clearing: True
           marking: True

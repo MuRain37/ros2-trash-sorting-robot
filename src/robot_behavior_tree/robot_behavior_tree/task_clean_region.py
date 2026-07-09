@@ -6,6 +6,8 @@ from rcl_interfaces.msg import Parameter, ParameterType, ParameterValue
 from rcl_interfaces.srv import SetParameters
 from robot_interfaces.action import ArmPreset
 from robot_interfaces.srv import GenerateCoveragePath
+from nav2_msgs.srv import ClearEntireCostmap
+from std_srvs.srv import SetBool
 
 from .task_models import CleanRegion
 
@@ -21,6 +23,20 @@ PARAMETER_DEFAULTS = (
     (
         'coverage_controller_set_parameters_service',
         '/controller_server/set_parameters',
+    ),
+    # 清扫抓取期间开关 scan_camera 进入 Nav2 costmap 的转发服务名。
+    (
+        'coverage_scan_camera_costmap_service',
+        '/set_scan_camera_costmap_enabled',
+    ),
+    # 清扫抓取前清除 scan_camera 已写入 Nav2 costmap 的残留障碍。
+    (
+        'coverage_local_clear_costmap_service',
+        '/local_costmap/clear_entirely_local_costmap',
+    ),
+    (
+        'coverage_global_clear_costmap_service',
+        '/global_costmap/clear_entirely_global_costmap',
     ),
     # 覆盖清扫时临时降低到的 Nav2 线速度。
     ('coverage_linear_speed', 0.12),
@@ -139,6 +155,7 @@ class CleanRegionTaskMixin:
                 picked = self._handle_clean_region_detection(goal_handle, picked)
                 if picked is None:
                     return None
+                # 抓取并归中后继续当前未完成 waypoint，由 Nav2 重新规划到该点。
                 continue
 
             waypoint_index += 1
@@ -146,34 +163,39 @@ class CleanRegionTaskMixin:
         return picked
 
     def _handle_clean_region_detection(self, goal_handle, picked):
-        target = self._detect_reachable_target(goal_handle)
-        if target is None:
-            self.get_logger().warning(
-                'clean_region visual trigger had no reachable target; '
-                'continue coverage path'
+        self._set_coverage_scan_camera_costmap_enabled(goal_handle, False)
+        self._clear_coverage_costmaps(goal_handle)
+        try:
+            target = self._detect_reachable_target(goal_handle)
+            if target is None:
+                self.get_logger().warning(
+                    'clean_region visual trigger had no reachable target; '
+                    'continue coverage path'
+                )
+                return picked
+
+            self._feedback(
+                goal_handle,
+                f'clean_region: grasping {target.class_name}',
+                0.45,
             )
+            bucket_id, bucket_level = self._grasp_target(goal_handle, target)
+            picked += 1
+            success, message = self._maybe_auto_dump_full_bucket(
+                goal_handle,
+                bucket_id,
+                bucket_level,
+            )
+            if not success:
+                raise RuntimeError(message)
+
+            if self._is_canceling(goal_handle):
+                return None
+            self._feedback(goal_handle, 'clean_region: arm center after grasp', 0.60)
+            self._send_arm_preset(goal_handle, ArmPreset.Goal.ARM_CENTER)
             return picked
-
-        self._feedback(
-            goal_handle,
-            f'clean_region: grasping {target.class_name}',
-            0.45,
-        )
-        bucket_id, bucket_level = self._grasp_target(goal_handle, target)
-        picked += 1
-        success, message = self._maybe_auto_dump_full_bucket(
-            goal_handle,
-            bucket_id,
-            bucket_level,
-        )
-        if not success:
-            raise RuntimeError(message)
-
-        if self._is_canceling(goal_handle):
-            return None
-        self._feedback(goal_handle, 'clean_region: arm center after grasp', 0.60)
-        self._send_arm_preset(goal_handle, ArmPreset.Goal.ARM_CENTER)
-        return picked
+        finally:
+            self._set_coverage_scan_camera_costmap_enabled(None, True)
 
     def _generate_coverage_path(self, goal_handle, region, start_position=None):
         request = GenerateCoveragePath.Request()
@@ -200,6 +222,56 @@ class CleanRegionTaskMixin:
         if not response.coverage_path.poses:
             return None, 'coverage path service returned no path'
         return response.coverage_path, response.message
+
+    def _set_coverage_scan_camera_costmap_enabled(self, goal_handle, enabled):
+        label = 'enable scan_camera costmap source' if enabled else (
+            'disable scan_camera costmap source'
+        )
+        request = SetBool.Request()
+        request.data = bool(enabled)
+
+        response = self._call_service(
+            self._scan_camera_costmap_gate_client,
+            request,
+            timeout_sec=float(self.get_parameter('service_timeout_sec').value),
+            goal_handle=goal_handle,
+            label=label,
+        )
+        if response is None:
+            self.get_logger().warning(f'{label} failed: no response')
+            return False
+        if not response.success:
+            self.get_logger().warning(f'{label} rejected: {response.message}')
+            return False
+        self.get_logger().info(f'{label}: enabled={bool(enabled)}')
+        return True
+
+    def _clear_coverage_costmaps(self, goal_handle):
+        local_ok = self._clear_costmap(
+            self._coverage_local_clear_costmap_client,
+            goal_handle,
+            'clear local costmap after scan_camera pause',
+        )
+        global_ok = self._clear_costmap(
+            self._coverage_global_clear_costmap_client,
+            goal_handle,
+            'clear global costmap after scan_camera pause',
+        )
+        return local_ok and global_ok
+
+    def _clear_costmap(self, client, goal_handle, label):
+        response = self._call_service(
+            client,
+            ClearEntireCostmap.Request(),
+            timeout_sec=float(self.get_parameter('service_timeout_sec').value),
+            goal_handle=goal_handle,
+            label=label,
+        )
+        if response is None:
+            self.get_logger().warning(f'{label} failed: no response')
+            return False
+        self.get_logger().info(label)
+        return True
 
     def _set_coverage_linear_speed(self, goal_handle, speed, label):
         request = SetParameters.Request()

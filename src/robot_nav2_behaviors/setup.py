@@ -57,6 +57,10 @@ setup(
                 'coverage_navigator = '
                 'robot_nav2_behaviors.coverage_navigator:main'
             ),
+            (
+                'scan_camera_gate = '
+                'robot_nav2_behaviors.scan_camera_gate:main'
+            ),
         ],
     },
 )

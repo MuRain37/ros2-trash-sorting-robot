@@ -29,4 +29,17 @@ def generate_launch_description():
         }],
     )
 
-    return LaunchDescription([pointcloud_to_laserscan])
+    scan_camera_gate = Node(
+        package='robot_nav2_behaviors',
+        executable='scan_camera_gate',
+        name='scan_camera_gate',
+        output='screen',
+        parameters=[{
+            'input_topic': '/scan_camera',
+            'output_topic': '/scan_camera_costmap',
+            'set_enabled_service': '/set_scan_camera_costmap_enabled',
+            'enabled': True,
+        }],
+    )
+
+    return LaunchDescription([pointcloud_to_laserscan, scan_camera_gate])

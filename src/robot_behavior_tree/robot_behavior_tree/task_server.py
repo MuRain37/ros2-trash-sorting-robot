@@ -6,6 +6,7 @@ import rclpy
 from geometry_msgs.msg import PoseWithCovarianceStamped, Twist
 from nav_msgs.msg import Odometry
 from nav2_msgs.action import NavigateThroughPoses, NavigateToPose
+from nav2_msgs.srv import ClearEntireCostmap
 from rcl_interfaces.srv import SetParameters
 from rclpy.action import ActionClient, ActionServer
 from rclpy.action import CancelResponse, GoalResponse
@@ -22,7 +23,7 @@ from robot_interfaces.srv import (
     SetGripper,
 )
 from sensor_msgs.msg import Imu
-from std_srvs.srv import Trigger
+from std_srvs.srv import SetBool, Trigger
 
 from .task_clean_region import CleanRegionTaskMixin
 from .task_clean_trash import CleanTrashTaskMixin
@@ -53,6 +54,21 @@ SERVICE_CLIENTS = (
         '_coverage_controller_params_client',
         SetParameters,
         'coverage_controller_set_parameters_service',
+    ),
+    (
+        '_scan_camera_costmap_gate_client',
+        SetBool,
+        'coverage_scan_camera_costmap_service',
+    ),
+    (
+        '_coverage_local_clear_costmap_client',
+        ClearEntireCostmap,
+        'coverage_local_clear_costmap_service',
+    ),
+    (
+        '_coverage_global_clear_costmap_client',
+        ClearEntireCostmap,
+        'coverage_global_clear_costmap_service',
     ),
     ('_gripper_client', SetGripper, 'gripper_service'),
     ('_camera_tf_preset_client', SetCameraTfPreset, 'camera_tf_preset_service'),

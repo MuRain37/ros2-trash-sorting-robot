@@ -64,7 +64,7 @@ PARAMETER_DEFAULTS = (
     # 卸载桶视觉居中单步旋转角速度。
     ('dump_center_angular_speed', 0.30),
     # 卸载桶视觉居中单次最大旋转角度。
-    ('dump_center_max_step_angle_deg', 3.0),
+    ('dump_center_max_step_angle_deg', 5.0),
     # 相机相对倒桶机构中心的横向偏移；正值表示相机在左侧，桶应落在画面右侧。
     ('dump_camera_lateral_offset_m', 0.033),
     # 相机水平视场角，用于把横向偏移换算为图像偏移比例。
