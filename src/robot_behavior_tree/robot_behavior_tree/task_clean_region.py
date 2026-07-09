@@ -39,11 +39,11 @@ PARAMETER_DEFAULTS = (
         '/global_costmap/clear_entirely_global_costmap',
     ),
     # 覆盖清扫时临时降低到的 Nav2 线速度。
-    ('coverage_linear_speed', 0.12),
+    ('coverage_linear_speed', 0.08),
     # 覆盖清扫时临时降低到的 Nav2 角速度。
     ('coverage_angular_speed', 0.24),
     # 覆盖清扫结束后恢复的 Nav2 线速度。
-    ('coverage_restore_linear_speed', 0.2),
+    ('coverage_restore_linear_speed', 0.25),
     # 覆盖清扫结束后恢复的 Nav2 角速度。
     ('coverage_restore_angular_speed', 0.8),
 )

@@ -164,7 +164,7 @@ def generate_launch_description():
         ),
         DeclareLaunchArgument('frame_id', default_value='map'),
         DeclareLaunchArgument('use_sim_time', default_value='false'),
-        DeclareLaunchArgument('zigzag_spacing', default_value='0.5'),
+        DeclareLaunchArgument('zigzag_spacing', default_value='0.7'),
         DeclareLaunchArgument('zigzag_edge_inset', default_value='0.05'),
         DeclareLaunchArgument('marker_line_width', default_value='0.02'),
         DeclareLaunchArgument('robot_base_frame', default_value='base_link'),
