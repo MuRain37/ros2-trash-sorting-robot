@@ -1,6 +1,7 @@
 """高层行为树任务调度节点。"""
 
 import threading
+import time
 
 import rclpy
 from geometry_msgs.msg import PoseWithCovarianceStamped, Twist
@@ -84,6 +85,22 @@ ACTION_CLIENTS = (
 )
 
 
+class _VisualWorkGoalHandle:
+
+    def __init__(self, task_server):
+        self._task_server = task_server
+
+    @property
+    def is_cancel_requested(self):
+        return (
+            not self._task_server._visual_work_enabled
+            or self._task_server._visual_work_yield_requested
+        )
+
+    def publish_feedback(self, feedback):
+        del feedback
+
+
 class RobotTaskServer(
     CleanTrashTaskMixin,
     DumpTrashTaskMixin,
@@ -115,6 +132,11 @@ class RobotTaskServer(
         self._pause_requested = False
         self._clear_requested = False
         self._visual_work_enabled = False
+        self._visual_work_busy = False
+        self._visual_work_can_yield = False
+        self._visual_work_yield_requested = False
+        self._visual_work_pose_ready = False
+        self._visual_work_goal_handle = _VisualWorkGoalHandle(self)
         self._dump_bucket_poses = {}
         self._clean_regions = {}
         self._bucket_fill_percent = {1: 0, 2: 0}
@@ -194,6 +216,18 @@ class RobotTaskServer(
             cancel_callback=self._handle_cancel,
             callback_group=callback_group,
         )
+        self._visual_work_timer = self.create_timer(
+            max(
+                0.2,
+                float(
+                    self.get_parameter(
+                        'coverage_detect_interval_sec'
+                    ).value
+                ),
+            ),
+            self._run_idle_visual_work_cycle,
+            callback_group=callback_group,
+        )
 
         self.get_logger().info(
             'robot behavior tree ready: '
@@ -221,6 +255,24 @@ class RobotTaskServer(
             return GoalResponse.REJECT
         if task_type in (RobotTask.Goal.TASK_STOP, RobotTask.Goal.TASK_RESUME):
             return GoalResponse.ACCEPT
+        if self._visual_work_busy:
+            if not self._visual_work_can_yield:
+                self.get_logger().warning(
+                    'rejecting task because visual work is grasping'
+                )
+                return GoalResponse.REJECT
+            self._visual_work_yield_requested = True
+            deadline = time.monotonic() + float(
+                self.get_parameter('service_timeout_sec').value
+            )
+            while self._visual_work_busy and time.monotonic() < deadline:
+                time.sleep(0.02)
+            if self._visual_work_busy:
+                self._visual_work_yield_requested = False
+                self.get_logger().warning(
+                    'rejecting task because visual work did not yield'
+                )
+                return GoalResponse.REJECT
         if self._active_goal is not None:
             self.get_logger().warning('rejecting task because another task is active')
             return GoalResponse.REJECT
@@ -261,6 +313,7 @@ class RobotTaskServer(
             goal_handle.abort()
             return self._result(False, 'another task is already running')
 
+        self._visual_work_yield_requested = False
         self._active_goal = goal_handle
         goal = goal_handle.request
         task_name = self._task_name(task_type)
@@ -280,6 +333,7 @@ class RobotTaskServer(
             self._stop_requested = False
             self._pause_requested = False
             self._clear_requested = False
+            self._visual_work_yield_requested = False
             self._active_goal = None
             self._task_lock.release()
 
@@ -316,7 +370,10 @@ class RobotTaskServer(
         return response
 
     def _set_visual_work_enabled(self, enabled):
-        self._visual_work_enabled = bool(enabled)
+        enabled = bool(enabled)
+        if enabled != self._visual_work_enabled:
+            self._visual_work_pose_ready = False
+        self._visual_work_enabled = enabled
         self._publish_visual_work_state()
         self.get_logger().info(
             f'visual work enabled={self._visual_work_enabled}'
@@ -326,6 +383,65 @@ class RobotTaskServer(
         msg = Bool()
         msg.data = bool(self._visual_work_enabled)
         self._visual_work_state_pub.publish(msg)
+
+    def _run_idle_visual_work_cycle(self):
+        if (
+            not self._visual_work_enabled
+            or self._active_goal is not None
+            or self._visual_work_busy
+        ):
+            return
+        if not self._task_lock.acquire(blocking=False):
+            return
+
+        self._visual_work_busy = True
+        self._visual_work_can_yield = True
+        goal_handle = self._visual_work_goal_handle
+        try:
+            if goal_handle.is_cancel_requested or self._active_goal is not None:
+                return
+
+            if not self._visual_work_pose_ready:
+                self._feedback(
+                    goal_handle,
+                    'visual_work: arm center',
+                    0.05,
+                )
+                self._send_arm_preset(
+                    goal_handle,
+                    ArmPreset.Goal.ARM_CENTER,
+                )
+                if goal_handle.is_cancel_requested:
+                    return
+                self._visual_work_pose_ready = True
+
+            target = self._detect_reachable_target(goal_handle)
+            if target is None or goal_handle.is_cancel_requested:
+                return
+
+            self._visual_work_can_yield = False
+            self.get_logger().info(
+                f'visual_work grasping {target.class_name}'
+            )
+            bucket_id, bucket_level = self._grasp_target(
+                goal_handle,
+                target,
+            )
+            success, message = self._maybe_auto_dump_full_bucket(
+                goal_handle,
+                bucket_id,
+                bucket_level,
+            )
+            if not success:
+                self.get_logger().warning(
+                    f'visual work auto dump failed: {message}'
+                )
+        except Exception as exc:
+            self.get_logger().warning(f'visual work cycle failed: {exc}')
+        finally:
+            self._visual_work_can_yield = False
+            self._visual_work_busy = False
+            self._task_lock.release()
 
     def _dispatch_task(self, goal_handle, goal):
         task_type = int(goal.task_type)

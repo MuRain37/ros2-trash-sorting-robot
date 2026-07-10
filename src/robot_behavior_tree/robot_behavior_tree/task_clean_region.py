@@ -41,7 +41,7 @@ PARAMETER_DEFAULTS = (
     # 覆盖清扫时临时降低到的 Nav2 线速度。
     ('coverage_linear_speed', 0.08),
     # 覆盖清扫时临时降低到的 Nav2 角速度。
-    ('coverage_angular_speed', 0.24),
+    ('coverage_angular_speed', 0.20),
     # 覆盖清扫结束后恢复的 Nav2 线速度。
     ('coverage_restore_linear_speed', 0.25),
     # 覆盖清扫结束后恢复的 Nav2 角速度。
