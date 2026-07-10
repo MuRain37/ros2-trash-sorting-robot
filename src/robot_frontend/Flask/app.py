@@ -234,7 +234,7 @@ class RuntimeData:
     @staticmethod
     def battery_level():
         elapsed_minutes = max(0, int((datetime.now() - START_TIME).total_seconds() // 60))
-        return max(0, 100 - elapsed_minutes // 5)
+        return max(0, 100 - elapsed_minutes // 2)
 
     @staticmethod
     def bin_levels():

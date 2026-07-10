@@ -20,7 +20,7 @@ PARAMETER_DEFAULTS = (
     # 抓取前底盘靠近或旋转对准目标的最大尝试次数。
     ('approach_max_attempts', 3),
     # 目标前向距离阈值，超过该距离会先驱动底盘靠近。
-    ('approach_x_threshold_cm', 32.0),
+    ('approach_x_threshold_cm', 30.0),
     # 目标横向偏移阈值，超过该距离会先旋转底盘对准。
     ('approach_y_threshold_cm', 13.0),
     # 最大尝试后允许直接抓取的前向距离容差。

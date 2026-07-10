@@ -374,6 +374,8 @@ class RobotTaskServer(
         if enabled != self._visual_work_enabled:
             self._visual_work_pose_ready = False
         self._visual_work_enabled = enabled
+        if not enabled:
+            self._restore_coverage_normal_speed(None)
         self._publish_visual_work_state()
         self.get_logger().info(
             f'visual work enabled={self._visual_work_enabled}'
