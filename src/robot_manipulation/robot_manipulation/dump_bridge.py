@@ -28,8 +28,8 @@ HOME_SERVICE = 'dump_home'
 SERVO_CENTER = 500.0
 HORIZONTAL_SERVO_ID = 7
 GRIPPER_ROTATE_SERVO_ID = 8
-LIFT_GRIPPER_OPEN_RAW = 500.0
-LIFT_GRIPPER_CLOSE_RAW = 595.0
+LIFT_GRIPPER_OPEN_RAW = 400.0
+LIFT_GRIPPER_CLOSE_RAW = 465.0
 
 DUMP_SERVO_DURATION_MS = 2000.0
 DUMP_GRIPPER_DURATION_MS = 1000.0
@@ -221,7 +221,7 @@ class DumpTrashBridge:
         self._call_lift(DUMP_LIFT_UP_STEPS)
         self._call_horizontal_async(SERVO_CENTER)
         self._call_gripper_rotation_async(SERVO_CENTER) 
-        self._call_gripper_async(SERVO_CENTER)
+        self._call_gripper_async(LIFT_GRIPPER_OPEN_RAW)
         self._sleep(max(self._servo_wait_sec, self._gripper_wait_sec))
         self._call_lift(DUMP_LIFT_DOWN_STEPS)
 

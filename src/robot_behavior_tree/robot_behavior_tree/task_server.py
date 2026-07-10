@@ -25,7 +25,7 @@ from robot_interfaces.srv import (
     SetGripper,
 )
 from sensor_msgs.msg import Imu
-from std_msgs.msg import Bool, String
+from std_msgs.msg import Bool
 from std_srvs.srv import SetBool, Trigger
 
 from .task_clean_region import CleanRegionTaskMixin
@@ -185,11 +185,6 @@ class RobotTaskServer(
             self.get_parameter('cmd_vel_topic').value,
             10,
         )
-        self._speak_command_pub = self.create_publisher(
-            String,
-            'voice/speak_command',
-            10,
-        )
         visual_work_qos = QoSProfile(
             depth=1,
             durability=DurabilityPolicy.TRANSIENT_LOCAL,
@@ -344,20 +339,10 @@ class RobotTaskServer(
             result.message = f'{task_name} canceled'
         elif success:
             self._feedback(goal_handle, f'{task_name}: completed', 1.0)
-            if task_type not in (
-                RobotTask.Goal.TASK_SET_DUMP_POSE,
-                RobotTask.Goal.TASK_SET_CLEAN_REGION,
-            ):
-                self._speak_sleep()
             goal_handle.succeed()
         else:
             goal_handle.abort()
         return result
-
-    def _speak_sleep(self):
-        msg = String()
-        msg.data = 'sleep'
-        self._speak_command_pub.publish(msg)
 
     def _handle_visual_work_enabled(self, request, response):
         self._set_visual_work_enabled(bool(request.data))
@@ -374,8 +359,6 @@ class RobotTaskServer(
         if enabled != self._visual_work_enabled:
             self._visual_work_pose_ready = False
         self._visual_work_enabled = enabled
-        if not enabled:
-            self._restore_coverage_normal_speed(None)
         self._publish_visual_work_state()
         self.get_logger().info(
             f'visual work enabled={self._visual_work_enabled}'

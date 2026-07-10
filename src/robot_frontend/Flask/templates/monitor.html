@@ -31,7 +31,7 @@
                     <strong id="vision-classes">未识别</strong>
                 </div>
                 <div>
-                    <span class="summary-label">目标坐标</span>
+                    <span class="summary-label">目标坐标（base_link）</span>
                     <strong id="vision-position">X - / Y - / Z -</strong>
                 </div>
                 <div>
@@ -158,6 +158,9 @@
     }
 
     function poseSummary(pose) {
+        if (pose && pose.transform_error) {
+            return `等待 ${pose.frame_id || 'base_link'} TF`;
+        }
         if (!pose || pose.z_m === null || pose.z_m === undefined) {
             return '等待深度';
         }
@@ -175,9 +178,9 @@
             <div class="object-item">
                 <strong>${index + 1}. ${item.class_name || '未知类别'}</strong>
                 <span>${formatConfidence(item.confidence)}</span>
-                <span class="object-meta">${poseSummary(item.pose)}</span>
-                <span class="object-meta">距离 ${formatMeters(item.pose && item.pose.distance_m)}</span>
-                <span class="object-meta">偏航 ${formatAngle(item.pose && item.pose.yaw_deg)} / 俯仰 ${formatAngle(item.pose && item.pose.pitch_deg)}</span>
+                <span class="object-meta">${item.pose && item.pose.frame_id ? item.pose.frame_id : 'base_link'} ${poseSummary(item.pose)}</span>
+                <span class="object-meta">基座距离 ${formatMeters(item.pose && item.pose.distance_m)}</span>
+                <span class="object-meta">图像偏航 ${formatAngle(item.pose && item.pose.yaw_deg)} / 俯仰 ${formatAngle(item.pose && item.pose.pitch_deg)}</span>
                 <span class="object-meta">旋转 ${formatAngle(item.pose && item.pose.rotation_deg)}</span>
             </div>
         `).join('');
@@ -196,12 +199,12 @@
             status.textContent = data.connected ? (objects.length ? '识别中' : '已连接') : '等待画面';
             status.className = data.connected ? 'status-pill ok' : 'status-pill warn';
             document.getElementById('vision-target-pose').textContent = primaryPose && primaryPose.z_m !== null && primaryPose.z_m !== undefined
-                ? `Z ${formatMeters(primaryPose.z_m)} · 旋转 ${formatAngle(primaryPose.rotation_deg)}`
+                ? `${primaryPose.frame_id || 'base_link'} Z ${formatMeters(primaryPose.z_m)} · 旋转 ${formatAngle(primaryPose.rotation_deg)}`
                 : (objects.length ? '等待深度' : '暂无目标');
             document.getElementById('vision-classes').textContent = classes.length ? classes.join('、') : '未识别';
             document.getElementById('vision-position').textContent = poseSummary(primaryPose);
             document.getElementById('vision-distance-angle').textContent = primaryPose
-                ? `距离 ${formatMeters(primaryPose.distance_m)} / 偏航 ${formatAngle(primaryPose.yaw_deg)} / 旋转 ${formatAngle(primaryPose.rotation_deg)}`
+                ? `基座距离 ${formatMeters(primaryPose.distance_m)} / 图像偏航 ${formatAngle(primaryPose.yaw_deg)} / 旋转 ${formatAngle(primaryPose.rotation_deg)}`
                 : '距离 - / 旋转 -';
             document.getElementById('vision-message').textContent = data.message || '等待识别结果';
             renderObjects(objects);

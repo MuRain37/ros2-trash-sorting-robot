@@ -16,6 +16,8 @@ PARAMETER_DEFAULTS = (
     ('navigate_through_poses_action', 'navigate_through_poses'),
 )
 
+_VISUAL_WORK_DISABLED = object()
+
 
 class NavigationTaskMixin:
 
@@ -73,6 +75,12 @@ class NavigationTaskMixin:
 
             picked = 0
             while True:
+                if not self._visual_work_enabled:
+                    return self._continue_navigation_after_visual_work(
+                        goal_handle,
+                        target_pose,
+                        picked,
+                    )
                 target_pose.header.stamp = self.get_clock().now().to_msg()
                 result = self._navigate_pose_with_visual_interrupt(
                     goal_handle,
@@ -81,6 +89,12 @@ class NavigationTaskMixin:
                     detect_enabled=True,
                     require_visual_work=True,
                 )
+                if result is _VISUAL_WORK_DISABLED:
+                    return self._continue_navigation_after_visual_work(
+                        goal_handle,
+                        target_pose,
+                        picked,
+                    )
                 if result is None:
                     return False, 'visual navigate to pose canceled'
                 if not result:
@@ -98,6 +112,37 @@ class NavigationTaskMixin:
         finally:
             self._restore_coverage_normal_speed(None)
             self._set_coverage_scan_camera_costmap_enabled(None, True)
+
+    def _continue_navigation_after_visual_work(
+        self,
+        goal_handle,
+        target_pose,
+        picked,
+    ):
+        self._publish_stop()
+        self._feedback(
+            goal_handle,
+            'navigate_to: restore arm mapping pose',
+            0.70,
+        )
+        self._send_arm_preset(goal_handle, ArmPreset.Goal.ARM_MAPPING)
+        self._clear_coverage_costmaps(goal_handle)
+        self._set_coverage_scan_camera_costmap_enabled(goal_handle, True)
+        self._restore_coverage_normal_speed(goal_handle)
+
+        target_pose.header.stamp = self.get_clock().now().to_msg()
+        nav_goal = NavigateToPose.Goal()
+        nav_goal.pose = target_pose
+        result = self._send_action_goal(
+            self._navigate_client,
+            nav_goal,
+            timeout_sec=self._navigation_timeout_sec(),
+            goal_handle=goal_handle,
+            label='navigate after visual work',
+        )
+        if result is None:
+            return False, 'navigate after visual work failed'
+        return True, f'navigate after visual work completed: picked={picked}'
 
     def _run_navigate_path_tree(self, goal_handle, goal):
         path = goal.path
@@ -145,6 +190,8 @@ class NavigationTaskMixin:
     ):
         if self._is_canceling(goal_handle):
             return None
+        if require_visual_work and not self._visual_work_enabled:
+            return _VISUAL_WORK_DISABLED
         if not self._navigate_client.wait_for_server(
             timeout_sec=float(self.get_parameter('service_timeout_sec').value)
         ):
@@ -178,6 +225,10 @@ class NavigationTaskMixin:
             ):
                 self._cancel_action_goal(nav_handle)
                 return None
+            if require_visual_work and not self._visual_work_enabled:
+                self._cancel_action_goal(nav_handle)
+                self._publish_stop()
+                return _VISUAL_WORK_DISABLED
             deadline, keep_waiting = self._wait_pause_and_extend_deadline(
                 goal_handle,
                 deadline,

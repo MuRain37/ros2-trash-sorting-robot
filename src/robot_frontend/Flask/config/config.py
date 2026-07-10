@@ -171,6 +171,7 @@ ROS_CONFIG = {
     ),
     'map_frame': os.getenv('ROS_MAP_FRAME', 'map'),
     'robot_base_frame': os.getenv('ROS_ROBOT_BASE_FRAME', 'base_footprint'),
+    'vision_target_frame': os.getenv('ROS_VISION_TARGET_FRAME', 'base_link'),
     'robot_task_action': os.getenv('ROS_ROBOT_TASK_ACTION', '/robot_task'),
     'visual_work_service': os.getenv(
         'ROS_VISUAL_WORK_SERVICE',

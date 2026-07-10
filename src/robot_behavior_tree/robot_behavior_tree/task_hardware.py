@@ -23,7 +23,7 @@ PARAMETER_DEFAULTS = (
     # 夹爪开合动作时长。
     ('gripper_duration_ms', 500.0),
     # 夹爪动作后等待物体稳定的时间。
-    ('gripper_wait_sec', 1.0),
+    ('gripper_wait_sec', 1.5),
 )
 
 

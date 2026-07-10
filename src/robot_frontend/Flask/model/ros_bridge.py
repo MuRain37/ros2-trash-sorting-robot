@@ -173,6 +173,34 @@ def _now_iso():
     return time.strftime("%Y-%m-%d %H:%M:%S")
 
 
+def _transform_xyz(point_xyz, translation, quaternion):
+    point = np.asarray(point_xyz, dtype=float)
+    offset = np.asarray(translation, dtype=float)
+    qx, qy, qz, qw = (float(value) for value in quaternion)
+    norm = math.sqrt(qx * qx + qy * qy + qz * qz + qw * qw)
+    if norm <= 1e-12:
+        raise ValueError("TF quaternion norm is zero")
+    qx, qy, qz, qw = qx / norm, qy / norm, qz / norm, qw / norm
+    rotation = np.array([
+        [
+            1.0 - 2.0 * (qy * qy + qz * qz),
+            2.0 * (qx * qy - qz * qw),
+            2.0 * (qx * qz + qy * qw),
+        ],
+        [
+            2.0 * (qx * qy + qz * qw),
+            1.0 - 2.0 * (qx * qx + qz * qz),
+            2.0 * (qy * qz - qx * qw),
+        ],
+        [
+            2.0 * (qx * qz - qy * qw),
+            2.0 * (qy * qz + qx * qw),
+            1.0 - 2.0 * (qx * qx + qy * qy),
+        ],
+    ])
+    return offset + rotation @ point
+
+
 class FlaskRosNode(Node):
     def __init__(self, bridge, config):
         super().__init__(config["node_name"])
@@ -399,6 +427,22 @@ class FlaskRosNode(Node):
             _yaw_from_quaternion(rotation),
             source="tf",
             stamp=_stamp_to_float(transform.header.stamp),
+        )
+
+    def transform_point(self, point_xyz, source_frame, target_frame):
+        if not source_frame:
+            raise ValueError("camera frame_id is empty")
+        transform = self.tf_buffer.lookup_transform(
+            str(target_frame),
+            str(source_frame),
+            Time(),
+        )
+        translation = transform.transform.translation
+        rotation = transform.transform.rotation
+        return _transform_xyz(
+            point_xyz,
+            (translation.x, translation.y, translation.z),
+            (rotation.x, rotation.y, rotation.z, rotation.w),
         )
 
     def publish_stop(self):
@@ -955,7 +999,12 @@ class RosBridge:
             results = model(color_image, verbose=False)
             detections = self._vision_detections_from_results(results, color_image.shape[:2])
             self._update_vision_timestamp()
-            self._attach_vision_pose_estimates(detections, depth_image, color_image.shape[:2])
+            self._attach_vision_pose_estimates(
+                detections,
+                depth_image,
+                color_image.shape[:2],
+                frame_meta.get("frame_id") or frame_meta.get("depth_frame_id"),
+            )
             message = "识别到物体" if detections else "未识别到物体"
             frame = self._encode_vision_frame(color_image, detections, message)
             self._set_vision_info(detections, message, frame_meta, frame, connected=frame_meta["connected"])
@@ -1025,15 +1074,26 @@ class RosBridge:
         except Exception:
             return None
 
-    def _attach_vision_pose_estimates(self, detections, depth_image, image_shape):
+    def _attach_vision_pose_estimates(
+        self,
+        detections,
+        depth_image,
+        image_shape,
+        source_frame,
+    ):
         if not detections:
             return
 
         height, width = image_shape
         center_x = width * 0.5
         center_y = height * 0.5
-        hfov = math.radians(float(self.config.get("vision_camera_hfov_deg", 69.0)))
-        vfov = math.radians(float(self.config.get("vision_camera_vfov_deg", 42.0)))
+        hfov = math.radians(
+            float(self.config.get("vision_camera_hfov_deg", 69.0))
+        )
+        vfov = math.radians(
+            float(self.config.get("vision_camera_vfov_deg", 42.0))
+        )
+        target_frame = str(self.config.get("vision_target_frame", "base_link"))
 
         depth = None
         if depth_image is not None:
@@ -1071,18 +1131,60 @@ class RosBridge:
                     if values.size:
                         z_m = float(np.median(values))
 
-            x_m = y_m = distance_m = None
+            camera_x_m = camera_y_m = None
+            x_m = y_m = z_base_m = distance_m = None
+            transform_error = None
             if z_m is not None:
-                x_m = math.tan(yaw) * z_m
-                y_m = math.tan(pitch) * z_m
-                distance_m = math.sqrt(x_m * x_m + y_m * y_m + z_m * z_m)
+                camera_x_m = math.tan(yaw) * z_m
+                camera_y_m = -math.tan(pitch) * z_m
+                try:
+                    if self.node is None:
+                        raise RuntimeError("ROS bridge node is unavailable")
+                    point_base = self.node.transform_point(
+                        (camera_x_m, camera_y_m, z_m),
+                        source_frame,
+                        target_frame,
+                    )
+                    x_m, y_m, z_base_m = (float(value) for value in point_base)
+                    distance_m = math.sqrt(
+                        x_m * x_m + y_m * y_m + z_base_m * z_base_m
+                    )
+                    with self.lock:
+                        self.errors.pop("vision_tf", None)
+                except Exception as exc:
+                    transform_error = str(exc)
+                    self.set_error(
+                        "vision_tf",
+                        f"{source_frame or '<empty>'} -> {target_frame}: {exc}",
+                    )
 
             detection["pose"] = {
                 "pixel": {"x": round(pixel_x, 1), "y": round(pixel_y, 1)},
+                "frame_id": target_frame,
+                "source_frame_id": source_frame,
                 "x_m": round(x_m, 3) if x_m is not None else None,
                 "y_m": round(y_m, 3) if y_m is not None else None,
-                "z_m": round(z_m, 3) if z_m is not None else None,
-                "distance_m": round(distance_m, 3) if distance_m is not None else None,
+                "z_m": round(z_base_m, 3) if z_base_m is not None else None,
+                "distance_m": (
+                    round(distance_m, 3)
+                    if distance_m is not None
+                    else None
+                ),
+                "depth_m": round(z_m, 3) if z_m is not None else None,
+                "camera_point_m": {
+                    "x": (
+                        round(camera_x_m, 3)
+                        if camera_x_m is not None
+                        else None
+                    ),
+                    "y": (
+                        round(camera_y_m, 3)
+                        if camera_y_m is not None
+                        else None
+                    ),
+                    "z": round(z_m, 3) if z_m is not None else None,
+                },
+                "transform_error": transform_error,
                 "yaw_deg": round(math.degrees(yaw), 1),
                 "pitch_deg": round(math.degrees(pitch), 1),
                 "rotation_deg": detection.get("rotation_deg"),
@@ -1144,7 +1246,10 @@ class RosBridge:
                 pose = detection.get("pose") or {}
                 label = f"{detection['class_name']} {detection['confidence']:.2f}"
                 if pose.get("z_m") is not None and pose.get("yaw_deg") is not None:
-                    label = f"{label} Z {pose['z_m']:.2f}m Yaw {pose['yaw_deg']:+.1f}"
+                    label = (
+                        f"{label} {pose.get('frame_id', 'base_link')} "
+                        f"Z {pose['z_m']:.2f}m Yaw {pose['yaw_deg']:+.1f}"
+                    )
                 cv2.putText(
                     frame,
                     label,
@@ -1171,10 +1276,17 @@ class RosBridge:
         if detections:
             pose = detections[0].get("pose") or {}
             if pose.get("z_m") is not None:
-                banner = (
-                    f"X {pose['x_m']:+.2f}m  Y {pose['y_m']:+.2f}m  "
-                    f"Z {pose['z_m']:.2f}m  Rot {pose.get('rotation_deg') if pose.get('rotation_deg') is not None else '-'}deg"
+                rotation_deg = pose.get("rotation_deg")
+                rotation_text = (
+                    rotation_deg if rotation_deg is not None else "-"
                 )
+                banner = (
+                    f"{pose.get('frame_id', 'base_link')}  "
+                    f"X {pose['x_m']:+.2f}m  Y {pose['y_m']:+.2f}m  "
+                    f"Z {pose['z_m']:.2f}m  Rot {rotation_text}deg"
+                )
+            elif pose.get("transform_error"):
+                banner = "Target pose: waiting base_link TF"
             else:
                 banner = "Target pose: waiting depth"
         else:

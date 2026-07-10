@@ -24,8 +24,8 @@ GRIPPER_ROTATE_SERVO_ID = 8
 
 # 9 号舵机：夹爪开度 (Gripper Open/Close)
 LIFT_GRIPPER_SERVO_ID = 9
-LIFT_GRIPPER_OPEN_RAW = 500.0       # 夹爪全开时的 raw 值
-LIFT_GRIPPER_CLOSE_RAW = 595.0       # 夹爪扣紧时的 raw 值
+LIFT_GRIPPER_OPEN_RAW = 400.0       # 夹爪中位/全开时的 raw 值
+LIFT_GRIPPER_CLOSE_RAW = 465.0      # 夹爪扣紧时的 raw 值
 
 # 舵机通用默认值
 SERVO_DURATION_MS = 100.0            # 默认运动时长（毫秒）

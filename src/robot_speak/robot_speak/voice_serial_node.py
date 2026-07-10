@@ -320,7 +320,7 @@ class VoiceSerialNode(Node):
             self._send_task(
                 RobotTask.Goal.TASK_DUMP_TRASH,
                 'dump_trash',
-                bucket_id=0,
+                bucket_id=1,
             )
 
     def _send_task(self, task_type, command, bucket_id=0):
