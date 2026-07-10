@@ -22,7 +22,7 @@ PARAMETER_DEFAULTS = (
     # 目标前向距离阈值，超过该距离会先驱动底盘靠近。
     ('approach_x_threshold_cm', 32.0),
     # 目标横向偏移阈值，超过该距离会先旋转底盘对准。
-    ('approach_y_threshold_cm', 12.0),
+    ('approach_y_threshold_cm', 13.0),
     # 最大尝试后允许直接抓取的前向距离容差。
     ('approach_x_tolerance_cm', 2.0),
     # 靠近目标时希望保留的前向距离。
@@ -270,6 +270,7 @@ class CleanTrashTaskMixin:
         time.sleep(wait_sec)
 
         bucket_id = target.bucket_id if target.bucket_id in (1, 2) else 1
+        self._send_arm_preset(goal_handle, ArmPreset.Goal.ARM_MAPPING)
         self._feedback(goal_handle, f'clean_trash: move to bucket {bucket_id}', 0.70)
         self._send_arm_preset(goal_handle, bucket_id)
         self._set_gripper(goal_handle, 1.0, duration_ms, 'release object')

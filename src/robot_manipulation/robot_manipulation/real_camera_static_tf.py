@@ -20,7 +20,7 @@ CAMERA_TF_FIELDS = ('x', 'y', 'z', 'roll', 'pitch', 'yaw')
 PRESET_CAMERA_TF = {
     ACTION_ARM_CENTER: {
         'parameter_prefix': 'arm_center',
-        'values': [0.248, 0.015, 0.20, 0.0, 1.10, 0.0],
+        'values': [0.248, 0.015, 0.19, 0.0, 1.12, 0.0],
     },
     ACTION_ARM_MAPPING: {
         'parameter_prefix': 'arm_mapping',
@@ -39,9 +39,9 @@ class RealCameraStaticTf(Node):
         self.declare_parameter('child_frame', 'real_camera_link')
         self.declare_parameter('x', 0.248)
         self.declare_parameter('y', 0.015)
-        self.declare_parameter('z', 0.20)
+        self.declare_parameter('z', 0.19)
         self.declare_parameter('roll', 0.0)
-        self.declare_parameter('pitch', 1.09)
+        self.declare_parameter('pitch', 1.12)
         self.declare_parameter('yaw', 0.0)
         self.declare_parameter(
             'set_preset_service',

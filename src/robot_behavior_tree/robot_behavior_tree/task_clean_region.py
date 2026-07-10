@@ -18,7 +18,7 @@ PARAMETER_DEFAULTS = (
     # 区域清扫任务最长运行时间。
     ('clean_region_timeout_sec', 360.0),
     # 覆盖清扫导航中视觉检测抓取目标的间隔。
-    ('coverage_detect_interval_sec', 0.3),
+    ('coverage_detect_interval_sec', 0.2),
     # 动态调整 controller_server 参数的服务名。
     (
         'coverage_controller_set_parameters_service',
