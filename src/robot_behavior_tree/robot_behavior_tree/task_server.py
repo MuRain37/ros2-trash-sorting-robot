@@ -13,6 +13,7 @@ from rclpy.action import CancelResponse, GoalResponse
 from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
+from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from robot_interfaces.action import ArmPreset, ArmTarget, RobotTask
 from robot_interfaces.srv import (
     DetectDumpBucket,
@@ -23,7 +24,7 @@ from robot_interfaces.srv import (
     SetGripper,
 )
 from sensor_msgs.msg import Imu
-from std_msgs.msg import String
+from std_msgs.msg import Bool, String
 from std_srvs.srv import SetBool, Trigger
 
 from .task_clean_region import CleanRegionTaskMixin
@@ -113,6 +114,7 @@ class RobotTaskServer(
         self._stop_requested = False
         self._pause_requested = False
         self._clear_requested = False
+        self._visual_work_enabled = False
         self._dump_bucket_poses = {}
         self._clean_regions = {}
         self._bucket_fill_percent = {1: 0, 2: 0}
@@ -166,6 +168,23 @@ class RobotTaskServer(
             'voice/speak_command',
             10,
         )
+        visual_work_qos = QoSProfile(
+            depth=1,
+            durability=DurabilityPolicy.TRANSIENT_LOCAL,
+            reliability=ReliabilityPolicy.RELIABLE,
+        )
+        self._visual_work_state_pub = self.create_publisher(
+            Bool,
+            self.get_parameter('visual_work_state_topic').value,
+            visual_work_qos,
+        )
+        self._visual_work_service = self.create_service(
+            SetBool,
+            self.get_parameter('visual_work_service').value,
+            self._handle_visual_work_enabled,
+            callback_group=callback_group,
+        )
+        self._publish_visual_work_state()
         self._action_server = ActionServer(
             self,
             RobotTask,
@@ -271,7 +290,11 @@ class RobotTaskServer(
             result.message = f'{task_name} canceled'
         elif success:
             self._feedback(goal_handle, f'{task_name}: completed', 1.0)
-            self._speak_sleep()
+            if task_type not in (
+                RobotTask.Goal.TASK_SET_DUMP_POSE,
+                RobotTask.Goal.TASK_SET_CLEAN_REGION,
+            ):
+                self._speak_sleep()
             goal_handle.succeed()
         else:
             goal_handle.abort()
@@ -281,6 +304,28 @@ class RobotTaskServer(
         msg = String()
         msg.data = 'sleep'
         self._speak_command_pub.publish(msg)
+
+    def _handle_visual_work_enabled(self, request, response):
+        self._set_visual_work_enabled(bool(request.data))
+        response.success = True
+        response.message = (
+            'visual work enabled'
+            if self._visual_work_enabled
+            else 'visual work disabled'
+        )
+        return response
+
+    def _set_visual_work_enabled(self, enabled):
+        self._visual_work_enabled = bool(enabled)
+        self._publish_visual_work_state()
+        self.get_logger().info(
+            f'visual work enabled={self._visual_work_enabled}'
+        )
+
+    def _publish_visual_work_state(self):
+        msg = Bool()
+        msg.data = bool(self._visual_work_enabled)
+        self._visual_work_state_pub.publish(msg)
 
     def _dispatch_task(self, goal_handle, goal):
         task_type = int(goal.task_type)
@@ -308,6 +353,7 @@ class RobotTaskServer(
 
     def _apply_control_command(self, command):
         command = str(command).strip().lower()
+        self._set_visual_work_enabled(False)
         if command == 'pause':
             self._pause_requested = True
             self._clear_requested = False

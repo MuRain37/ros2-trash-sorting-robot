@@ -262,6 +262,9 @@ class RuntimeData:
             "target_point": map_data.get("target_point"),
             "nav_status": map_data.get("nav_status"),
             "robot_task_status": ros_status.get("robot_task_status", {}),
+            "visual_work_enabled": bool(
+                ros_status.get("visual_work_enabled", False)
+            ),
             "last_update": datetime.now().isoformat(),
         }
 

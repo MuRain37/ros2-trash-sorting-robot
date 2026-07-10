@@ -23,6 +23,8 @@ try:
     from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy, qos_profile_sensor_data
     from rclpy.time import Time
     from sensor_msgs.msg import Image, LaserScan
+    from std_msgs.msg import Bool
+    from std_srvs.srv import SetBool
     from tf2_ros import Buffer, TransformListener
 except Exception as exc:
     rclpy = None
@@ -187,6 +189,10 @@ class FlaskRosNode(Node):
                 RobotTask,
                 config["robot_task_action"],
             )
+        self.visual_work_client = self.create_client(
+            SetBool,
+            config["visual_work_service"],
+        )
         self.arm_preset_client = None
         if ArmPreset is not None:
             self.arm_preset_client = ActionClient(
@@ -288,6 +294,17 @@ class FlaskRosNode(Node):
             self.handle_scan,
             qos_profile_sensor_data,
         )
+        visual_work_qos = QoSProfile(
+            depth=1,
+            durability=DurabilityPolicy.TRANSIENT_LOCAL,
+            reliability=ReliabilityPolicy.RELIABLE,
+        )
+        self.create_subscription(
+            Bool,
+            config["visual_work_state_topic"],
+            self.handle_visual_work_state,
+            visual_work_qos,
+        )
 
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
@@ -360,6 +377,9 @@ class FlaskRosNode(Node):
 
     def handle_scan(self, msg):
         self.bridge.set_scan(msg)
+
+    def handle_visual_work_state(self, msg):
+        self.bridge.set_visual_work_state(bool(msg.data))
 
     def update_tf_pose(self):
         try:
@@ -507,6 +527,7 @@ class RosBridge:
             "message": "未发送行为树任务",
             "updated_at": _now_iso(),
         }
+        self.visual_work_enabled = False
         self.bucket_fill_levels = {1: 0, 2: 0}
         self.errors = {}
         self.startup_static_map_yaml = None
@@ -2418,6 +2439,23 @@ class RosBridge:
             f"({final_goal['x']:.3f}, {final_goal['y']:.3f})"
         )
 
+        if self.visual_work_enabled:
+            result = self.send_navigation_goal(
+                final_goal["x"],
+                final_goal["y"],
+                final_goal["theta"],
+            )
+            return {
+                **result,
+                "waypoint_count": 1,
+                "via_count": 0,
+                "target_point": dict(final_goal),
+                "message": result.get(
+                    "message",
+                    "视觉清扫模式已直接导航到最终目标点",
+                ),
+            }
+
         if RobotTask is None:
             return {
                 "success": False,
@@ -2796,6 +2834,7 @@ class RosBridge:
 
     def clear_robot_tasks(self, command="standby"):
         self.publish_stop()
+        self.set_visual_work_enabled(False)
         if not self.started or not self.node:
             return {"success": False, "error": self.start_error or "ROS bridge 未启动"}
         if RobotTask is None:
@@ -2843,35 +2882,62 @@ class RosBridge:
             result["command_seq"] = parsed_command_seq
         return result
 
-    def call_grasp_service(self, action):
+    def set_visual_work_state(self, enabled):
+        with self.lock:
+            self.visual_work_enabled = bool(enabled)
+
+    def set_visual_work_enabled(self, enabled):
         if not self.started or not self.node:
             return {"success": False, "message": self.start_error or "ROS bridge not started"}
-        if RobotTask is None:
+        client = self.node.visual_work_client
+        timeout = float(self.config.get("goal_timeout_sec", 3.0))
+        if not client.wait_for_service(timeout_sec=timeout):
             return {
                 "success": False,
-                "message": f"RobotTask 接口未加载: {ROBOT_TASK_IMPORT_ERROR}",
+                "message": (
+                    "视觉工作模式服务不可用: "
+                    f"{self.config['visual_work_service']}"
+                ),
             }
+
+        request = SetBool.Request()
+        request.data = bool(enabled)
+        response_event = threading.Event()
+        result = {}
+
+        def on_response(done):
+            try:
+                response = done.result()
+                success = bool(response.success)
+                result.update({
+                    "success": success,
+                    "message": response.message,
+                    "visual_work_enabled": bool(enabled) if success else self.visual_work_enabled,
+                })
+                if success:
+                    self.set_visual_work_state(enabled)
+            except Exception as exc:
+                result.update({"success": False, "message": str(exc)})
+            finally:
+                response_event.set()
+
+        client.call_async(request).add_done_callback(on_response)
+        if not response_event.wait(timeout):
+            return {
+                "success": False,
+                "message": "视觉工作模式服务响应超时",
+            }
+        return result
+
+    def call_grasp_service(self, action):
         if action == "start":
-            task_result = self.send_robot_task(
-                RobotTask.Goal.TASK_CLEAN_TRASH,
-                wait_result=False,
-                command="clean_trash",
-            )
-            return {
-                "success": task_result.get("success", False),
-                "message": task_result.get("message", "行为树清扫任务已发送"),
-            }
+            result = self.set_visual_work_enabled(True)
+            result.setdefault("message", "视觉清扫工作已启动")
+            return result
         if action == "stop":
-            self.publish_stop()
-            task_result = self.send_robot_task(
-                RobotTask.Goal.TASK_STOP,
-                wait_result=False,
-                command="standby",
-            )
-            return {
-                "success": task_result.get("success", False),
-                "message": task_result.get("message", "行为树停止任务已发送"),
-            }
+            result = self.set_visual_work_enabled(False)
+            result.setdefault("message", "视觉清扫工作已停止")
+            return result
         return {"success": False, "message": f"unknown grasp action: {action}"}
 
     def status(self):
@@ -2905,6 +2971,7 @@ class RosBridge:
                 "camera_tf_preset_interface_error": str(CAMERA_TF_PRESET_IMPORT_ERROR) if CAMERA_TF_PRESET_IMPORT_ERROR else None,
                 "nav_status": dict(self.nav_status),
                 "robot_task_status": dict(self.robot_task_status),
+                "visual_work_enabled": bool(self.visual_work_enabled),
                 "errors": dict(self.errors),
             }
 

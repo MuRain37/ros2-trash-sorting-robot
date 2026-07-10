@@ -83,7 +83,7 @@ class VisionGraspNode(Node):
         self._model_path = str(self._param('model_path', ''))
         self._model_device = self._param('model_device', 'CPU')
         self._class_names = list(self._param('class_names', DEFAULT_CLASS_NAMES))
-        self._confidence_threshold = float(self._param('confidence_threshold', 0.7))
+        self._confidence_threshold = float(self._param('confidence_threshold', 0.6))
         self._iou_threshold = float(self._param('iou_threshold', 0.65))
         self._mask_threshold = float(self._param('mask_threshold', 0.5))
         self._color_topic = self._param('color_topic', '/camera/camera/color/image_raw')

@@ -262,12 +262,7 @@
     }
 
     function syncGraspRunningFromStatus(status) {
-        const taskState = status.robot_task_status?.state || '';
-        const taskMessage = status.robot_task_status?.message || '';
-        graspRunning = taskState === 'accepted'
-            || taskState === 'running'
-            || taskState === 'pending'
-            || taskMessage.includes('clean_trash');
+        graspRunning = Boolean(status.visual_work_enabled);
         updateGraspButton();
     }
 
@@ -283,7 +278,11 @@
             if (!response.ok || !data.success) {
                 throw new Error(data.message || data.error || '操作失败');
             }
-            graspRunning = !graspRunning;
+            graspRunning = Boolean(
+                data.visual_work_enabled
+                ?? data.status?.visual_work_enabled
+                ?? !graspRunning
+            );
             updateGraspButton();
             if (data.status) {
                 renderStatus(data.status);

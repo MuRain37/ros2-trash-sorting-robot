@@ -24,7 +24,11 @@ PARAMETER_DEFAULTS = (
     # 普通服务调用和短等待的超时时间。
     ('service_timeout_sec', 3.0),
     # 导航任务和导航相关等待的超时时间。
-    ('navigation_timeout_sec', 120.0),
+    ('navigation_timeout_sec', 180.0),
+    # 前端开启或关闭持续视觉清扫工作模式的服务名。
+    ('visual_work_service', '/set_visual_work_enabled'),
+    # 持续视觉清扫工作模式的状态话题名。
+    ('visual_work_state_topic', '/visual_work_enabled'),
 )
 
 

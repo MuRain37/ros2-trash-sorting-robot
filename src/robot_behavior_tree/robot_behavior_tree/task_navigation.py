@@ -24,21 +24,15 @@ class NavigationTaskMixin:
             self.declare_parameter(name, default)
 
     def _run_navigate_tree(self, goal_handle, goal):
+        target_pose = self._navigation_target_pose(goal)
+        if self._visual_work_enabled:
+            return self._run_visual_navigate_tree(goal_handle, target_pose)
+
         self._feedback(goal_handle, 'navigate_to: arm mapping pose', 0.05)
         self._send_arm_preset(goal_handle, ArmPreset.Goal.ARM_MAPPING)
         self._feedback(goal_handle, 'navigate_to: sending goal', 0.20)
         nav_goal = NavigateToPose.Goal()
-        nav_goal.pose = PoseStamped()
-        nav_goal.pose.header.frame_id = (
-            goal.frame_id or str(self.get_parameter('map_frame').value)
-        )
-        nav_goal.pose.header.stamp = self.get_clock().now().to_msg()
-        nav_goal.pose.pose.position.x = float(goal.x)
-        nav_goal.pose.pose.position.y = float(goal.y)
-        nav_goal.pose.pose.position.z = 0.0
-        qz, qw = self._yaw_to_quaternion_z_w(float(goal.yaw))
-        nav_goal.pose.pose.orientation.z = qz
-        nav_goal.pose.pose.orientation.w = qw
+        nav_goal.pose = target_pose
 
         result = self._send_action_goal(
             self._navigate_client,
@@ -50,6 +44,60 @@ class NavigationTaskMixin:
         if result is None:
             return False, 'navigate to pose failed'
         return True, 'navigate to pose completed'
+
+    def _navigation_target_pose(self, goal):
+        pose = PoseStamped()
+        pose.header.frame_id = (
+            goal.frame_id or str(self.get_parameter('map_frame').value)
+        )
+        pose.header.stamp = self.get_clock().now().to_msg()
+        pose.pose.position.x = float(goal.x)
+        pose.pose.position.y = float(goal.y)
+        pose.pose.position.z = 0.0
+        qz, qw = self._yaw_to_quaternion_z_w(float(goal.yaw))
+        pose.pose.orientation.z = qz
+        pose.pose.orientation.w = qw
+        return pose
+
+    def _run_visual_navigate_tree(self, goal_handle, target_pose):
+        self._set_coverage_scan_camera_costmap_enabled(goal_handle, False)
+        try:
+            self._feedback(
+                goal_handle,
+                'navigate_to: arm center for visual work',
+                0.05,
+            )
+            self._send_arm_preset(goal_handle, ArmPreset.Goal.ARM_CENTER)
+            self._clear_coverage_costmaps(goal_handle)
+            self._set_coverage_slow_speed(goal_handle)
+
+            picked = 0
+            while True:
+                target_pose.header.stamp = self.get_clock().now().to_msg()
+                result = self._navigate_pose_with_visual_interrupt(
+                    goal_handle,
+                    target_pose,
+                    'visual navigate to pose',
+                    detect_enabled=True,
+                    require_visual_work=True,
+                )
+                if result is None:
+                    return False, 'visual navigate to pose canceled'
+                if not result:
+                    return (
+                        True,
+                        f'visual navigate to pose completed: picked={picked}',
+                    )
+
+                picked = self._handle_clean_region_detection(
+                    goal_handle,
+                    picked,
+                )
+                if picked is None:
+                    return False, 'visual navigate to pose canceled'
+        finally:
+            self._restore_coverage_normal_speed(None)
+            self._set_coverage_scan_camera_costmap_enabled(None, True)
 
     def _run_navigate_path_tree(self, goal_handle, goal):
         path = goal.path
@@ -93,6 +141,7 @@ class NavigationTaskMixin:
         pose,
         label,
         detect_enabled=True,
+        require_visual_work=False,
     ):
         if self._is_canceling(goal_handle):
             return None
@@ -141,7 +190,10 @@ class NavigationTaskMixin:
                 self._cancel_action_goal(nav_handle)
                 raise RuntimeError(f'{label} result timed out')
 
-            if detect_enabled and time.monotonic() >= next_detect:
+            visual_detection_enabled = detect_enabled and (
+                not require_visual_work or self._visual_work_enabled
+            )
+            if visual_detection_enabled and time.monotonic() >= next_detect:
                 target = self._detect_grasp_target(goal_handle)
                 next_detect = time.monotonic() + detect_interval
                 if target is not None:
