@@ -1,10 +1,11 @@
 """Navigation task behavior for RobotTaskServer."""
 
+import math
 import time
 
 import rclpy
 from action_msgs.msg import GoalStatus
-from geometry_msgs.msg import PoseStamped
+from geometry_msgs.msg import PoseStamped, Twist
 from nav2_msgs.action import NavigateThroughPoses, NavigateToPose
 from robot_interfaces.action import ArmPreset
 
@@ -17,6 +18,7 @@ PARAMETER_DEFAULTS = (
 )
 
 _VISUAL_WORK_DISABLED = object()
+_CLEANING_SCAN_PAUSE = object()
 
 
 class NavigationTaskMixin:
@@ -72,6 +74,7 @@ class NavigationTaskMixin:
             self._send_arm_preset(goal_handle, ArmPreset.Goal.ARM_CENTER)
             self._clear_coverage_costmaps(goal_handle)
             self._set_coverage_slow_speed(goal_handle)
+            self._reset_cleaning_scan_distance()
 
             picked = 0
             while True:
@@ -95,6 +98,8 @@ class NavigationTaskMixin:
                         target_pose,
                         picked,
                     )
+                if result is _CLEANING_SCAN_PAUSE:
+                    continue
                 if result is None:
                     return False, 'visual navigate to pose canceled'
                 if not result:
@@ -109,7 +114,10 @@ class NavigationTaskMixin:
                 )
                 if picked is None:
                     return False, 'visual navigate to pose canceled'
+                self._reset_cleaning_scan_distance()
         finally:
+            if self._visual_work_enabled:
+                self._set_visual_work_enabled(False)
             self._publish_stop()
             self._restore_coverage_normal_speed(None)
             self._set_coverage_scan_camera_costmap_enabled(None, True)
@@ -248,6 +256,21 @@ class NavigationTaskMixin:
             visual_detection_enabled = detect_enabled and (
                 not require_visual_work or self._visual_work_enabled
             )
+            if visual_detection_enabled and self._cleaning_scan_stop_due():
+                self.get_logger().info(
+                    f'{label}: traveled cleaning scan interval; pausing'
+                )
+                self._cancel_action_goal(nav_handle)
+                self._publish_twist_for(
+                    goal_handle,
+                    Twist(),
+                    float(
+                        self.get_parameter(
+                            'coverage_scan_stop_duration_sec'
+                        ).value
+                    ),
+                )
+                return _CLEANING_SCAN_PAUSE
             if visual_detection_enabled and time.monotonic() >= next_detect:
                 target = self._detect_grasp_target(goal_handle)
                 next_detect = time.monotonic() + detect_interval
@@ -266,6 +289,36 @@ class NavigationTaskMixin:
         if wrapped.status != GoalStatus.STATUS_SUCCEEDED:
             raise RuntimeError(f'{label} failed: status={wrapped.status}')
         return False
+
+    def _reset_cleaning_scan_distance(self):
+        self._cleaning_scan_last_odom_xy = self._current_odom_xy()
+        self._cleaning_scan_distance_m = 0.0
+
+    def _is_cleaning_scan_pause_result(self, result):
+        return result is _CLEANING_SCAN_PAUSE
+
+    def _cleaning_scan_stop_due(self):
+        current_xy = self._current_odom_xy()
+        previous_xy = self._cleaning_scan_last_odom_xy
+        self._cleaning_scan_last_odom_xy = current_xy
+        if current_xy is None or previous_xy is None:
+            return False
+
+        self._cleaning_scan_distance_m += math.hypot(
+            current_xy[0] - previous_xy[0],
+            current_xy[1] - previous_xy[1],
+        )
+        stop_distance = max(
+            0.01,
+            float(
+                self.get_parameter('coverage_scan_stop_distance_m').value
+            ),
+        )
+        if self._cleaning_scan_distance_m < stop_distance:
+            return False
+
+        self._cleaning_scan_distance_m = 0.0
+        return True
 
     def _cancel_action_goal(self, action_goal_handle):
         try:

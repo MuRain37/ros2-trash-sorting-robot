@@ -141,6 +141,9 @@ class RobotTaskServer(
         self._clean_regions = {}
         self._bucket_fill_percent = {1: 0, 2: 0}
         self._latest_odom_yaw = None
+        self._latest_odom_xy = None
+        self._cleaning_scan_last_odom_xy = None
+        self._cleaning_scan_distance_m = 0.0
         self._latest_imu_yaw = None
         self._latest_map_pose = None
         self._load_dump_bucket_poses()
@@ -230,6 +233,10 @@ class RobotTaskServer(
         )
 
     def _handle_odom(self, msg):
+        self._latest_odom_xy = (
+            float(msg.pose.pose.position.x),
+            float(msg.pose.pose.position.y),
+        )
         self._latest_odom_yaw = self._yaw_from_quaternion(msg.pose.pose.orientation)
 
     def _handle_imu(self, msg):

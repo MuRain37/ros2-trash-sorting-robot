@@ -25,6 +25,9 @@ class MotionMixin:
             return self._latest_odom_yaw
         return self._latest_imu_yaw
 
+    def _current_odom_xy(self):
+        return self._latest_odom_xy
+
     def _current_map_xy(self):
         if self._latest_map_pose is None:
             return None

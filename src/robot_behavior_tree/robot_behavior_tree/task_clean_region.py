@@ -20,6 +20,10 @@ PARAMETER_DEFAULTS = (
     ('clean_region_timeout_sec', 360.0),
     # 覆盖清扫导航中视觉检测抓取目标的间隔。
     ('coverage_detect_interval_sec', 0.2),
+    # 覆盖清扫每累计行驶该距离后短暂停车，给视觉处理留出稳定画面。
+    ('coverage_scan_stop_distance_m', 0.3),
+    # 覆盖清扫按里程停车的持续时间。
+    ('coverage_scan_stop_duration_sec', 0.2),
     # 动态调整 controller_server 参数的服务名。
     (
         'coverage_controller_set_parameters_service',
@@ -124,6 +128,7 @@ class CleanRegionTaskMixin:
         if path is None:
             raise RuntimeError(message)
 
+        self._reset_cleaning_scan_distance()
         waypoint_index = 0
 
         while time.monotonic() < deadline:
@@ -159,12 +164,15 @@ class CleanRegionTaskMixin:
                 f'coverage waypoint {waypoint_index + 1}',
                 detect_enabled=True,
             )
+            if self._is_cleaning_scan_pause_result(result):
+                continue
             if result is None:
                 return None
             if result:
                 picked = self._handle_clean_region_detection(goal_handle, picked)
                 if picked is None:
                     return None
+                self._reset_cleaning_scan_distance()
                 # 抓取并归中后继续当前未完成 waypoint，由 Nav2 重新规划到该点。
                 continue
 
