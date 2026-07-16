@@ -1,5 +1,6 @@
 """Clean-region task behavior for RobotTaskServer."""
 
+import math
 import time
 
 from rcl_interfaces.msg import Parameter, ParameterType, ParameterValue
@@ -39,13 +40,13 @@ PARAMETER_DEFAULTS = (
         '/global_costmap/clear_entirely_global_costmap',
     ),
     # 覆盖清扫时临时降低到的 Nav2 线速度。
-    ('coverage_linear_speed', 0.05),
+    ('coverage_linear_speed', 0.10),
     # 覆盖清扫时临时降低到的 Nav2 角速度。
-    ('coverage_angular_speed', 0.22),
-    # 覆盖清扫结束后恢复的 Nav2 线速度。
-    ('coverage_restore_linear_speed', 0.25),
-    # 覆盖清扫结束后恢复的 Nav2 角速度。
-    ('coverage_restore_angular_speed', 0.8),
+    ('coverage_angular_speed', 0.5),
+    # 覆盖清扫结束后恢复的 Nav2 线速度，应与普通 Nav2 配置保持一致。
+    ('coverage_restore_linear_speed', 0.32),
+    # 覆盖清扫结束后恢复的 Nav2 角速度，应与普通 Nav2 配置保持一致。
+    ('coverage_restore_angular_speed', 1.2)
 )
 
 
@@ -71,7 +72,10 @@ class CleanRegionTaskMixin:
         if preview_path is None:
             return False, message
 
-        start_pose = preview_path.poses[0]
+        start_pose = self._orient_pose_from_current_xy(
+            preview_path.poses[0],
+            self._current_map_xy(),
+        )
         self._feedback(goal_handle, 'clean_region: navigate to start pose', 0.15)
         start_result = self._navigate_pose_with_visual_interrupt(
             goal_handle,
@@ -93,8 +97,12 @@ class CleanRegionTaskMixin:
             if picked is None:
                 return False, 'clean region canceled'
         finally:
+            self._publish_stop()
             self._restore_coverage_normal_speed(None)
             self._set_coverage_scan_camera_costmap_enabled(None, True)
+            self._restore_arm_mapping_for_cleanup(
+                'clean_region: restore arm mapping pose'
+            )
         return True, f'clean region completed: picked={picked}'
 
     def _run_clean_region_scan_loop(self, goal_handle, region):
@@ -134,7 +142,10 @@ class CleanRegionTaskMixin:
 
             if waypoint_index >= len(path.poses):
                 return picked
-            next_pose = path.poses[waypoint_index]
+            next_pose = self._orient_pose_from_current_xy(
+                path.poses[waypoint_index],
+                current_xy,
+            )
 
             self._feedback(
                 goal_handle,
@@ -160,6 +171,22 @@ class CleanRegionTaskMixin:
             waypoint_index += 1
 
         return picked
+
+    def _orient_pose_from_current_xy(self, pose, current_xy):
+        if current_xy is None:
+            return pose
+
+        dx = float(pose.pose.position.x) - float(current_xy[0])
+        dy = float(pose.pose.position.y) - float(current_xy[1])
+        if abs(dx) <= 1e-6 and abs(dy) <= 1e-6:
+            return pose
+
+        qz, qw = self._yaw_to_quaternion_z_w(math.atan2(dy, dx))
+        pose.pose.orientation.x = 0.0
+        pose.pose.orientation.y = 0.0
+        pose.pose.orientation.z = qz
+        pose.pose.orientation.w = qw
+        return pose
 
     def _handle_clean_region_detection(self, goal_handle, picked):
         target = self._detect_reachable_target(goal_handle)

@@ -268,13 +268,13 @@ class CoveragePathGenerator(Node):
 
         for index, x in enumerate(track_xs):
             if bottom_to_top:
-                self.append_line_with_midpoint(
+                self.append_line_with_quarter_points(
                     points,
                     (x, min_y),
                     (x, max_y),
                 )
             else:
-                self.append_line_with_midpoint(
+                self.append_line_with_quarter_points(
                     points,
                     (x, max_y),
                     (x, min_y),
@@ -302,13 +302,13 @@ class CoveragePathGenerator(Node):
 
         for index, y in enumerate(track_ys):
             if left_to_right:
-                self.append_line_with_midpoint(
+                self.append_line_with_quarter_points(
                     points,
                     (min_x, y),
                     (max_x, y),
                 )
             else:
-                self.append_line_with_midpoint(
+                self.append_line_with_quarter_points(
                     points,
                     (max_x, y),
                     (min_x, y),
@@ -324,15 +324,23 @@ class CoveragePathGenerator(Node):
 
         return points
 
-    def append_line_with_midpoint(self, points, start, end):
+    def append_line_with_quarter_points(self, points, start, end):
         start_x, start_y = start
         end_x, end_y = end
-        # 每条直线加入中点，让 Nav2 路径更贴近完整覆盖线段。
+        # 只在长边扫描线加入四等分点。
         points.extend([
             start,
             (
+                start_x + (end_x - start_x) * 0.25,
+                start_y + (end_y - start_y) * 0.25,
+            ),
+            (
                 (start_x + end_x) / 2.0,
                 (start_y + end_y) / 2.0,
+            ),
+            (
+                start_x + (end_x - start_x) * 0.75,
+                start_y + (end_y - start_y) * 0.75,
             ),
             end,
         ])

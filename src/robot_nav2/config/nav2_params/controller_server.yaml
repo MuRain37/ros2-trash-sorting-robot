@@ -3,7 +3,7 @@ controller_server:
     use_sim_time: True
     controller_frequency: 20.0
     min_x_velocity_threshold: 0.001
-    min_y_velocity_threshold: 0.5
+    min_y_velocity_threshold: 0.01
     min_theta_velocity_threshold: 0.001
     failure_tolerance: 0.3
     progress_checker_plugin: "progress_checker"
@@ -82,7 +82,7 @@ controller_server:
       PathAngleCritic.cost_weight: 2.0
       PathAngleCritic.threshold_to_consider: 0.5
       PathAngleCritic.offset_from_furthest: 4
-      PathAngleCritic.max_angle_to_furthest: 1.0
+      PathAngleCritic.max_angle_to_furthest: 0.2
       PathAngleCritic.mode: 0
       PreferForwardCritic.enabled: true
       PreferForwardCritic.cost_power: 1

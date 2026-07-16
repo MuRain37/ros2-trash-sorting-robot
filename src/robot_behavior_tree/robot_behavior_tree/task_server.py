@@ -356,12 +356,29 @@ class RobotTaskServer(
 
     def _set_visual_work_enabled(self, enabled):
         enabled = bool(enabled)
+        was_enabled = self._visual_work_enabled
         if enabled != self._visual_work_enabled:
             self._visual_work_pose_ready = False
         self._visual_work_enabled = enabled
         self._publish_visual_work_state()
         self.get_logger().info(
             f'visual work enabled={self._visual_work_enabled}'
+        )
+        if enabled and not was_enabled:
+            self._set_coverage_scan_camera_costmap_enabled(None, False)
+        if (
+            was_enabled
+            and not enabled
+            and self._active_goal is None
+            and not self._visual_work_busy
+        ):
+            self._restore_visual_work_cleanup()
+
+    def _restore_visual_work_cleanup(self):
+        self._publish_stop()
+        self._set_coverage_scan_camera_costmap_enabled(None, True)
+        self._restore_arm_mapping_for_cleanup(
+            'visual_work: restore arm mapping pose'
         )
 
     def _publish_visual_work_state(self):
@@ -424,6 +441,8 @@ class RobotTaskServer(
         except Exception as exc:
             self.get_logger().warning(f'visual work cycle failed: {exc}')
         finally:
+            if not self._visual_work_enabled:
+                self._restore_visual_work_cleanup()
             self._visual_work_can_yield = False
             self._visual_work_busy = False
             self._task_lock.release()

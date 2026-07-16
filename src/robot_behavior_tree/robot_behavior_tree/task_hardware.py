@@ -70,6 +70,15 @@ class HardwareTaskMixin:
             return
         self._set_camera_tf_preset(goal_handle, action_type)
 
+    def _restore_arm_mapping_for_cleanup(self, label='restore arm mapping pose'):
+        try:
+            self.get_logger().info(label)
+            self._send_arm_preset(None, ArmPreset.Goal.ARM_MAPPING)
+            return True
+        except Exception as exc:
+            self.get_logger().warning(f'{label} failed: {exc}')
+            return False
+
     def _set_camera_tf_preset(self, goal_handle, action_type):
         request = SetCameraTfPreset.Request()
         request.action_type = int(action_type)

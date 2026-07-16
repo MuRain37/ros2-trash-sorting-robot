@@ -110,8 +110,12 @@ class NavigationTaskMixin:
                 if picked is None:
                     return False, 'visual navigate to pose canceled'
         finally:
+            self._publish_stop()
             self._restore_coverage_normal_speed(None)
             self._set_coverage_scan_camera_costmap_enabled(None, True)
+            self._restore_arm_mapping_for_cleanup(
+                'navigate_to: restore arm mapping pose'
+            )
 
     def _continue_navigation_after_visual_work(
         self,

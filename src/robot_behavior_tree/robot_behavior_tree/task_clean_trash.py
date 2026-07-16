@@ -46,52 +46,60 @@ class CleanTrashTaskMixin:
 
     def _run_clean_trash_tree(self, goal_handle):
         """清扫垃圾：识别 -> 必要时前进 -> MoveIt 抓取 -> 投桶 -> 归中。"""
-        self._feedback(goal_handle, 'clean_trash: arm center', 0.05)
-        self._send_arm_preset(goal_handle, ArmPreset.Goal.ARM_CENTER)
+        self._set_coverage_scan_camera_costmap_enabled(goal_handle, False)
+        try:
+            self._feedback(goal_handle, 'clean_trash: arm center', 0.05)
+            self._send_arm_preset(goal_handle, ArmPreset.Goal.ARM_CENTER)
 
-        picked = 0
-        scan_index = 0
-        max_objects = int(self.get_parameter('clean_max_objects').value)
-        while max_objects <= 0 or picked < max_objects:
-            if self._is_canceling(goal_handle):
-                return False, 'clean trash canceled'
+            picked = 0
+            scan_index = 0
+            max_objects = int(self.get_parameter('clean_max_objects').value)
+            while max_objects <= 0 or picked < max_objects:
+                if self._is_canceling(goal_handle):
+                    return False, 'clean trash canceled'
 
-            scan_index += 1
-            self._feedback(
-                goal_handle,
-                f'clean_trash: detecting target {scan_index}',
-                0.10,
-            )
-            target = self._detect_reachable_target(goal_handle)
-            if target is None:
-                if max_objects > 0:
-                    if picked == 0:
-                        return False, 'no reachable trash target detected'
-                    return True, f'clean trash completed: picked={picked}'
+                scan_index += 1
                 self._feedback(
                     goal_handle,
-                    'clean_trash: no target, scanning again',
-                    0.20,
+                    f'clean_trash: detecting target {scan_index}',
+                    0.10,
                 )
-                time.sleep(0.5)
-                continue
+                target = self._detect_reachable_target(goal_handle)
+                if target is None:
+                    if max_objects > 0:
+                        if picked == 0:
+                            return False, 'no reachable trash target detected'
+                        return True, f'clean trash completed: picked={picked}'
+                    self._feedback(
+                        goal_handle,
+                        'clean_trash: no target, scanning again',
+                        0.20,
+                    )
+                    time.sleep(0.5)
+                    continue
 
-            self._feedback(
-                goal_handle,
-                f'clean_trash: grasping {target.class_name}',
-                0.35,
-            )
-            bucket_id, bucket_level = self._grasp_target(goal_handle, target)
-            picked += 1
-            success, message = self._maybe_auto_dump_full_bucket(
-                goal_handle,
-                bucket_id,
-                bucket_level,
-            )
-            if not success:
-                return False, message
+                self._feedback(
+                    goal_handle,
+                    f'clean_trash: grasping {target.class_name}',
+                    0.35,
+                )
+                bucket_id, bucket_level = self._grasp_target(goal_handle, target)
+                picked += 1
+                success, message = self._maybe_auto_dump_full_bucket(
+                    goal_handle,
+                    bucket_id,
+                    bucket_level,
+                )
+                if not success:
+                    return False, message
 
-        return True, f'clean trash completed: picked={picked}'
+            return True, f'clean trash completed: picked={picked}'
+        finally:
+            self._publish_stop()
+            self._set_coverage_scan_camera_costmap_enabled(None, True)
+            self._restore_arm_mapping_for_cleanup(
+                'clean_trash: restore arm mapping pose'
+            )
 
     def _detect_reachable_target(self, goal_handle):
         last_target = None
