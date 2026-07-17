@@ -6,6 +6,11 @@ from robot_vision_grasp import vision_grasp_node as node_module
 
 def test_paper_gripper_rotation_is_forced_to_zero(monkeypatch):
     node = node_module.VisionGraspNode.__new__(node_module.VisionGraspNode)
+    node.get_parameter = lambda _name: type(
+        'ParameterValue',
+        (),
+        {'value': 'recyclable'},
+    )()
 
     monkeypatch.setattr(
         node_module.VisionGraspNode,
@@ -32,27 +37,33 @@ def test_paper_gripper_rotation_is_forced_to_zero(monkeypatch):
 
 
 def test_bucket_mapping_matches_class_groups():
-    assert (
-        node_module.VisionGraspNode._bucket_preset_for_class('paper')
-        == ArmPreset.Goal.LEFT_BUCKET
-    )
-    assert (
-        node_module.VisionGraspNode._bucket_preset_for_class('yan')
-        == ArmPreset.Goal.LEFT_BUCKET
-    )
-    assert (
-        node_module.VisionGraspNode._bucket_preset_for_class('bottle')
-        == ArmPreset.Goal.LEFT_BUCKET
-    )
-    assert (
-        node_module.VisionGraspNode._bucket_preset_for_class('usb')
-        == ArmPreset.Goal.RIGHT_BUCKET
-    )
-    assert (
-        node_module.VisionGraspNode._bucket_preset_for_class('charger')
-        == ArmPreset.Goal.RIGHT_BUCKET
-    )
-    assert (
-        node_module.VisionGraspNode._bucket_preset_for_class('pen')
-        == ArmPreset.Goal.RIGHT_BUCKET
-    )
+    expectations = {
+        'recyclable': {
+            'pen': ArmPreset.Goal.LEFT_BUCKET,
+            'paper': ArmPreset.Goal.LEFT_BUCKET,
+            'yan': ArmPreset.Goal.RIGHT_BUCKET,
+            'battry': ArmPreset.Goal.RIGHT_BUCKET,
+            'pit': ArmPreset.Goal.RIGHT_BUCKET,
+        },
+        'dry_wet': {
+            'pen': ArmPreset.Goal.LEFT_BUCKET,
+            'paper': ArmPreset.Goal.LEFT_BUCKET,
+            'yan': ArmPreset.Goal.LEFT_BUCKET,
+            'battry': ArmPreset.Goal.LEFT_BUCKET,
+            'pit': ArmPreset.Goal.RIGHT_BUCKET,
+        },
+        'trash_lost': {
+            'pen': ArmPreset.Goal.RIGHT_BUCKET,
+            'paper': ArmPreset.Goal.LEFT_BUCKET,
+            'yan': ArmPreset.Goal.LEFT_BUCKET,
+            'battry': ArmPreset.Goal.RIGHT_BUCKET,
+            'pit': ArmPreset.Goal.LEFT_BUCKET,
+        },
+    }
+
+    for mode, class_buckets in expectations.items():
+        for class_name, bucket_id in class_buckets.items():
+            assert node_module.VisionGraspNode._bucket_preset_for_class(
+                class_name,
+                mode,
+            ) == bucket_id

@@ -133,7 +133,11 @@ ROS_CONFIG = {
     'vision_model_device': os.getenv('ROS_VISION_MODEL_DEVICE', 'CPU'),
     'vision_class_names': _env_list(
         'ROS_VISION_CLASS_NAMES',
-        ['bottle', 'pen', 'paper', 'charger', 'usb', 'yan'],
+        ['pen', 'paper', 'yan', 'battry', 'pit'],
+    ),
+    'vision_grasp_set_parameters_service': os.getenv(
+        'ROS_VISION_GRASP_SET_PARAMETERS_SERVICE',
+        '/vision_grasp_node/set_parameters',
     ),
     'vision_confidence_threshold': float(
         os.getenv('ROS_VISION_CONFIDENCE_THRESHOLD', '0.55')

@@ -265,6 +265,10 @@ class RuntimeData:
             "visual_work_enabled": bool(
                 ros_status.get("visual_work_enabled", False)
             ),
+            "classification_mode": ros_status.get(
+                "classification_mode",
+                "recyclable",
+            ),
             "last_update": datetime.now().isoformat(),
         }
 
@@ -339,6 +343,18 @@ def get_robot_status():
     return jsonify(RuntimeData.robot_status())
 
 
+@app.route("/api/robot/classification_mode", methods=["POST"])
+def set_classification_mode():
+    data = request.get_json(silent=True) or {}
+    result = ROS_BRIDGE.set_classification_mode(
+        data.get("classification_mode")
+    )
+    return jsonify({
+        **result,
+        "status": RuntimeData.robot_status(),
+    }), 200 if result.get("success") else 400
+
+
 @app.route("/api/robot/control", methods=["POST"])
 def control_robot():
     data = request.get_json(silent=True) or {}
@@ -357,11 +373,15 @@ def control_robot():
 
     if command_type in ("grasp_start", "grasp_stop"):
         action = "start" if command_type == "grasp_start" else "stop"
-        result = ROS_BRIDGE.call_grasp_service(action)
+        result = ROS_BRIDGE.call_grasp_service(
+            action,
+            classification_mode=data.get("classification_mode"),
+        )
         return jsonify({
             "success": result.get("success", False),
             "message": result.get("message", ""),
             "command_type": command_type,
+            "classification_mode": result.get("classification_mode"),
             "status": RuntimeData.robot_status(),
         })
 

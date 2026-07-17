@@ -17,6 +17,8 @@ try:
     from cv_bridge import CvBridge
     from geometry_msgs.msg import PoseWithCovarianceStamped, PoseStamped, Twist
     from nav_msgs.msg import OccupancyGrid, Path as RosPath
+    from rcl_interfaces.msg import Parameter, ParameterType, ParameterValue
+    from rcl_interfaces.srv import SetParameters
     from rclpy.action import ActionClient
     from rclpy.executors import SingleThreadedExecutor
     from rclpy.node import Node
@@ -30,6 +32,10 @@ except Exception as exc:
     rclpy = None
     Node = object
     RosPath = object
+    Parameter = None
+    ParameterType = None
+    ParameterValue = None
+    SetParameters = None
     ROS_IMPORT_ERROR = exc
 else:
     ROS_IMPORT_ERROR = None
@@ -81,8 +87,23 @@ except Exception as exc:
 else:
     CAMERA_TF_PRESET_IMPORT_ERROR = None
 
-DEFAULT_MONITOR_CLASS_NAMES = ['bottle', 'pen', 'paper', 'charger', 'usb', 'yan']
+DEFAULT_MONITOR_CLASS_NAMES = ['pen', 'paper', 'yan', 'battry', 'pit']
+DEFAULT_CLASSIFICATION_MODE = "recyclable"
+CLASSIFICATION_MODE_ALIASES = {
+    "recyclable": "recyclable",
+    "dry_wet": "dry_wet",
+    "dry-wet": "dry_wet",
+    "trash_lost": "trash_lost",
+    "trash-lost": "trash_lost",
+}
 VISION_MODEL_IMPORT_ERROR = None
+
+
+def _normalize_classification_mode(value):
+    key = str(value or "").strip().lower().replace("-", "_")
+    return CLASSIFICATION_MODE_ALIASES.get(key)
+
+
 try:
     from robot_vision_grasp.yolo_seg_openvino import YOLOSegOpenVINO
 except Exception as exc:
@@ -221,6 +242,12 @@ class FlaskRosNode(Node):
             SetBool,
             config["visual_work_service"],
         )
+        self.vision_grasp_params_client = None
+        if SetParameters is not None:
+            self.vision_grasp_params_client = self.create_client(
+                SetParameters,
+                config["vision_grasp_set_parameters_service"],
+            )
         self.arm_preset_client = None
         if ArmPreset is not None:
             self.arm_preset_client = ActionClient(
@@ -572,6 +599,7 @@ class RosBridge:
             "updated_at": _now_iso(),
         }
         self.visual_work_enabled = False
+        self.classification_mode = DEFAULT_CLASSIFICATION_MODE
         self.bucket_fill_levels = {1: 0, 2: 0}
         self.errors = {}
         self.startup_static_map_yaml = None
@@ -3041,13 +3069,99 @@ class RosBridge:
             }
         return result
 
-    def call_grasp_service(self, action):
+    def set_classification_mode(self, mode, require_service=False):
+        mode = _normalize_classification_mode(mode)
+        if mode is None:
+            return {
+                "success": False,
+                "message": "不支持的清扫分类模式",
+            }
+
+        if not self.started or not self.node:
+            with self.lock:
+                self.classification_mode = mode
+            return {
+                "success": not require_service,
+                "message": (
+                    self.start_error or "ROS bridge not started"
+                    if require_service
+                    else "分类模式已保存，ROS 启动后生效"
+                ),
+                "classification_mode": mode,
+            }
+
+        client = getattr(self.node, "vision_grasp_params_client", None)
+        service_name = self.config["vision_grasp_set_parameters_service"]
+        timeout = float(self.config.get("goal_timeout_sec", 3.0))
+        if client is None:
+            return {
+                "success": False,
+                "message": "视觉节点参数服务客户端不可用",
+                "classification_mode": self.classification_mode,
+            }
+        if not client.wait_for_service(timeout_sec=timeout):
+            return {
+                "success": False,
+                "message": f"视觉节点参数服务不可用: {service_name}",
+                "classification_mode": self.classification_mode,
+            }
+
+        parameter = Parameter()
+        parameter.name = "classification_mode"
+        parameter.value = ParameterValue()
+        parameter.value.type = ParameterType.PARAMETER_STRING
+        parameter.value.string_value = mode
+        request = SetParameters.Request()
+        request.parameters = [parameter]
+        response_event = threading.Event()
+        result = {}
+
+        def on_response(done):
+            try:
+                results = list(getattr(done.result(), "results", []))
+                success = bool(results) and all(item.successful for item in results)
+                reason = "; ".join(
+                    item.reason for item in results if getattr(item, "reason", "")
+                )
+                result.update({
+                    "success": success,
+                    "message": reason or (
+                        f"分类模式已切换为 {mode}"
+                        if success else "视觉节点拒绝分类模式参数"
+                    ),
+                })
+            except Exception as exc:
+                result.update({"success": False, "message": str(exc)})
+            finally:
+                response_event.set()
+
+        client.call_async(request).add_done_callback(on_response)
+        if not response_event.wait(timeout):
+            result.update({
+                "success": False,
+                "message": "视觉节点参数服务响应超时",
+            })
+        if result.get("success"):
+            with self.lock:
+                self.classification_mode = mode
+        result["classification_mode"] = self.classification_mode
+        return result
+
+    def call_grasp_service(self, action, classification_mode=None):
         if action == "start":
+            mode_result = self.set_classification_mode(
+                classification_mode or self.classification_mode,
+                require_service=True,
+            )
+            if not mode_result.get("success"):
+                return mode_result
             result = self.set_visual_work_enabled(True)
+            result["classification_mode"] = mode_result.get("classification_mode")
             result.setdefault("message", "视觉清扫工作已启动")
             return result
         if action == "stop":
             result = self.set_visual_work_enabled(False)
+            result["classification_mode"] = self.classification_mode
             result.setdefault("message", "视觉清扫工作已停止")
             return result
         return {"success": False, "message": f"unknown grasp action: {action}"}
@@ -3068,6 +3182,9 @@ class RosBridge:
                     "scan": self.config["scan_topic"],
                     "robot_task_action": self.config["robot_task_action"],
                     "arm_preset_action": self.config["arm_preset_action"],
+                    "vision_grasp_set_parameters_service": self.config[
+                        "vision_grasp_set_parameters_service"
+                    ],
                     "camera_tf_preset_service": self.config[
                         "camera_tf_preset_service"
                     ],
@@ -3084,6 +3201,7 @@ class RosBridge:
                 "nav_status": dict(self.nav_status),
                 "robot_task_status": dict(self.robot_task_status),
                 "visual_work_enabled": bool(self.visual_work_enabled),
+                "classification_mode": self.classification_mode,
                 "errors": dict(self.errors),
             }
 

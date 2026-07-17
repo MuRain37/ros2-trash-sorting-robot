@@ -74,7 +74,13 @@ class YOLOSegOpenVINO:
         self._conf_thres = float(conf_thres)
         self._iou_thres = float(iou_thres)
         self._mask_coeff_count = int(mask_coeff_count)
-        self._names = names or {0: 'bottle', 1: 'pen', 2: 'paper', 3: 'charger', 4: 'usb', 5: 'yan'}
+        self._names = names or {
+            0: 'pen',
+            1: 'paper',
+            2: 'yan',
+            3: 'battry',
+            4: 'pit',
+        }
 
     def __call__(self, img, verbose=False):
         del verbose

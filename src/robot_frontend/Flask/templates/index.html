@@ -45,7 +45,7 @@
 
     <section class="card bin-card">
         <div class="card-header">
-            <span><i class="fas fa-trash-can me-2"></i>左侧垃圾桶</span>
+            <span><i class="fas fa-trash-can me-2"></i><span id="bucket-one-title">桶1（可回收）</span></span>
             <span class="status-pill dark">0-100%</span>
         </div>
         <div class="card-body">
@@ -63,7 +63,7 @@
 
     <section class="card bin-card">
         <div class="card-header">
-            <span><i class="fas fa-trash-can me-2"></i>右侧垃圾桶</span>
+            <span><i class="fas fa-trash-can me-2"></i><span id="bucket-two-title">桶2（不可回收）</span></span>
             <span class="status-pill dark">0-100%</span>
         </div>
         <div class="card-body">
@@ -81,8 +81,16 @@
 </div>
 
 <section class="card command-card mt-4">
-    <div class="card-header">
+    <div class="card-header command-card-header">
         <span><i class="fas fa-keyboard me-2"></i>简单命令</span>
+        <label class="mode-select-wrap" for="classification-mode">
+            <span>清扫分类模式</span>
+            <select class="form-select form-select-sm" id="classification-mode" onchange="updateClassificationMode(this.value, true)">
+                <option value="recyclable" selected>可回收 / 不可回收</option>
+                <option value="dry_wet">干垃圾 / 湿垃圾</option>
+                <option value="trash_lost">垃圾 / 散落物</option>
+            </select>
+        </label>
     </div>
     <div class="card-body">
         <div class="command-grid">
@@ -96,11 +104,11 @@
             </button>
             <button class="btn btn-warning command-btn" type="button" onclick="dumpBucket(1)">
                 <i class="fas fa-dumpster"></i>
-                <span>卸载桶1</span>
+                <span id="dump-bucket-one-label">卸载桶1（可回收）</span>
             </button>
             <button class="btn btn-warning command-btn" type="button" onclick="dumpBucket(2)">
                 <i class="fas fa-dumpster-fire"></i>
-                <span>卸载桶2</span>
+                <span id="dump-bucket-two-label">卸载桶2（不可回收）</span>
             </button>
         </div>
     </div>
@@ -214,6 +222,27 @@
         gap: 14px;
     }
 
+    .command-card-header {
+        flex-wrap: wrap;
+    }
+
+    .mode-select-wrap {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin: 0;
+        color: var(--muted);
+        font-size: 13px;
+        font-weight: 700;
+    }
+
+    .mode-select-wrap .form-select {
+        width: auto;
+        min-width: 180px;
+        border-radius: 8px;
+        font-weight: 700;
+    }
+
     .command-btn {
         min-height: 76px;
         display: flex;
@@ -238,6 +267,16 @@
         .command-grid {
             grid-template-columns: 1fr;
         }
+
+        .mode-select-wrap {
+            width: 100%;
+            justify-content: space-between;
+        }
+
+        .mode-select-wrap .form-select {
+            width: min(220px, 100%);
+            min-width: 0;
+        }
     }
 </style>
 {% endblock %}
@@ -245,9 +284,64 @@
 {% block extra_js %}
 <script>
     let graspRunning = false;
+    let selectedClassificationMode = 'recyclable';
+    const classificationModes = {
+        recyclable: {
+            bucketOne: '可回收',
+            bucketTwo: '不可回收'
+        },
+        dry_wet: {
+            bucketOne: '干垃圾',
+            bucketTwo: '湿垃圾'
+        },
+        trash_lost: {
+            bucketOne: '垃圾',
+            bucketTwo: '散落物'
+        }
+    };
 
     function clampPercent(value) {
         return Math.max(0, Math.min(100, Number(value) || 0));
+    }
+
+    async function syncClassificationMode(modeKey) {
+        try {
+            const response = await fetch('/api/robot/classification_mode', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ classification_mode: modeKey })
+            });
+            const data = await response.json();
+            if (!response.ok || !data.success) {
+                throw new Error(data.message || data.error || '分类模式切换失败');
+            }
+            if (data.status) {
+                renderStatus(data.status);
+            }
+            showToast(data.message || '分类模式已切换', 'success');
+        } catch (error) {
+            showToast(error.message || '分类模式切换失败', 'error');
+        }
+    }
+
+    function updateClassificationMode(modeKey, syncBackend = false) {
+        const nextModeKey = classificationModes[modeKey] ? modeKey : 'recyclable';
+        const mode = classificationModes[nextModeKey];
+        selectedClassificationMode = nextModeKey;
+
+        const select = document.getElementById('classification-mode');
+        if (select && select.value !== nextModeKey) {
+            select.value = nextModeKey;
+        }
+
+        document.getElementById('bucket-one-title').textContent = `桶1（${mode.bucketOne}）`;
+        document.getElementById('bucket-two-title').textContent = `桶2（${mode.bucketTwo}）`;
+        document.getElementById('dump-bucket-one-label').textContent = `卸载桶1（${mode.bucketOne}）`;
+        document.getElementById('dump-bucket-two-label').textContent = `卸载桶2（${mode.bucketTwo}）`;
+
+        if (syncBackend) {
+            syncClassificationMode(nextModeKey);
+        }
     }
 
     function updateGraspButton() {
@@ -272,7 +366,10 @@
             const response = await fetch('/api/robot/control', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ type: action })
+                body: JSON.stringify({
+                    type: action,
+                    classification_mode: selectedClassificationMode
+                })
             });
             const data = await response.json();
             if (!response.ok || !data.success) {
@@ -305,6 +402,9 @@
         document.getElementById('left-bin-fill').style.height = `${leftBin}%`;
         document.getElementById('right-bin').textContent = rightBin;
         document.getElementById('right-bin-fill').style.height = `${rightBin}%`;
+        if (status.classification_mode) {
+            updateClassificationMode(status.classification_mode);
+        }
         syncGraspRunningFromStatus(status);
     }
 
@@ -361,6 +461,7 @@
         }
     }
 
+    updateClassificationMode('recyclable');
     refreshStatus();
     setInterval(refreshStatus, 5000);
 </script>

@@ -4761,10 +4761,10 @@
 			</output>
 		</layer>
 		<layer id="259" name="model.22.cv3.0.2.weight" type="Const" version="opset1">
-			<data element_type="f32" shape="6, 128, 1, 1" offset="26419800" size="3072" />
+			<data element_type="f32" shape="5, 128, 1, 1" offset="26419800" size="2560" />
 			<output>
 				<port id="0" precision="FP32" names="model.22.cv3.0.2.weight">
-					<dim>6</dim>
+					<dim>5</dim>
 					<dim>128</dim>
 					<dim>1</dim>
 					<dim>1</dim>
@@ -4781,7 +4781,7 @@
 					<dim>80</dim>
 				</port>
 				<port id="1" precision="FP32">
-					<dim>6</dim>
+					<dim>5</dim>
 					<dim>128</dim>
 					<dim>1</dim>
 					<dim>1</dim>
@@ -4790,18 +4790,18 @@
 			<output>
 				<port id="2" precision="FP32">
 					<dim>1</dim>
-					<dim>6</dim>
+					<dim>5</dim>
 					<dim>80</dim>
 					<dim>80</dim>
 				</port>
 			</output>
 		</layer>
 		<layer id="261" name="Reshape_857" type="Const" version="opset1">
-			<data element_type="f32" shape="1, 6, 1, 1" offset="26422872" size="24" />
+			<data element_type="f32" shape="1, 5, 1, 1" offset="26422360" size="20" />
 			<output>
 				<port id="0" precision="FP32">
 					<dim>1</dim>
-					<dim>6</dim>
+					<dim>5</dim>
 					<dim>1</dim>
 					<dim>1</dim>
 				</port>
@@ -4812,13 +4812,13 @@
 			<input>
 				<port id="0" precision="FP32">
 					<dim>1</dim>
-					<dim>6</dim>
+					<dim>5</dim>
 					<dim>80</dim>
 					<dim>80</dim>
 				</port>
 				<port id="1" precision="FP32">
 					<dim>1</dim>
-					<dim>6</dim>
+					<dim>5</dim>
 					<dim>1</dim>
 					<dim>1</dim>
 				</port>
@@ -4826,7 +4826,7 @@
 			<output>
 				<port id="2" precision="FP32" names="/model.22/cv3.0/cv3.0.2/Conv_output_0">
 					<dim>1</dim>
-					<dim>6</dim>
+					<dim>5</dim>
 					<dim>80</dim>
 					<dim>80</dim>
 				</port>
@@ -4843,7 +4843,7 @@
 				</port>
 				<port id="1" precision="FP32">
 					<dim>1</dim>
-					<dim>6</dim>
+					<dim>5</dim>
 					<dim>80</dim>
 					<dim>80</dim>
 				</port>
@@ -4851,14 +4851,14 @@
 			<output>
 				<port id="2" precision="FP32" names="/model.22/Concat_1_output_0">
 					<dim>1</dim>
-					<dim>70</dim>
+					<dim>69</dim>
 					<dim>80</dim>
 					<dim>80</dim>
 				</port>
 			</output>
 		</layer>
 		<layer id="264" name="/model.22/Constant_3_output_0" type="Const" version="opset1">
-			<data element_type="i64" shape="3" offset="26422896" size="24" />
+			<data element_type="i64" shape="3" offset="26422380" size="24" />
 			<output>
 				<port id="0" precision="I64" names="/model.22/Constant_3_output_0">
 					<dim>3</dim>
@@ -4870,7 +4870,7 @@
 			<input>
 				<port id="0" precision="FP32">
 					<dim>1</dim>
-					<dim>70</dim>
+					<dim>69</dim>
 					<dim>80</dim>
 					<dim>80</dim>
 				</port>
@@ -4881,13 +4881,13 @@
 			<output>
 				<port id="2" precision="FP32" names="/model.22/Reshape_3_output_0">
 					<dim>1</dim>
-					<dim>70</dim>
+					<dim>69</dim>
 					<dim>6400</dim>
 				</port>
 			</output>
 		</layer>
 		<layer id="266" name="model.16.conv.weight" type="Const" version="opset1">
-			<data element_type="f32" shape="128, 128, 3, 3" offset="26422920" size="589824" />
+			<data element_type="f32" shape="128, 128, 3, 3" offset="26422404" size="589824" />
 			<output>
 				<port id="0" precision="FP32" names="model.16.conv.weight">
 					<dim>128</dim>
@@ -4923,7 +4923,7 @@
 			</output>
 		</layer>
 		<layer id="268" name="Reshape_650" type="Const" version="opset1">
-			<data element_type="f32" shape="1, 128, 1, 1" offset="27012744" size="512" />
+			<data element_type="f32" shape="1, 128, 1, 1" offset="27012228" size="512" />
 			<output>
 				<port id="0" precision="FP32">
 					<dim>1</dim>
@@ -5002,7 +5002,7 @@
 			</output>
 		</layer>
 		<layer id="272" name="model.18.cv1.conv.weight" type="Const" version="opset1">
-			<data element_type="f32" shape="256, 384, 1, 1" offset="27013256" size="393216" />
+			<data element_type="f32" shape="256, 384, 1, 1" offset="27012740" size="393216" />
 			<output>
 				<port id="0" precision="FP32" names="model.18.cv1.conv.weight">
 					<dim>256</dim>
@@ -5038,7 +5038,7 @@
 			</output>
 		</layer>
 		<layer id="274" name="Reshape_787" type="Const" version="opset1">
-			<data element_type="f32" shape="1, 256, 1, 1" offset="27406472" size="1024" />
+			<data element_type="f32" shape="1, 256, 1, 1" offset="27405956" size="1024" />
 			<output>
 				<port id="0" precision="FP32">
 					<dim>1</dim>
@@ -5134,7 +5134,7 @@
 			</output>
 		</layer>
 		<layer id="280" name="model.18.m.0.cv1.conv.weight" type="Const" version="opset1">
-			<data element_type="f32" shape="128, 128, 3, 3" offset="27407496" size="589824" />
+			<data element_type="f32" shape="128, 128, 3, 3" offset="27406980" size="589824" />
 			<output>
 				<port id="0" precision="FP32" names="model.18.m.0.cv1.conv.weight">
 					<dim>128</dim>
@@ -5170,7 +5170,7 @@
 			</output>
 		</layer>
 		<layer id="282" name="Reshape_893" type="Const" version="opset1">
-			<data element_type="f32" shape="1, 128, 1, 1" offset="27997320" size="512" />
+			<data element_type="f32" shape="1, 128, 1, 1" offset="27996804" size="512" />
 			<output>
 				<port id="0" precision="FP32">
 					<dim>1</dim>
@@ -5224,7 +5224,7 @@
 			</output>
 		</layer>
 		<layer id="285" name="model.18.m.0.cv2.conv.weight" type="Const" version="opset1">
-			<data element_type="f32" shape="128, 128, 3, 3" offset="27997832" size="589824" />
+			<data element_type="f32" shape="128, 128, 3, 3" offset="27997316" size="589824" />
 			<output>
 				<port id="0" precision="FP32" names="model.18.m.0.cv2.conv.weight">
 					<dim>128</dim>
@@ -5260,7 +5260,7 @@
 			</output>
 		</layer>
 		<layer id="287" name="Reshape_914" type="Const" version="opset1">
-			<data element_type="f32" shape="1, 128, 1, 1" offset="28587656" size="512" />
+			<data element_type="f32" shape="1, 128, 1, 1" offset="28587140" size="512" />
 			<output>
 				<port id="0" precision="FP32">
 					<dim>1</dim>
@@ -5345,7 +5345,7 @@
 			</output>
 		</layer>
 		<layer id="291" name="model.18.cv2.conv.weight" type="Const" version="opset1">
-			<data element_type="f32" shape="256, 384, 1, 1" offset="28588168" size="393216" />
+			<data element_type="f32" shape="256, 384, 1, 1" offset="28587652" size="393216" />
 			<output>
 				<port id="0" precision="FP32" names="model.18.cv2.conv.weight">
 					<dim>256</dim>
@@ -5381,7 +5381,7 @@
 			</output>
 		</layer>
 		<layer id="293" name="Reshape_932" type="Const" version="opset1">
-			<data element_type="f32" shape="1, 256, 1, 1" offset="28981384" size="1024" />
+			<data element_type="f32" shape="1, 256, 1, 1" offset="28980868" size="1024" />
 			<output>
 				<port id="0" precision="FP32">
 					<dim>1</dim>
@@ -5435,7 +5435,7 @@
 			</output>
 		</layer>
 		<layer id="296" name="model.22.cv2.1.0.conv.weight" type="Const" version="opset1">
-			<data element_type="f32" shape="64, 256, 3, 3" offset="28982408" size="589824" />
+			<data element_type="f32" shape="64, 256, 3, 3" offset="28981892" size="589824" />
 			<output>
 				<port id="0" precision="FP32" names="model.22.cv2.1.0.conv.weight">
 					<dim>64</dim>
@@ -5471,7 +5471,7 @@
 			</output>
 		</layer>
 		<layer id="298" name="Reshape_979" type="Const" version="opset1">
-			<data element_type="f32" shape="1, 64, 1, 1" offset="29572232" size="256" />
+			<data element_type="f32" shape="1, 64, 1, 1" offset="29571716" size="256" />
 			<output>
 				<port id="0" precision="FP32">
 					<dim>1</dim>
@@ -5525,7 +5525,7 @@
 			</output>
 		</layer>
 		<layer id="301" name="model.22.cv2.1.1.conv.weight" type="Const" version="opset1">
-			<data element_type="f32" shape="64, 64, 3, 3" offset="29572488" size="147456" />
+			<data element_type="f32" shape="64, 64, 3, 3" offset="29571972" size="147456" />
 			<output>
 				<port id="0" precision="FP32" names="model.22.cv2.1.1.conv.weight">
 					<dim>64</dim>
@@ -5561,7 +5561,7 @@
 			</output>
 		</layer>
 		<layer id="303" name="Reshape_1033" type="Const" version="opset1">
-			<data element_type="f32" shape="1, 64, 1, 1" offset="29719944" size="256" />
+			<data element_type="f32" shape="1, 64, 1, 1" offset="29719428" size="256" />
 			<output>
 				<port id="0" precision="FP32">
 					<dim>1</dim>
@@ -5615,7 +5615,7 @@
 			</output>
 		</layer>
 		<layer id="306" name="model.22.cv2.1.2.weight" type="Const" version="opset1">
-			<data element_type="f32" shape="64, 64, 1, 1" offset="29720200" size="16384" />
+			<data element_type="f32" shape="64, 64, 1, 1" offset="29719684" size="16384" />
 			<output>
 				<port id="0" precision="FP32" names="model.22.cv2.1.2.weight">
 					<dim>64</dim>
@@ -5651,7 +5651,7 @@
 			</output>
 		</layer>
 		<layer id="308" name="Reshape_1101" type="Const" version="opset1">
-			<data element_type="f32" shape="1, 64, 1, 1" offset="29736584" size="256" />
+			<data element_type="f32" shape="1, 64, 1, 1" offset="29736068" size="256" />
 			<output>
 				<port id="0" precision="FP32">
 					<dim>1</dim>
@@ -5687,7 +5687,7 @@
 			</output>
 		</layer>
 		<layer id="310" name="model.22.cv3.1.0.conv.weight" type="Const" version="opset1">
-			<data element_type="f32" shape="128, 256, 3, 3" offset="29736840" size="1179648" />
+			<data element_type="f32" shape="128, 256, 3, 3" offset="29736324" size="1179648" />
 			<output>
 				<port id="0" precision="FP32" names="model.22.cv3.1.0.conv.weight">
 					<dim>128</dim>
@@ -5723,7 +5723,7 @@
 			</output>
 		</layer>
 		<layer id="312" name="Reshape_994" type="Const" version="opset1">
-			<data element_type="f32" shape="1, 128, 1, 1" offset="30916488" size="512" />
+			<data element_type="f32" shape="1, 128, 1, 1" offset="30915972" size="512" />
 			<output>
 				<port id="0" precision="FP32">
 					<dim>1</dim>
@@ -5777,7 +5777,7 @@
 			</output>
 		</layer>
 		<layer id="315" name="model.22.cv3.1.1.conv.weight" type="Const" version="opset1">
-			<data element_type="f32" shape="128, 128, 3, 3" offset="30917000" size="589824" />
+			<data element_type="f32" shape="128, 128, 3, 3" offset="30916484" size="589824" />
 			<output>
 				<port id="0" precision="FP32" names="model.22.cv3.1.1.conv.weight">
 					<dim>128</dim>
@@ -5813,7 +5813,7 @@
 			</output>
 		</layer>
 		<layer id="317" name="Reshape_1048" type="Const" version="opset1">
-			<data element_type="f32" shape="1, 128, 1, 1" offset="31506824" size="512" />
+			<data element_type="f32" shape="1, 128, 1, 1" offset="31506308" size="512" />
 			<output>
 				<port id="0" precision="FP32">
 					<dim>1</dim>
@@ -5867,10 +5867,10 @@
 			</output>
 		</layer>
 		<layer id="320" name="model.22.cv3.1.2.weight" type="Const" version="opset1">
-			<data element_type="f32" shape="6, 128, 1, 1" offset="31507336" size="3072" />
+			<data element_type="f32" shape="5, 128, 1, 1" offset="31506820" size="2560" />
 			<output>
 				<port id="0" precision="FP32" names="model.22.cv3.1.2.weight">
-					<dim>6</dim>
+					<dim>5</dim>
 					<dim>128</dim>
 					<dim>1</dim>
 					<dim>1</dim>
@@ -5887,7 +5887,7 @@
 					<dim>40</dim>
 				</port>
 				<port id="1" precision="FP32">
-					<dim>6</dim>
+					<dim>5</dim>
 					<dim>128</dim>
 					<dim>1</dim>
 					<dim>1</dim>
@@ -5896,18 +5896,18 @@
 			<output>
 				<port id="2" precision="FP32">
 					<dim>1</dim>
-					<dim>6</dim>
+					<dim>5</dim>
 					<dim>40</dim>
 					<dim>40</dim>
 				</port>
 			</output>
 		</layer>
 		<layer id="322" name="Reshape_1116" type="Const" version="opset1">
-			<data element_type="f32" shape="1, 6, 1, 1" offset="31510408" size="24" />
+			<data element_type="f32" shape="1, 5, 1, 1" offset="31509380" size="20" />
 			<output>
 				<port id="0" precision="FP32">
 					<dim>1</dim>
-					<dim>6</dim>
+					<dim>5</dim>
 					<dim>1</dim>
 					<dim>1</dim>
 				</port>
@@ -5918,13 +5918,13 @@
 			<input>
 				<port id="0" precision="FP32">
 					<dim>1</dim>
-					<dim>6</dim>
+					<dim>5</dim>
 					<dim>40</dim>
 					<dim>40</dim>
 				</port>
 				<port id="1" precision="FP32">
 					<dim>1</dim>
-					<dim>6</dim>
+					<dim>5</dim>
 					<dim>1</dim>
 					<dim>1</dim>
 				</port>
@@ -5932,7 +5932,7 @@
 			<output>
 				<port id="2" precision="FP32" names="/model.22/cv3.1/cv3.1.2/Conv_output_0">
 					<dim>1</dim>
-					<dim>6</dim>
+					<dim>5</dim>
 					<dim>40</dim>
 					<dim>40</dim>
 				</port>
@@ -5949,7 +5949,7 @@
 				</port>
 				<port id="1" precision="FP32">
 					<dim>1</dim>
-					<dim>6</dim>
+					<dim>5</dim>
 					<dim>40</dim>
 					<dim>40</dim>
 				</port>
@@ -5957,7 +5957,7 @@
 			<output>
 				<port id="2" precision="FP32" names="/model.22/Concat_2_output_0">
 					<dim>1</dim>
-					<dim>70</dim>
+					<dim>69</dim>
 					<dim>40</dim>
 					<dim>40</dim>
 				</port>
@@ -5968,7 +5968,7 @@
 			<input>
 				<port id="0" precision="FP32">
 					<dim>1</dim>
-					<dim>70</dim>
+					<dim>69</dim>
 					<dim>40</dim>
 					<dim>40</dim>
 				</port>
@@ -5979,13 +5979,13 @@
 			<output>
 				<port id="2" precision="FP32" names="/model.22/Reshape_4_output_0">
 					<dim>1</dim>
-					<dim>70</dim>
+					<dim>69</dim>
 					<dim>1600</dim>
 				</port>
 			</output>
 		</layer>
 		<layer id="326" name="model.19.conv.weight" type="Const" version="opset1">
-			<data element_type="f32" shape="256, 256, 3, 3" offset="31510432" size="2359296" />
+			<data element_type="f32" shape="256, 256, 3, 3" offset="31509400" size="2359296" />
 			<output>
 				<port id="0" precision="FP32" names="model.19.conv.weight">
 					<dim>256</dim>
@@ -6021,7 +6021,7 @@
 			</output>
 		</layer>
 		<layer id="328" name="Reshape_949" type="Const" version="opset1">
-			<data element_type="f32" shape="1, 256, 1, 1" offset="33869728" size="1024" />
+			<data element_type="f32" shape="1, 256, 1, 1" offset="33868696" size="1024" />
 			<output>
 				<port id="0" precision="FP32">
 					<dim>1</dim>
@@ -6100,7 +6100,7 @@
 			</output>
 		</layer>
 		<layer id="332" name="model.21.cv1.conv.weight" type="Const" version="opset1">
-			<data element_type="f32" shape="512, 768, 1, 1" offset="33870752" size="1572864" />
+			<data element_type="f32" shape="512, 768, 1, 1" offset="33869720" size="1572864" />
 			<output>
 				<port id="0" precision="FP32" names="model.21.cv1.conv.weight">
 					<dim>512</dim>
@@ -6136,7 +6136,7 @@
 			</output>
 		</layer>
 		<layer id="334" name="Reshape_1063" type="Const" version="opset1">
-			<data element_type="f32" shape="1, 512, 1, 1" offset="35443616" size="2048" />
+			<data element_type="f32" shape="1, 512, 1, 1" offset="35442584" size="2048" />
 			<output>
 				<port id="0" precision="FP32">
 					<dim>1</dim>
@@ -6232,7 +6232,7 @@
 			</output>
 		</layer>
 		<layer id="340" name="model.21.m.0.cv1.conv.weight" type="Const" version="opset1">
-			<data element_type="f32" shape="256, 256, 3, 3" offset="35445664" size="2359296" />
+			<data element_type="f32" shape="256, 256, 3, 3" offset="35444632" size="2359296" />
 			<output>
 				<port id="0" precision="FP32" names="model.21.m.0.cv1.conv.weight">
 					<dim>256</dim>
@@ -6268,7 +6268,7 @@
 			</output>
 		</layer>
 		<layer id="342" name="Reshape_1136" type="Const" version="opset1">
-			<data element_type="f32" shape="1, 256, 1, 1" offset="37804960" size="1024" />
+			<data element_type="f32" shape="1, 256, 1, 1" offset="37803928" size="1024" />
 			<output>
 				<port id="0" precision="FP32">
 					<dim>1</dim>
@@ -6322,7 +6322,7 @@
 			</output>
 		</layer>
 		<layer id="345" name="model.21.m.0.cv2.conv.weight" type="Const" version="opset1">
-			<data element_type="f32" shape="256, 256, 3, 3" offset="37805984" size="2359296" />
+			<data element_type="f32" shape="256, 256, 3, 3" offset="37804952" size="2359296" />
 			<output>
 				<port id="0" precision="FP32" names="model.21.m.0.cv2.conv.weight">
 					<dim>256</dim>
@@ -6358,7 +6358,7 @@
 			</output>
 		</layer>
 		<layer id="347" name="Reshape_1154" type="Const" version="opset1">
-			<data element_type="f32" shape="1, 256, 1, 1" offset="40165280" size="1024" />
+			<data element_type="f32" shape="1, 256, 1, 1" offset="40164248" size="1024" />
 			<output>
 				<port id="0" precision="FP32">
 					<dim>1</dim>
@@ -6443,7 +6443,7 @@
 			</output>
 		</layer>
 		<layer id="351" name="model.21.cv2.conv.weight" type="Const" version="opset1">
-			<data element_type="f32" shape="512, 768, 1, 1" offset="40166304" size="1572864" />
+			<data element_type="f32" shape="512, 768, 1, 1" offset="40165272" size="1572864" />
 			<output>
 				<port id="0" precision="FP32" names="model.21.cv2.conv.weight">
 					<dim>512</dim>
@@ -6479,7 +6479,7 @@
 			</output>
 		</layer>
 		<layer id="353" name="Reshape_1172" type="Const" version="opset1">
-			<data element_type="f32" shape="1, 512, 1, 1" offset="41739168" size="2048" />
+			<data element_type="f32" shape="1, 512, 1, 1" offset="41738136" size="2048" />
 			<output>
 				<port id="0" precision="FP32">
 					<dim>1</dim>
@@ -6533,7 +6533,7 @@
 			</output>
 		</layer>
 		<layer id="356" name="model.22.cv2.2.0.conv.weight" type="Const" version="opset1">
-			<data element_type="f32" shape="64, 512, 3, 3" offset="41741216" size="1179648" />
+			<data element_type="f32" shape="64, 512, 3, 3" offset="41740184" size="1179648" />
 			<output>
 				<port id="0" precision="FP32" names="model.22.cv2.2.0.conv.weight">
 					<dim>64</dim>
@@ -6569,7 +6569,7 @@
 			</output>
 		</layer>
 		<layer id="358" name="Reshape_1204" type="Const" version="opset1">
-			<data element_type="f32" shape="1, 64, 1, 1" offset="42920864" size="256" />
+			<data element_type="f32" shape="1, 64, 1, 1" offset="42919832" size="256" />
 			<output>
 				<port id="0" precision="FP32">
 					<dim>1</dim>
@@ -6623,7 +6623,7 @@
 			</output>
 		</layer>
 		<layer id="361" name="model.22.cv2.2.1.conv.weight" type="Const" version="opset1">
-			<data element_type="f32" shape="64, 64, 3, 3" offset="42921120" size="147456" />
+			<data element_type="f32" shape="64, 64, 3, 3" offset="42920088" size="147456" />
 			<output>
 				<port id="0" precision="FP32" names="model.22.cv2.2.1.conv.weight">
 					<dim>64</dim>
@@ -6659,7 +6659,7 @@
 			</output>
 		</layer>
 		<layer id="363" name="Reshape_1255" type="Const" version="opset1">
-			<data element_type="f32" shape="1, 64, 1, 1" offset="43068576" size="256" />
+			<data element_type="f32" shape="1, 64, 1, 1" offset="43067544" size="256" />
 			<output>
 				<port id="0" precision="FP32">
 					<dim>1</dim>
@@ -6713,7 +6713,7 @@
 			</output>
 		</layer>
 		<layer id="366" name="model.22.cv2.2.2.weight" type="Const" version="opset1">
-			<data element_type="f32" shape="64, 64, 1, 1" offset="43068832" size="16384" />
+			<data element_type="f32" shape="64, 64, 1, 1" offset="43067800" size="16384" />
 			<output>
 				<port id="0" precision="FP32" names="model.22.cv2.2.2.weight">
 					<dim>64</dim>
@@ -6749,7 +6749,7 @@
 			</output>
 		</layer>
 		<layer id="368" name="Reshape_1306" type="Const" version="opset1">
-			<data element_type="f32" shape="1, 64, 1, 1" offset="43085216" size="256" />
+			<data element_type="f32" shape="1, 64, 1, 1" offset="43084184" size="256" />
 			<output>
 				<port id="0" precision="FP32">
 					<dim>1</dim>
@@ -6785,7 +6785,7 @@
 			</output>
 		</layer>
 		<layer id="370" name="model.22.cv3.2.0.conv.weight" type="Const" version="opset1">
-			<data element_type="f32" shape="128, 512, 3, 3" offset="43085472" size="2359296" />
+			<data element_type="f32" shape="128, 512, 3, 3" offset="43084440" size="2359296" />
 			<output>
 				<port id="0" precision="FP32" names="model.22.cv3.2.0.conv.weight">
 					<dim>128</dim>
@@ -6821,7 +6821,7 @@
 			</output>
 		</layer>
 		<layer id="372" name="Reshape_1219" type="Const" version="opset1">
-			<data element_type="f32" shape="1, 128, 1, 1" offset="45444768" size="512" />
+			<data element_type="f32" shape="1, 128, 1, 1" offset="45443736" size="512" />
 			<output>
 				<port id="0" precision="FP32">
 					<dim>1</dim>
@@ -6875,7 +6875,7 @@
 			</output>
 		</layer>
 		<layer id="375" name="model.22.cv3.2.1.conv.weight" type="Const" version="opset1">
-			<data element_type="f32" shape="128, 128, 3, 3" offset="45445280" size="589824" />
+			<data element_type="f32" shape="128, 128, 3, 3" offset="45444248" size="589824" />
 			<output>
 				<port id="0" precision="FP32" names="model.22.cv3.2.1.conv.weight">
 					<dim>128</dim>
@@ -6911,7 +6911,7 @@
 			</output>
 		</layer>
 		<layer id="377" name="Reshape_1270" type="Const" version="opset1">
-			<data element_type="f32" shape="1, 128, 1, 1" offset="46035104" size="512" />
+			<data element_type="f32" shape="1, 128, 1, 1" offset="46034072" size="512" />
 			<output>
 				<port id="0" precision="FP32">
 					<dim>1</dim>
@@ -6965,10 +6965,10 @@
 			</output>
 		</layer>
 		<layer id="380" name="model.22.cv3.2.2.weight" type="Const" version="opset1">
-			<data element_type="f32" shape="6, 128, 1, 1" offset="46035616" size="3072" />
+			<data element_type="f32" shape="5, 128, 1, 1" offset="46034584" size="2560" />
 			<output>
 				<port id="0" precision="FP32" names="model.22.cv3.2.2.weight">
-					<dim>6</dim>
+					<dim>5</dim>
 					<dim>128</dim>
 					<dim>1</dim>
 					<dim>1</dim>
@@ -6985,7 +6985,7 @@
 					<dim>20</dim>
 				</port>
 				<port id="1" precision="FP32">
-					<dim>6</dim>
+					<dim>5</dim>
 					<dim>128</dim>
 					<dim>1</dim>
 					<dim>1</dim>
@@ -6994,18 +6994,18 @@
 			<output>
 				<port id="2" precision="FP32">
 					<dim>1</dim>
-					<dim>6</dim>
+					<dim>5</dim>
 					<dim>20</dim>
 					<dim>20</dim>
 				</port>
 			</output>
 		</layer>
 		<layer id="382" name="Reshape_1321" type="Const" version="opset1">
-			<data element_type="f32" shape="1, 6, 1, 1" offset="46038688" size="24" />
+			<data element_type="f32" shape="1, 5, 1, 1" offset="46037144" size="20" />
 			<output>
 				<port id="0" precision="FP32">
 					<dim>1</dim>
-					<dim>6</dim>
+					<dim>5</dim>
 					<dim>1</dim>
 					<dim>1</dim>
 				</port>
@@ -7016,13 +7016,13 @@
 			<input>
 				<port id="0" precision="FP32">
 					<dim>1</dim>
-					<dim>6</dim>
+					<dim>5</dim>
 					<dim>20</dim>
 					<dim>20</dim>
 				</port>
 				<port id="1" precision="FP32">
 					<dim>1</dim>
-					<dim>6</dim>
+					<dim>5</dim>
 					<dim>1</dim>
 					<dim>1</dim>
 				</port>
@@ -7030,7 +7030,7 @@
 			<output>
 				<port id="2" precision="FP32" names="/model.22/cv3.2/cv3.2.2/Conv_output_0">
 					<dim>1</dim>
-					<dim>6</dim>
+					<dim>5</dim>
 					<dim>20</dim>
 					<dim>20</dim>
 				</port>
@@ -7047,7 +7047,7 @@
 				</port>
 				<port id="1" precision="FP32">
 					<dim>1</dim>
-					<dim>6</dim>
+					<dim>5</dim>
 					<dim>20</dim>
 					<dim>20</dim>
 				</port>
@@ -7055,7 +7055,7 @@
 			<output>
 				<port id="2" precision="FP32" names="/model.22/Concat_3_output_0">
 					<dim>1</dim>
-					<dim>70</dim>
+					<dim>69</dim>
 					<dim>20</dim>
 					<dim>20</dim>
 				</port>
@@ -7066,7 +7066,7 @@
 			<input>
 				<port id="0" precision="FP32">
 					<dim>1</dim>
-					<dim>70</dim>
+					<dim>69</dim>
 					<dim>20</dim>
 					<dim>20</dim>
 				</port>
@@ -7077,7 +7077,7 @@
 			<output>
 				<port id="2" precision="FP32" names="/model.22/Reshape_5_output_0">
 					<dim>1</dim>
-					<dim>70</dim>
+					<dim>69</dim>
 					<dim>400</dim>
 				</port>
 			</output>
@@ -7087,24 +7087,24 @@
 			<input>
 				<port id="0" precision="FP32">
 					<dim>1</dim>
-					<dim>70</dim>
+					<dim>69</dim>
 					<dim>6400</dim>
 				</port>
 				<port id="1" precision="FP32">
 					<dim>1</dim>
-					<dim>70</dim>
+					<dim>69</dim>
 					<dim>1600</dim>
 				</port>
 				<port id="2" precision="FP32">
 					<dim>1</dim>
-					<dim>70</dim>
+					<dim>69</dim>
 					<dim>400</dim>
 				</port>
 			</input>
 			<output>
 				<port id="3" precision="FP32" names="/model.22/Concat_4_output_0">
 					<dim>1</dim>
-					<dim>70</dim>
+					<dim>69</dim>
 					<dim>8400</dim>
 				</port>
 			</output>
@@ -7116,7 +7116,7 @@
 			</output>
 		</layer>
 		<layer id="388" name="Constant_1329" type="Const" version="opset1">
-			<data element_type="i64" shape="2" offset="46038712" size="16" />
+			<data element_type="i64" shape="2" offset="46037164" size="16" />
 			<output>
 				<port id="0" precision="I64">
 					<dim>2</dim>
@@ -7127,7 +7127,7 @@
 			<input>
 				<port id="0" precision="FP32">
 					<dim>1</dim>
-					<dim>70</dim>
+					<dim>69</dim>
 					<dim>8400</dim>
 				</port>
 				<port id="1" precision="I64" />
@@ -7143,13 +7143,13 @@
 				</port>
 				<port id="4" precision="FP32" names="/model.22/Split_output_1">
 					<dim>1</dim>
-					<dim>6</dim>
+					<dim>5</dim>
 					<dim>8400</dim>
 				</port>
 			</output>
 		</layer>
 		<layer id="390" name="/model.22/dfl/Constant_output_0" type="Const" version="opset1">
-			<data element_type="i64" shape="4" offset="46038728" size="32" />
+			<data element_type="i64" shape="4" offset="46037180" size="32" />
 			<output>
 				<port id="0" precision="I64" names="/model.22/dfl/Constant_output_0">
 					<dim>4</dim>
@@ -7178,7 +7178,7 @@
 			</output>
 		</layer>
 		<layer id="392" name="Constant_1334" type="Const" version="opset1">
-			<data element_type="i64" shape="4" offset="46038760" size="32" />
+			<data element_type="i64" shape="4" offset="46037212" size="32" />
 			<output>
 				<port id="0" precision="I64">
 					<dim>4</dim>
@@ -7226,7 +7226,7 @@
 			</output>
 		</layer>
 		<layer id="395" name="Constant_1337" type="Const" version="opset1">
-			<data element_type="i64" shape="4" offset="46038792" size="32" />
+			<data element_type="i64" shape="4" offset="46037244" size="32" />
 			<output>
 				<port id="0" precision="I64">
 					<dim>4</dim>
@@ -7255,7 +7255,7 @@
 			</output>
 		</layer>
 		<layer id="397" name="model.22.dfl.conv.weight" type="Const" version="opset1">
-			<data element_type="f32" shape="1, 16, 1, 1" offset="46038824" size="64" />
+			<data element_type="f32" shape="1, 16, 1, 1" offset="46037276" size="64" />
 			<output>
 				<port id="0" precision="FP32" names="model.22.dfl.conv.weight">
 					<dim>1</dim>
@@ -7291,7 +7291,7 @@
 			</output>
 		</layer>
 		<layer id="399" name="/model.22/dfl/Constant_1_output_0" type="Const" version="opset1">
-			<data element_type="i64" shape="3" offset="46038888" size="24" />
+			<data element_type="i64" shape="3" offset="46037340" size="24" />
 			<output>
 				<port id="0" precision="I64" names="/model.22/dfl/Constant_1_output_0">
 					<dim>3</dim>
@@ -7320,7 +7320,7 @@
 			</output>
 		</layer>
 		<layer id="401" name="/model.22/Constant_7_output_0" type="Const" version="opset1">
-			<data element_type="i64" shape="1" offset="46038912" size="8" />
+			<data element_type="i64" shape="1" offset="46037364" size="8" />
 			<output>
 				<port id="0" precision="I64" names="/model.22/Constant_7_output_0">
 					<dim>1</dim>
@@ -7328,7 +7328,7 @@
 			</output>
 		</layer>
 		<layer id="402" name="/model.22/Mul_output_0" type="Const" version="opset1">
-			<data element_type="i64" shape="1" offset="46038920" size="8" />
+			<data element_type="i64" shape="1" offset="46037372" size="8" />
 			<output>
 				<port id="0" precision="I64" names="/model.22/Mul_output_0">
 					<dim>1</dim>
@@ -7412,7 +7412,7 @@
 			</output>
 		</layer>
 		<layer id="408" name="/model.22/Mul_1_output_0" type="Const" version="opset1">
-			<data element_type="i64" shape="1" offset="46038928" size="8" />
+			<data element_type="i64" shape="1" offset="46037380" size="8" />
 			<output>
 				<port id="0" precision="I64" names="/model.22/Mul_1_output_0">
 					<dim>1</dim>
@@ -7500,7 +7500,7 @@
 			</output>
 		</layer>
 		<layer id="413" name="Constant_6010" type="Const" version="opset1">
-			<data element_type="f32" shape="1, 1, 1" offset="46038936" size="4" />
+			<data element_type="f32" shape="1, 1, 1" offset="46037388" size="4" />
 			<output>
 				<port id="0" precision="FP32">
 					<dim>1</dim>
@@ -7576,7 +7576,7 @@
 			</output>
 		</layer>
 		<layer id="417" name="Constant_6011" type="Const" version="opset1">
-			<data element_type="f32" shape="1, 1, 8400" offset="46038940" size="33600" />
+			<data element_type="f32" shape="1, 1, 8400" offset="46037392" size="33600" />
 			<output>
 				<port id="0" precision="FP32">
 					<dim>1</dim>
@@ -7611,20 +7611,20 @@
 			<input>
 				<port id="0" precision="FP32">
 					<dim>1</dim>
-					<dim>6</dim>
+					<dim>5</dim>
 					<dim>8400</dim>
 				</port>
 			</input>
 			<output>
 				<port id="1" precision="FP32" names="/model.22/Sigmoid_output_0">
 					<dim>1</dim>
-					<dim>6</dim>
+					<dim>5</dim>
 					<dim>8400</dim>
 				</port>
 			</output>
 		</layer>
 		<layer id="420" name="model.22.cv4.0.0.conv.weight" type="Const" version="opset1">
-			<data element_type="f32" shape="32, 128, 3, 3" offset="46072540" size="147456" />
+			<data element_type="f32" shape="32, 128, 3, 3" offset="46070992" size="147456" />
 			<output>
 				<port id="0" precision="FP32" names="model.22.cv4.0.0.conv.weight">
 					<dim>32</dim>
@@ -7660,7 +7660,7 @@
 			</output>
 		</layer>
 		<layer id="422" name="Reshape_680" type="Const" version="opset1">
-			<data element_type="f32" shape="1, 32, 1, 1" offset="46219996" size="128" />
+			<data element_type="f32" shape="1, 32, 1, 1" offset="46218448" size="128" />
 			<output>
 				<port id="0" precision="FP32">
 					<dim>1</dim>
@@ -7714,7 +7714,7 @@
 			</output>
 		</layer>
 		<layer id="425" name="model.22.cv4.0.1.conv.weight" type="Const" version="opset1">
-			<data element_type="f32" shape="32, 32, 3, 3" offset="46220124" size="36864" />
+			<data element_type="f32" shape="32, 32, 3, 3" offset="46218576" size="36864" />
 			<output>
 				<port id="0" precision="FP32" names="model.22.cv4.0.1.conv.weight">
 					<dim>32</dim>
@@ -7750,7 +7750,7 @@
 			</output>
 		</layer>
 		<layer id="427" name="Reshape_742" type="Const" version="opset1">
-			<data element_type="f32" shape="1, 32, 1, 1" offset="46256988" size="128" />
+			<data element_type="f32" shape="1, 32, 1, 1" offset="46255440" size="128" />
 			<output>
 				<port id="0" precision="FP32">
 					<dim>1</dim>
@@ -7804,7 +7804,7 @@
 			</output>
 		</layer>
 		<layer id="430" name="model.22.cv4.0.2.weight" type="Const" version="opset1">
-			<data element_type="f32" shape="32, 32, 1, 1" offset="46257116" size="4096" />
+			<data element_type="f32" shape="32, 32, 1, 1" offset="46255568" size="4096" />
 			<output>
 				<port id="0" precision="FP32" names="model.22.cv4.0.2.weight">
 					<dim>32</dim>
@@ -7840,7 +7840,7 @@
 			</output>
 		</layer>
 		<layer id="432" name="Reshape_827" type="Const" version="opset1">
-			<data element_type="f32" shape="1, 32, 1, 1" offset="46261212" size="128" />
+			<data element_type="f32" shape="1, 32, 1, 1" offset="46259664" size="128" />
 			<output>
 				<port id="0" precision="FP32">
 					<dim>1</dim>
@@ -7876,7 +7876,7 @@
 			</output>
 		</layer>
 		<layer id="434" name="/model.22/Constant_output_0" type="Const" version="opset1">
-			<data element_type="i64" shape="3" offset="46261340" size="24" />
+			<data element_type="i64" shape="3" offset="46259792" size="24" />
 			<output>
 				<port id="0" precision="I64" names="/model.22/Constant_output_0">
 					<dim>3</dim>
@@ -7905,7 +7905,7 @@
 			</output>
 		</layer>
 		<layer id="436" name="model.22.cv4.1.0.conv.weight" type="Const" version="opset1">
-			<data element_type="f32" shape="32, 256, 3, 3" offset="46261364" size="294912" />
+			<data element_type="f32" shape="32, 256, 3, 3" offset="46259816" size="294912" />
 			<output>
 				<port id="0" precision="FP32" names="model.22.cv4.1.0.conv.weight">
 					<dim>32</dim>
@@ -7941,7 +7941,7 @@
 			</output>
 		</layer>
 		<layer id="438" name="Reshape_964" type="Const" version="opset1">
-			<data element_type="f32" shape="1, 32, 1, 1" offset="46556276" size="128" />
+			<data element_type="f32" shape="1, 32, 1, 1" offset="46554728" size="128" />
 			<output>
 				<port id="0" precision="FP32">
 					<dim>1</dim>
@@ -7995,7 +7995,7 @@
 			</output>
 		</layer>
 		<layer id="441" name="model.22.cv4.1.1.conv.weight" type="Const" version="opset1">
-			<data element_type="f32" shape="32, 32, 3, 3" offset="46556404" size="36864" />
+			<data element_type="f32" shape="32, 32, 3, 3" offset="46554856" size="36864" />
 			<output>
 				<port id="0" precision="FP32" names="model.22.cv4.1.1.conv.weight">
 					<dim>32</dim>
@@ -8031,7 +8031,7 @@
 			</output>
 		</layer>
 		<layer id="443" name="Reshape_1018" type="Const" version="opset1">
-			<data element_type="f32" shape="1, 32, 1, 1" offset="46593268" size="128" />
+			<data element_type="f32" shape="1, 32, 1, 1" offset="46591720" size="128" />
 			<output>
 				<port id="0" precision="FP32">
 					<dim>1</dim>
@@ -8085,7 +8085,7 @@
 			</output>
 		</layer>
 		<layer id="446" name="model.22.cv4.1.2.weight" type="Const" version="opset1">
-			<data element_type="f32" shape="32, 32, 1, 1" offset="46593396" size="4096" />
+			<data element_type="f32" shape="32, 32, 1, 1" offset="46591848" size="4096" />
 			<output>
 				<port id="0" precision="FP32" names="model.22.cv4.1.2.weight">
 					<dim>32</dim>
@@ -8121,7 +8121,7 @@
 			</output>
 		</layer>
 		<layer id="448" name="Reshape_1086" type="Const" version="opset1">
-			<data element_type="f32" shape="1, 32, 1, 1" offset="46597492" size="128" />
+			<data element_type="f32" shape="1, 32, 1, 1" offset="46595944" size="128" />
 			<output>
 				<port id="0" precision="FP32">
 					<dim>1</dim>
@@ -8178,7 +8178,7 @@
 			</output>
 		</layer>
 		<layer id="451" name="model.22.cv4.2.0.conv.weight" type="Const" version="opset1">
-			<data element_type="f32" shape="32, 512, 3, 3" offset="46597620" size="589824" />
+			<data element_type="f32" shape="32, 512, 3, 3" offset="46596072" size="589824" />
 			<output>
 				<port id="0" precision="FP32" names="model.22.cv4.2.0.conv.weight">
 					<dim>32</dim>
@@ -8214,7 +8214,7 @@
 			</output>
 		</layer>
 		<layer id="453" name="Reshape_1189" type="Const" version="opset1">
-			<data element_type="f32" shape="1, 32, 1, 1" offset="47187444" size="128" />
+			<data element_type="f32" shape="1, 32, 1, 1" offset="47185896" size="128" />
 			<output>
 				<port id="0" precision="FP32">
 					<dim>1</dim>
@@ -8268,7 +8268,7 @@
 			</output>
 		</layer>
 		<layer id="456" name="model.22.cv4.2.1.conv.weight" type="Const" version="opset1">
-			<data element_type="f32" shape="32, 32, 3, 3" offset="47187572" size="36864" />
+			<data element_type="f32" shape="32, 32, 3, 3" offset="47186024" size="36864" />
 			<output>
 				<port id="0" precision="FP32" names="model.22.cv4.2.1.conv.weight">
 					<dim>32</dim>
@@ -8304,7 +8304,7 @@
 			</output>
 		</layer>
 		<layer id="458" name="Reshape_1240" type="Const" version="opset1">
-			<data element_type="f32" shape="1, 32, 1, 1" offset="47224436" size="128" />
+			<data element_type="f32" shape="1, 32, 1, 1" offset="47222888" size="128" />
 			<output>
 				<port id="0" precision="FP32">
 					<dim>1</dim>
@@ -8358,7 +8358,7 @@
 			</output>
 		</layer>
 		<layer id="461" name="model.22.cv4.2.2.weight" type="Const" version="opset1">
-			<data element_type="f32" shape="32, 32, 1, 1" offset="47224564" size="4096" />
+			<data element_type="f32" shape="32, 32, 1, 1" offset="47223016" size="4096" />
 			<output>
 				<port id="0" precision="FP32" names="model.22.cv4.2.2.weight">
 					<dim>32</dim>
@@ -8394,7 +8394,7 @@
 			</output>
 		</layer>
 		<layer id="463" name="Reshape_1291" type="Const" version="opset1">
-			<data element_type="f32" shape="1, 32, 1, 1" offset="47228660" size="128" />
+			<data element_type="f32" shape="1, 32, 1, 1" offset="47227112" size="128" />
 			<output>
 				<port id="0" precision="FP32">
 					<dim>1</dim>
@@ -8487,7 +8487,7 @@
 				</port>
 				<port id="1" precision="FP32">
 					<dim>1</dim>
-					<dim>6</dim>
+					<dim>5</dim>
 					<dim>8400</dim>
 				</port>
 				<port id="2" precision="FP32">
@@ -8499,7 +8499,7 @@
 			<output>
 				<port id="3" precision="FP32" names="output0">
 					<dim>1</dim>
-					<dim>42</dim>
+					<dim>41</dim>
 					<dim>8400</dim>
 				</port>
 			</output>
@@ -8508,7 +8508,7 @@
 			<input>
 				<port id="0" precision="FP32">
 					<dim>1</dim>
-					<dim>42</dim>
+					<dim>41</dim>
 					<dim>8400</dim>
 				</port>
 			</input>
@@ -9055,12 +9055,12 @@
 		<framework>
 			<author value="Ultralytics" />
 			<batch value="1" />
-			<date value="2026-07-10T17:45:11.012322" />
+			<date value="2026-07-17T18:11:07.101542" />
 			<description value="Ultralytics YOLOv8s-seg model trained on m.yaml" />
 			<docs value="https://docs.ultralytics.com" />
 			<imgsz value="[640, 640]" />
 			<license value="AGPL-3.0 License (https://ultralytics.com/license)" />
-			<names value="{0: 'bottle', 1: 'pen', 2: 'paper', 3: 'charger', 4: 'usb', 5: 'yan'}" />
+			<names value="{0: 'pen', 1: 'paper', 2: 'yan', 3: 'battry', 4: 'pit'}" />
 			<stride value="32" />
 			<task value="segment" />
 			<version value="8.3.34" />

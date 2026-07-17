@@ -19,13 +19,14 @@ from robot_vision_grasp.grasp_geometry import _get_axis_angle, get_ik_pitch, gri
 from robot_vision_grasp.yolo_seg_openvino import YOLOSegOpenVINO
 
 
-DEFAULT_CLASS_NAMES = ['bottle', 'pen', 'paper', 'charger', 'usb', 'yan']
-
-LEFT_BUCKET_CLASSES = {'paper', 'yan', 'bottle'}
-RIGHT_BUCKET_CLASSES = {'usb', 'charger', 'pen'}
+DEFAULT_CLASS_NAMES = ['pen', 'paper', 'yan', 'battry', 'pit']
+DEFAULT_CLASSIFICATION_MODE = 'recyclable'
+CLASSIFICATION_BUCKET_CLASSES = {
+    'recyclable': ({'paper', 'pen'}, {'yan', 'battry', 'pit'}),
+    'dry_wet': ({'pen', 'paper', 'yan', 'battry'}, {'pit'}),
+    'trash_lost': ({'paper', 'yan', 'pit'}, {'pen', 'battry'}),
+}
 TARGET_OFFSETS_CM = {
-    'bottle': (0.0, 0.0, -6.0),
-    'charger': (0.0, 0.0, -1.0),
     'paper': (1.0, 0.0, -1.0),
 }
 
@@ -83,6 +84,7 @@ class VisionGraspNode(Node):
         self._model_path = str(self._param('model_path', ''))
         self._model_device = self._param('model_device', 'CPU')
         self._class_names = list(self._param('class_names', DEFAULT_CLASS_NAMES))
+        self._param('classification_mode', DEFAULT_CLASSIFICATION_MODE)
         self._confidence_threshold = float(self._param('confidence_threshold', 0.6))
         self._iou_threshold = float(self._param('iou_threshold', 0.65))
         self._mask_threshold = float(self._param('mask_threshold', 0.5))
@@ -218,7 +220,10 @@ class VisionGraspNode(Node):
             'best_angle_deg': best_angle_deg,
             'gripper_rotation_deg': 0.0 if class_name == 'paper' else _get_axis_angle(points_cam, camera_pitch_deg),
             'gripper_close_ratio': gripper_close_open_ratio(class_name),
-            'bucket_id': self._bucket_preset_for_class(class_name),
+            'bucket_id': self._bucket_preset_for_class(
+                class_name,
+                self.get_parameter('classification_mode').value,
+            ),
         }
 
     def _lookup_tf_camera_transform(self):
@@ -269,10 +274,16 @@ class VisionGraspNode(Node):
         return target_cm
 
     @staticmethod
-    def _bucket_preset_for_class(class_name):
-        if class_name in LEFT_BUCKET_CLASSES:
-            return 1
-        return 2
+    def _bucket_preset_for_class(
+        class_name,
+        classification_mode=DEFAULT_CLASSIFICATION_MODE,
+    ):
+        mode = str(classification_mode).strip().lower().replace('-', '_')
+        bucket_one_classes, _ = CLASSIFICATION_BUCKET_CLASSES.get(
+            mode,
+            CLASSIFICATION_BUCKET_CLASSES[DEFAULT_CLASSIFICATION_MODE],
+        )
+        return 1 if str(class_name) in bucket_one_classes else 2
 
 
 def main(args=None):
