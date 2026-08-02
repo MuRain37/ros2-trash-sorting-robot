@@ -14,6 +14,11 @@
 
 > 本仓库作为 ROS 2 上位机程序和仿真配置的归档与展示版本继续维护。[STM32 下位机固件已开源](https://gitee.com/yuzhou_888/stm32_-chassis_-controller)。
 
+## 分支说明
+
+- `master` 分支主要维护 ROS 2 上位机实现。
+- 行为树相关实现主要在 `xjw` 分支。
+
 ## 推荐环境
 
 - Ubuntu 22.04 LTS

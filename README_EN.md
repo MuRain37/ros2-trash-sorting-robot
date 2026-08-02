@@ -14,6 +14,11 @@ The project includes a four-wheel mobile chassis, front pickup arm, left and rig
 
 > This repository is maintained as an archived and showcase version of the ROS 2 host-side software and simulation configuration. The [STM32 low-level controller firmware is open source](https://gitee.com/yuzhou_888/stm32_-chassis_-controller).
 
+## Branch Notes
+
+- The `master` branch mainly maintains the ROS 2 host-side implementation.
+- Behavior-tree related implementation is mainly maintained on the `xjw` branch.
+
 ## Recommended Environment
 
 - Ubuntu 22.04 LTS
