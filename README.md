@@ -1,18 +1,62 @@
 # 基于 ROS2 与嵌入式 AI 的室内自主导航垃圾拾取分类倾倒机器人
 
+[简体中文](README.md) | [English](README_EN.md)
+
+![ROS 2](https://img.shields.io/badge/ROS%202-Humble-22314E?logo=ros)
+![Ubuntu](https://img.shields.io/badge/Ubuntu-22.04-E95420?logo=ubuntu&logoColor=white)
+![License](https://img.shields.io/badge/License-Apache--2.0-blue)
+![C++](https://img.shields.io/badge/C++-17-00599C?logo=cplusplus)
+![Python](https://img.shields.io/badge/Python-3-3776AB?logo=python&logoColor=white)
+
 这是一个面向室内场景的自主导航垃圾拾取、分类和倾倒机器人 ROS 2 工作空间。机器人会在指定区域内自主导航和扫描垃圾，按垃圾类型使用前部机械臂夹取并投放到左右两个分类桶；区域清理完成后，机器人导航到垃圾桶位置，再通过后部升降倾倒结构把车载桶提起并倾倒到垃圾桶内。
 
 项目包含四轮移动底盘、前部夹取机械臂、左右分类桶、后部升降倾倒机构、MoveIt、Nav2、Gazebo 仿真、硬件桥接、覆盖路径任务和传感器驱动相关包。软件既支持 Gazebo 仿真模式，也支持连接真实硬件的 custom 模式。
 
-> 项目仍在参赛和开发阶段，硬件结构、控制策略、任务流程和配套仓库会持续更新。部分下位机固件、机械设计文件和前后端系统将在作品提交后陆续开源。
+> 本仓库作为 ROS 2 上位机程序和仿真配置的归档与展示版本继续维护。[STM32 下位机固件已开源](https://gitee.com/yuzhou_888/stm32_-chassis_-controller)。
+
+## 分支说明
+
+- `master` 分支主要维护 ROS 2 上位机实现。
+- 行为树相关实现主要在 `xjw` 分支。
+
+## 推荐环境
+
+- Ubuntu 22.04 LTS
+- ROS 2 Humble
+
+## 快速开始
+
+以下命令假设已经安装 ROS 2 Humble：
+
+```bash
+source /opt/ros/humble/setup.bash
+rosdep install --from-paths src --ignore-src -r -y
+colcon build
+source install/setup.bash
+ros2 launch robot_launch robot.launch.py
+```
 
 ## 实机照片
 
-![机器人整体](docs/images/robot-overview.jpg)
-
-![后部升降倾倒结构](docs/images/lift-dump-structure.jpg)
+![机器人实机](docs/images/trash-robot-overview.webp)
 
 ## 功能演示
+
+### 实机建图
+
+![实机建图](docs/gifs/real-hardware-mapping.gif)
+
+### 实机导航避障
+
+![实机导航避障](docs/gifs/real-hardware-navigation-obstacle-avoidance.gif)
+
+### 实机夹取垃圾
+
+![实机夹取垃圾](docs/gifs/real-hardware-trash-pickup.gif)
+
+### 实机倾倒垃圾
+
+![实机倾倒垃圾](docs/gifs/real-hardware-trash-dumping.gif)
 
 ### MoveIt 拖动控制
 
@@ -80,13 +124,11 @@
 
 ## 相关仓库
 
-本仓库主要维护 ROS 2 上层控制、导航、机械臂规划、硬件桥接和仿真配置。下位机固件、机械结构设计和前后端系统计划以独立仓库开源，链接后续补充。
+本仓库主要维护 ROS 2 上层控制、导航、机械臂规划、硬件桥接和仿真配置。STM32 下位机固件已在独立仓库开源。
 
 | 仓库 | 内容 | 状态 |
 | --- | --- | --- |
-| STM32 下位机固件 | MCU 串口协议、底盘电机、机械臂舵机、升降倾倒机构步进电机和舵机控制。 | 待补充链接 |
-| SolidWorks 机械设计 | 机器人底盘、机械臂安装、双桶结构、后部升降倾倒结构、装配体和零件模型。 | 待补充链接 |
-| 前后端系统 | 任务配置、地图/区域选择、机器人状态监控、远程控制和可视化管理界面。 | 待补充链接 |
+| STM32 下位机固件 | MCU 串口协议、底盘电机、机械臂舵机、升降倾倒机构步进电机和舵机控制。 | [已开源](https://gitee.com/yuzhou_888/stm32_-chassis_-controller) |
 
 ## 环境与依赖
 
@@ -283,86 +325,3 @@ Service：
 - `set_lift_horizontal_rotation`：控制倾倒机构水平旋转舵机角度。
 - `set_lift_gripper_rotation`：控制夹持机构旋转舵机角度。
 - `set_lift_gripper`：控制后部夹爪开合比例。
-
-## 测试与检查
-
-运行全部测试：
-
-```bash
-colcon test
-colcon test-result --verbose
-```
-
-运行指定包测试：
-
-```bash
-colcon test --packages-select robot_manipulation
-colcon test-result --verbose
-```
-
-常用检查命令：
-
-```bash
-# 确认包可被 ROS 2 发现
-ros2 pkg list | grep robot_
-
-# 查看 Python 可执行入口
-ros2 pkg executables robot_hardware_bridge
-ros2 pkg executables robot_arm
-ros2 pkg executables robot_manipulation
-ros2 pkg executables robot_nav2_behaviors
-
-# 查看接口
-ros2 interface show robot_interfaces/action/ArmTarget
-ros2 interface show robot_interfaces/action/ArmPreset
-ros2 interface show robot_interfaces/srv/GenerateCoveragePath
-
-# 查看 launch 参数
-ros2 launch robot_launch robot.launch.py --show-args
-```
-
-## 常见问题
-
-### 找不到包或可执行文件
-
-确认已经 source ROS 2 和当前工作空间：
-
-```bash
-source /opt/ros/<ros-distro>/setup.bash
-source install/setup.bash
-```
-
-如果刚修改了接口或 `setup.py`，需要重新构建并重新 source。
-
-### 缺少 MoveIt、Nav2 或 Gazebo 依赖
-
-先运行 rosdep：
-
-```bash
-rosdep install --from-paths src --ignore-src -r -y
-```
-
-如果仍然缺包，按当前 ROS 2 发行版安装对应的 MoveIt、Nav2、Gazebo 和 ros2_control 包。
-
-### RViz、Nav2 或 MoveIt 时间不同步
-
-Gazebo 模式通常需要 `use_sim_time:=true`，真实硬件 custom 模式通常需要 `use_sim_time:=false`。总启动入口使用 `use_sim_time:=auto` 时会按 `mode` 自动选择。
-
-### 真实硬件串口无法打开
-
-检查设备路径和权限：
-
-```bash
-ls -l /dev/ttyACM*
-groups
-```
-
-如果需要访问串口，按系统配置把当前用户加入对应设备组，例如 `dialout`，然后重新登录。串口路径、波特率和 MCU 固件协议需要按实际设备保持一致。
-
-### Nav2 无法定位或路径不可用
-
-确认地图文件存在，`map` frame、`base_link` frame 和 TF 链路正常。Gazebo 模式下优先使用仿真时间，并检查 `src/robot_nav2/config/nav2_params` 下的参数是否与机器人模型和地图匹配。
-
-### MoveIt 无法规划或机械臂动作失败
-
-确认 `move_group` 已启动，规划组名为 `plan`，并检查 ros2_control 控制器是否已经加载。若使用真实硬件，先确认硬件桥接和反馈是否正常；调试阶段可以按需要启用开环反馈参数。
