@@ -38,41 +38,55 @@ ros2 launch robot_launch robot.launch.py
 
 ## Robot Photo
 
-![Robot overview](docs/images/trash-robot-overview.webp)
+<p align="center">
+  <img src="docs/images/trash-robot-overview.webp" alt="Robot overview" width="760">
+</p>
+
+<p align="center"><sub>Robot overview: four-wheel mobile chassis, front arm, dual sorting bins, and rear lift-and-dump mechanism.</sub></p>
 
 ## Demos
 
-### Real Hardware Mapping
+### Real-World Tasks
 
-![Real hardware mapping](docs/gifs/real-hardware-mapping.gif)
+<table>
+  <tr>
+    <td align="center" width="50%"><strong>Real Hardware Mapping</strong></td>
+    <td align="center" width="50%"><strong>Navigation and Obstacle Avoidance</strong></td>
+  </tr>
+  <tr>
+    <td><img src="docs/gifs/real-hardware-mapping.gif" alt="Real hardware mapping" width="100%"></td>
+    <td><img src="docs/gifs/real-hardware-navigation-obstacle-avoidance.gif" alt="Real hardware navigation and obstacle avoidance" width="100%"></td>
+  </tr>
+  <tr>
+    <td align="center"><strong>Trash Pickup</strong></td>
+    <td align="center"><strong>Trash Dumping</strong></td>
+  </tr>
+  <tr>
+    <td><img src="docs/gifs/real-hardware-trash-pickup.gif" alt="Real hardware trash pickup" width="100%"></td>
+    <td><img src="docs/gifs/real-hardware-trash-dumping.gif" alt="Real hardware trash dumping" width="100%"></td>
+  </tr>
+</table>
 
-### Real Hardware Navigation and Obstacle Avoidance
+### Planning, Control, and Perception
 
-![Real hardware navigation and obstacle avoidance](docs/gifs/real-hardware-navigation-obstacle-avoidance.gif)
-
-### Real Hardware Trash Pickup
-
-![Real hardware trash pickup](docs/gifs/real-hardware-trash-pickup.gif)
-
-### Real Hardware Trash Dumping
-
-![Real hardware trash dumping](docs/gifs/real-hardware-trash-dumping.gif)
-
-### MoveIt Drag Control
-
-![MoveIt drag control](docs/gifs/moveit-drag-control.gif)
-
-### MoveIt Command Control
-
-![MoveIt command control](docs/gifs/moveit-command-control.gif)
-
-### Area-Based Coverage Navigation
-
-![Coverage area navigation](docs/gifs/coverage-area-navigation.gif)
-
-### Depth Camera Obstacle Avoidance
-
-![Depth camera obstacle avoidance](docs/gifs/depth-camera-obstacle-avoidance.gif)
+<table>
+  <tr>
+    <td align="center" width="50%"><strong>MoveIt Drag Control</strong></td>
+    <td align="center" width="50%"><strong>MoveIt Command Control</strong></td>
+  </tr>
+  <tr>
+    <td><img src="docs/gifs/moveit-drag-control.gif" alt="MoveIt drag control" width="100%"></td>
+    <td><img src="docs/gifs/moveit-command-control.gif" alt="MoveIt command control" width="100%"></td>
+  </tr>
+  <tr>
+    <td align="center"><strong>Area-Based Coverage Navigation</strong></td>
+    <td align="center"><strong>Depth Camera Obstacle Avoidance</strong></td>
+  </tr>
+  <tr>
+    <td><img src="docs/gifs/coverage-area-navigation.gif" alt="Coverage area navigation" width="100%"></td>
+    <td><img src="docs/gifs/depth-camera-obstacle-avoidance.gif" alt="Depth camera obstacle avoidance" width="100%"></td>
+  </tr>
+</table>
 
 ## Real Hardware and Workflow
 
@@ -98,13 +112,20 @@ Typical task loop:
 
 ## Hardware Structure
 
-![Internal layout without lift-and-dump mechanism](docs/images/internal-without-lift-dump.jpg)
-
-After removing the rear lift-and-dump mechanism, the internal layout shows the power module, motor drivers, controller boards, wiring, and arm base.
-
-![DK2500 host controller board](docs/images/dk2500-main-controller.jpg)
-
-The DK2500 host controller board is installed at the bottom layer of the chassis. It runs the ROS 2 host-side programs and communicates with the MCU, motor drivers, servos, and stepper motor controller modules over serial.
+<table>
+  <tr>
+    <td align="center" width="50%"><strong>Internal Chassis Layout</strong></td>
+    <td align="center" width="50%"><strong>DK2500 Host Controller</strong></td>
+  </tr>
+  <tr>
+    <td><img src="docs/images/internal-without-lift-dump.jpg" alt="Internal chassis layout without the lift-and-dump mechanism" width="100%"></td>
+    <td><img src="docs/images/dk2500-main-controller.jpg" alt="DK2500 host controller board" width="100%"></td>
+  </tr>
+  <tr>
+    <td valign="top">With the rear lift-and-dump mechanism removed, the power module, motor drivers, controller boards, wiring, and arm base are visible.</td>
+    <td valign="top">The bottom-mounted DK2500 runs the ROS 2 host software and communicates with the MCU, motor drivers, servos, and stepper motor controllers over serial.</td>
+  </tr>
+</table>
 
 ## Project Structure
 

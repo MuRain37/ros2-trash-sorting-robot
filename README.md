@@ -38,41 +38,55 @@ ros2 launch robot_launch robot.launch.py
 
 ## 实机照片
 
-![机器人实机](docs/images/trash-robot-overview.webp)
+<p align="center">
+  <img src="docs/images/trash-robot-overview.webp" alt="机器人实机总览" width="760">
+</p>
+
+<p align="center"><sub>机器人实机总览：四轮移动底盘、前部机械臂、双分类桶与后部升降倾倒机构。</sub></p>
 
 ## 功能演示
 
-### 实机建图
+### 实机任务
 
-![实机建图](docs/gifs/real-hardware-mapping.gif)
+<table>
+  <tr>
+    <td align="center" width="50%"><strong>实机建图</strong></td>
+    <td align="center" width="50%"><strong>实机导航避障</strong></td>
+  </tr>
+  <tr>
+    <td><img src="docs/gifs/real-hardware-mapping.gif" alt="实机建图" width="100%"></td>
+    <td><img src="docs/gifs/real-hardware-navigation-obstacle-avoidance.gif" alt="实机导航避障" width="100%"></td>
+  </tr>
+  <tr>
+    <td align="center"><strong>实机夹取垃圾</strong></td>
+    <td align="center"><strong>实机倾倒垃圾</strong></td>
+  </tr>
+  <tr>
+    <td><img src="docs/gifs/real-hardware-trash-pickup.gif" alt="实机夹取垃圾" width="100%"></td>
+    <td><img src="docs/gifs/real-hardware-trash-dumping.gif" alt="实机倾倒垃圾" width="100%"></td>
+  </tr>
+</table>
 
-### 实机导航避障
+### 规划、控制与感知
 
-![实机导航避障](docs/gifs/real-hardware-navigation-obstacle-avoidance.gif)
-
-### 实机夹取垃圾
-
-![实机夹取垃圾](docs/gifs/real-hardware-trash-pickup.gif)
-
-### 实机倾倒垃圾
-
-![实机倾倒垃圾](docs/gifs/real-hardware-trash-dumping.gif)
-
-### MoveIt 拖动控制
-
-![MoveIt 拖动控制](docs/gifs/moveit-drag-control.gif)
-
-### MoveIt 命令控制
-
-![MoveIt 命令控制](docs/gifs/moveit-command-control.gif)
-
-### 框选区域导航
-
-![框选区域导航](docs/gifs/coverage-area-navigation.gif)
-
-### 深度摄像头融合避障
-
-![深度摄像头融合避障](docs/gifs/depth-camera-obstacle-avoidance.gif)
+<table>
+  <tr>
+    <td align="center" width="50%"><strong>MoveIt 拖动控制</strong></td>
+    <td align="center" width="50%"><strong>MoveIt 命令控制</strong></td>
+  </tr>
+  <tr>
+    <td><img src="docs/gifs/moveit-drag-control.gif" alt="MoveIt 拖动控制" width="100%"></td>
+    <td><img src="docs/gifs/moveit-command-control.gif" alt="MoveIt 命令控制" width="100%"></td>
+  </tr>
+  <tr>
+    <td align="center"><strong>框选区域导航</strong></td>
+    <td align="center"><strong>深度摄像头融合避障</strong></td>
+  </tr>
+  <tr>
+    <td><img src="docs/gifs/coverage-area-navigation.gif" alt="框选区域导航" width="100%"></td>
+    <td><img src="docs/gifs/depth-camera-obstacle-avoidance.gif" alt="深度摄像头融合避障" width="100%"></td>
+  </tr>
+</table>
 
 ## 真实硬件与任务流程
 
@@ -98,13 +112,20 @@ ros2 launch robot_launch robot.launch.py
 
 ## 硬件结构
 
-![去除升降倾倒结构后的内部布局](docs/images/internal-without-lift-dump.jpg)
-
-去除后部升降倾倒结构后，可以看到底盘内部的电源模块、电机驱动、控制板、线束连接和机械臂底座布局。
-
-![DK2500 上位机主控板](docs/images/dk2500-main-controller.jpg)
-
-底盘最下层安装 DK2500 上位机主控板，负责运行 ROS 2 上层程序，并通过串口与 MCU、电机驱动、舵机和步进电机控制模块通信。
+<table>
+  <tr>
+    <td align="center" width="50%"><strong>底盘内部布局</strong></td>
+    <td align="center" width="50%"><strong>DK2500 上位机主控板</strong></td>
+  </tr>
+  <tr>
+    <td><img src="docs/images/internal-without-lift-dump.jpg" alt="去除升降倾倒结构后的底盘内部布局" width="100%"></td>
+    <td><img src="docs/images/dk2500-main-controller.jpg" alt="DK2500 上位机主控板" width="100%"></td>
+  </tr>
+  <tr>
+    <td valign="top">去除后部升降倾倒结构后，可以看到电源模块、电机驱动、控制板、线束连接和机械臂底座布局。</td>
+    <td valign="top">底盘最下层的 DK2500 负责运行 ROS 2 上层程序，并通过串口与 MCU、电机驱动、舵机和步进电机控制模块通信。</td>
+  </tr>
+</table>
 
 ## 项目结构
 
