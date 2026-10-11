@@ -1,7 +1,5 @@
 # 基于 ROS2 与嵌入式 AI 的室内自主导航垃圾拾取分类倾倒机器人
 
-[简体中文](README.md) | [English](README_EN.md)
-
 ![ROS 2](https://img.shields.io/badge/ROS%202-Humble-22314E?logo=ros)
 ![Ubuntu](https://img.shields.io/badge/Ubuntu-22.04-E95420?logo=ubuntu&logoColor=white)
 ![License](https://img.shields.io/badge/License-Apache--2.0-blue)
